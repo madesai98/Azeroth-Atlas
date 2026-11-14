@@ -1,6 +1,6 @@
-# WoW Forever 3D Map
+# Azeroth Atlas
 
-A private, local 3D map of the WoW Forever world — like Google Earth for Azeroth — rendered with
+A local 3D map of the WoW Forever world — like Google Earth for Azeroth — rendered with
 WebGPU. Everything is read from **your own installed game** (read-only), so the map is the same
 geometry the game uses: exact terrain heights, the real buildings and objects in their real
 positions, water, zone names and in-game map coordinates.
@@ -17,8 +17,9 @@ It runs on Windows, beside the game. You need:
 
 Then:
 
-1. **Get the map tool.** On its GitHub page: **Code → Download ZIP**, and unpack it wherever you
-   like (not inside the game's folder). Or, with git: `git clone` it.
+1. **Get the map tool.** At https://github.com/madesai98/Azeroth-Atlas : **Code → Download ZIP**,
+   and unpack it wherever you like (not inside the game's folder). Or, with git:
+   `git clone https://github.com/madesai98/Azeroth-Atlas.git`.
 2. Double-click **`Start Map.bat`**. (Windows may warn about a file from the internet the first
    time: **More info → Run anyway**.) A window opens and stays open, and the map opens in your
    browser at `http://localhost:5173/`.

@@ -1,9 +1,9 @@
 {
-  "name": "wow-forever-3d-map",
+  "name": "azeroth-atlas",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Private 3D map viewer for WoW Forever, built from the locally installed game data.",
+  "description": "Azeroth Atlas: a local 3D map of the WoW Forever world, built from your own installed game.",
   "scripts": {
     "start": "node server/watch.js",
     "serve": "node server/server.js",

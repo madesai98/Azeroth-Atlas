@@ -32,7 +32,7 @@ import { execFile } from 'node:child_process';
 const CHECK_EVERY = 6 * 3600 * 1000;  // how often it looks while the map is running
 const NOT_AGAIN_FOR = 30 * 60 * 1000; // a start of the server soon after a look does not look again
 const HELD_RETRY = 5 * 60 * 1000;     // something was in the way (a map build): tried again after this
-const AGENT = 'wow-forever-3d-map';
+const AGENT = 'azeroth-atlas';
 const NO_SOURCE = 'This copy does not say where it came from (no "repository" in package.json): it cannot look for a newer one.';
 /** Never written and never removed by an update, whatever a download holds. */
 const YOURS = [/^config\.json$/i, /^data(\/|$)/i, /^\.git(\/|$)/i, /^server\/\.build(\/|$)/i, /^\.app-version\.json$/i, /^node_modules(\/|$)/i, /^extractor\/dbd(\/|$)/i];

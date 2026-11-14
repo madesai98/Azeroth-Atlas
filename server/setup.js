@@ -103,7 +103,7 @@ export function runSetup(problem, file, app) {
   }
   server.listen(port, '127.0.0.1', () => {
     const url = `http://localhost:${port}/`;
-    console.log(`WoW Forever 3D map: ${url}`);
+    console.log(`Azeroth Atlas: ${url}`);
     console.log(`  ${problem.message}.`);
     console.log('  The map page asks where it is: answer there (or set "installRoot" in config.json).');
     if (process.argv.includes('--open')) spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore', windowsHide: true }).unref();

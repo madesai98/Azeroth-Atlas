@@ -243,7 +243,7 @@ if (process.send) {
 
 server.listen(cfg.port, '127.0.0.1', () => {
   const url = `http://localhost:${cfg.port}/`;
-  console.log(`WoW Forever 3D map: ${url}`);
+  console.log(`Azeroth Atlas: ${url}`);
   console.log(`  game:  ${cfg.installRoot}${cfg.foundGame ? '  (found there: "installRoot" in config.json names another)' : ''}`);
   console.log(`  data:  ${cfg.dataDir}`);
   if (process.argv.includes('--open')) spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
