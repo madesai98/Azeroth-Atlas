@@ -8,5 +8,6 @@
     "start": "node server/watch.js",
     "serve": "node server/server.js",
     "extract": "node extractor/extract.js"
-  }
+  },
+  "repository": "github:madesai98/Azeroth-Atlas"
 }
