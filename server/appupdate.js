@@ -100,7 +100,6 @@ export class AppUpdate {
     this.busy = opts.busy ?? (() => {});
     this.api = opts.api ?? 'https://api.github.com';
     this.codeload = opts.codeload ?? 'https://codeload.github.com';
-    this.git = fs.existsSync(path.join(root, '.git'));
     this.recordFile = path.join(root, '.app-version.json');       // which commit a plain folder was last brought up to, and its files
     this.lookedFile = path.join(root, 'server', '.build', 'app-check.json'); // when it last looked, and what it found
     this.running = null;
@@ -125,6 +124,13 @@ export class AppUpdate {
     const { checkedAt, available, canApply, latest, note, error, updated } = this.s;
     try { fs.mkdirSync(path.dirname(this.lookedFile), { recursive: true }); fs.writeFileSync(this.lookedFile, JSON.stringify({ commit: this.commit, checkedAt, available, canApply, latest, note, error, updated })); } catch { /* it looks again sooner, that is all */ }
   }
+
+  /**
+   * Is this copy a git checkout? Asked every time, not once: a folder made into a repository
+   * while the server runs must not go on being treated as a plain one (that would write the
+   * published files over work of your own that is not committed yet).
+   */
+  get git() { return fs.existsSync(path.join(this.root, '.git')); }
 
   #pkg() { try { return JSON.parse(fs.readFileSync(path.join(this.root, 'package.json'), 'utf8')); } catch { return {}; } }
   #record() { try { return JSON.parse(fs.readFileSync(this.recordFile, 'utf8')); } catch { return null; } }
