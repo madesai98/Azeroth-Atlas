@@ -1,0 +1,12 @@
+{
+  "name": "wow-forever-3d-map",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Private 3D map viewer for WoW Forever, built from the locally installed game data.",
+  "scripts": {
+    "start": "node server/watch.js",
+    "serve": "node server/server.js",
+    "extract": "node extractor/extract.js"
+  }
+}

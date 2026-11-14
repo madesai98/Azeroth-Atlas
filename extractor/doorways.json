@@ -1,0 +1,14 @@
+{
+  "about": "The doorways between maps (the Deeprun Tram's entrances, the portals): where each stands and where it leads. The game's files do not say (the server decides where one leads), so they are listed here. Used when the ShortestPathForever addon is not installed; where it is, its own, possibly newer, list is read instead.",
+  "credit": "From the ShortestPathForever addon by cjber (Data/Portals.lua, GPL-3.0-or-later). https://github.com/cjber",
+  "portals": [
+    { "name": "Portal to Rut'theran Village", "kind": "portal", "from": { "map": 1, "pos": [9947.48, 2630.04, 1318.6] }, "to": { "map": 1, "pos": [8785.79, 966.983, 30.2] }, "seconds": 5 },
+    { "name": "Portal to Darnassus", "kind": "portal", "from": { "map": 1, "pos": [8799.41, 969.787, 30.241] }, "to": { "map": 1, "pos": [9946.25, 2612.97, 1316.49] }, "seconds": 5 },
+    { "name": "Passage to Ironforge", "kind": "passage", "from": { "map": 369, "pos": [76.027, 10.504, -4.297] }, "to": { "map": 0, "pos": [-4839.51, -1317.74, 501.868] }, "seconds": 5 },
+    { "name": "Passage to Stormwind", "kind": "passage", "from": { "map": 369, "pos": [80.163, 2490.88, -1.857] }, "to": { "map": 0, "pos": [-8354.23, 524.068, 91.797] }, "seconds": 5 },
+    { "name": "Passage to Deeprun Tram (Stormwind)", "kind": "passage", "from": { "map": 0, "pos": [-8346.46, 514.031, 96.599] }, "to": { "map": 369, "pos": [67.761, 2490.98, -4.296] }, "seconds": 5 },
+    { "name": "Passage to Deeprun Tram (Ironforge)", "kind": "passage", "from": { "map": 0, "pos": [-4840.26, -1330.46, 508.172] }, "to": { "map": 369, "pos": [69.228, 10.393, -4.297] }, "seconds": 5 },
+    { "name": "Portal to Stormwind", "kind": "portal", "from": { "map": 571, "pos": [5807.06, 506.244, 657.576] }, "to": { "map": 0, "pos": [-8842.09, 626.358, 94.087] }, "seconds": 5 },
+    { "name": "Portal to Dalaran", "kind": "portal", "from": { "map": 0, "pos": [-9017, 889, 132] }, "to": { "map": 571, "pos": [5807.06, 506.244, 657.576] }, "seconds": 5 }
+  ]
+}

@@ -1,0 +1,112 @@
+#!/usr/bin/env node
+// Runs the map server and keeps it current: whenever the server's own code changes on disk (an
+// update of the map), the server is stopped and started again, by itself. The map page looks
+// after itself in the same way (server/changes.js, viewer/js/reload.js), so after an update
+// there is nothing to restart or reload by hand. "Start Map.bat" and "npm start" run this.
+//
+//   node server/watch.js [--open] [--config=path/to/config.json]
+import { fork } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(HERE, '..');
+const SERVER = path.join(HERE, 'server.js');
+const PORT_TAKEN = 3;   // the server's way of saying another copy is already running (see server.js)
+const AGAIN = 75;       // this watcher's way of asking Start Map.bat to start it again (its own code has changed)
+const SELF = path.basename(fileURLToPath(import.meta.url)).toLowerCase();
+const SETTLE_MS = 350;  // an update writes several files: wait until it has gone quiet
+const args = process.argv.slice(2);
+const configArg = args.find((a) => a.startsWith('--config='));
+const CONFIG = configArg ? path.resolve(configArg.slice(9)) : path.join(ROOT, 'config.json');
+// What the server is made of: its own folder, and the extractor's code that it shares.
+const FOLDERS = [path.join(ROOT, 'server'), path.join(ROOT, 'extractor')];
+const CODE = /\.(js|mjs|cs)$/i;
+const NOT_CODE = /(^|[\\/])(\.build|node_modules)([\\/]|$)/;
+
+const say = (text) => console.log(`[${new Date().toLocaleTimeString()}] ${text}`);
+if (+process.versions.node.split('.')[0] < 20) {
+  console.error(`Node.js ${process.versions.node} is too old for the map: it needs version 20 or newer. Install the LTS version from https://nodejs.org and start the map again.`);
+  process.exit(1);
+}
+let child = null;      // the server running now
+let opened = false;    // the browser has been opened (once is enough)
+let busy = false;      // the server is in the middle of a map update: not to be interrupted
+let waiting = false;   // a restart is owed once it is no longer busy
+let stopping = false;  // the server has been asked to make way
+let quitting = false;
+let renew = false;     // this file itself has changed (an update of the map tool): to be started afresh
+let timer = 0;
+
+function start() {
+  const mine = fork(SERVER, args.filter((a) => a !== '--open' || !opened), { cwd: ROOT, stdio: 'inherit' });
+  child = mine;
+  opened = true;
+  busy = false;
+  mine.on('message', (m) => {
+    if (child !== mine || typeof m?.busy !== 'boolean') return;
+    busy = m.busy;
+    if (!busy && waiting) restart();
+  });
+  mine.on('exit', (code) => {
+    if (child !== mine) return;
+    child = null;
+    if (quitting) return;
+    if (stopping || waiting) { stopping = false; waiting = false; start(); return; }
+    if (code === PORT_TAKEN) { quitting = true; process.exitCode = 1; for (const w of watchers) w.close(); return; }
+    say(code ? 'The map server stopped on an error (above). It starts again as soon as its files change.' : 'The map server has stopped. It starts again as soon as its files change.');
+  });
+}
+
+/** This watcher's own code has changed: the server is put away and Start Map.bat starts everything again. */
+function relaunch() {
+  // (Start Map.bat starts it again on this; run by hand - npm start - it is for you to start again)
+  say('The map\'s own starter has been updated: starting everything again. (If nothing follows, start the map again yourself.)');
+  quitting = true;
+  for (const w of watchers) w.close();
+  const go = () => process.exit(AGAIN);
+  const mine = child;
+  if (!mine) { go(); return; }
+  mine.once('exit', go);
+  try { mine.send({ stop: true }); } catch { /* it is going anyway */ }
+  setTimeout(() => { try { mine.kill(); } catch { /* gone */ } setTimeout(go, 300); }, 2500);
+}
+
+function restart() {
+  waiting = false;
+  if (quitting || stopping) return;
+  if (renew) {
+    if (busy) { waiting = true; return; }
+    relaunch();
+    return;
+  }
+  if (!child) { say('The map has changed: starting the server.'); start(); return; }
+  if (busy) { waiting = true; say('The map has changed: the server starts again once the map update it is running has finished.'); return; }
+  stopping = true;
+  say('The map has changed: starting the server again.');
+  const mine = child;
+  // (asked first, so that it can put its helper away; made to, should it not answer)
+  try { mine.send({ stop: true }); } catch { /* it is going anyway */ }
+  setTimeout(() => { if (child === mine) mine.kill(); }, 2500);
+}
+
+const changed = () => { clearTimeout(timer); timer = setTimeout(restart, SETTLE_MS); };
+const watchers = [];
+for (const dir of FOLDERS) {
+  try {
+    watchers.push(fs.watch(dir, { recursive: true }, (event, name) => {
+      if (name && path.basename(name).toLowerCase() === SELF && dir === HERE) renew = true;
+      if (name && CODE.test(name) && !NOT_CODE.test(name)) changed();
+    }));
+  } catch (err) { say(`Cannot watch ${dir} for changes (${err.message}): after an update there, close this window and start the map again.`); }
+}
+try {
+  // (a file is watched through its folder: editors replace files, and a watch on the file itself would be lost)
+  watchers.push(fs.watch(path.dirname(CONFIG), (event, name) => { if (name && name.toLowerCase() === path.basename(CONFIG).toLowerCase()) changed(); }));
+} catch { /* the settings file is read when the server starts */ }
+
+const quit = () => { quitting = true; child?.kill(); process.exit(0); };
+process.on('SIGINT', quit);
+process.on('SIGTERM', quit);
+start();

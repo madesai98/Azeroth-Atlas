@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WoW Forever 3D Map</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%231d3b5c'/%3E%3Cpath d='M6 20l6-8 4 5 3-3 7 9z' fill='%239ccf6a'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: rgba(16, 19, 26, 0.92);
+    --bg2: rgba(255, 255, 255, 0.045);
+    --line: rgba(255, 255, 255, 0.1);
+    --text: #e8ecf2;
+    --dim: #9aa5b5;
+    --accent: #f3c969;
+    --good: #7ed38a;
+    --warn: #ffb454;
+    --side-w: 344px;   /* the sidebar; 0 while it is folded away (the map takes the rest of the window) */
+  }
+  body.side-shut { --side-w: 0px; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0c0f14; color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  canvas { position: absolute; top: 0; left: var(--side-w); width: calc(100% - var(--side-w)); height: 100%; display: block; }
+  #gl { outline: none; cursor: grab; touch-action: none; }
+  #gl.dragging { cursor: grabbing; }
+  #labels { pointer-events: none; }
+
+  /* ---- the sidebar: everything there is to set, in one place ---- */
+  #side { position: absolute; left: 0; top: 0; bottom: 0; width: 344px; display: flex; flex-direction: column; background: var(--bg); border-right: 1px solid var(--line); backdrop-filter: blur(6px); z-index: 5; transition: transform 0.18s ease; }
+  body.side-shut #side { transform: translateX(-100%); }
+  #sideHead { padding: 10px 12px 8px 46px; border-bottom: 1px solid var(--line); flex: none; }
+  #sideBody { flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent; }
+  #sideToggle { position: absolute; left: 8px; top: 8px; width: 30px; height: 30px; padding: 0; z-index: 6; border-radius: 7px; background: rgba(16, 19, 26, 0.86); font-size: 16px; line-height: 1; }
+  details.sec { border-bottom: 1px solid var(--line); }
+  details.sec > summary { list-style: none; display: flex; align-items: center; gap: 7px; padding: 8px 12px; cursor: pointer; user-select: none; font-weight: 600; letter-spacing: 0.02em; }
+  details.sec > summary::-webkit-details-marker { display: none; }
+  details.sec > summary::before { content: '▸'; color: var(--dim); width: 10px; flex: none; transition: transform 0.12s; }
+  details.sec[open] > summary::before { transform: rotate(90deg); }
+  details.sec > summary:hover { background: var(--bg2); }
+  details.sec > summary .grow { flex: 1; }
+  details.sec > summary input[type=checkbox] { margin: 0; accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+  .secb { padding: 2px 12px 11px; display: flex; flex-direction: column; gap: 5px; }
+  .secb > .gap { height: 3px; }
+  .off { opacity: 0.45; }
+
+  select, input[type=text], input[type=number], button {
+    font: inherit; color: var(--text); background: rgba(255, 255, 255, 0.07); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; width: 100%;
+  }
+  select option, select optgroup { background: #1a1f29; color: var(--text); }
+  input[type=number] { width: 54px; padding: 2px 4px; }
+  input[type=color] { width: 22px; height: 18px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: none; cursor: pointer; flex: none; }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.primary { background: #2f6fd0; border-color: #4a86e0; }
+  button.primary:hover:not(:disabled) { background: #3a7be0; }
+  button.attention { background: #b06a12; border-color: #e09a3a; }
+  label.row, div.row { display: flex; align-items: center; gap: 6px; user-select: none; }
+  label.row { cursor: pointer; }
+  label.row input[type=checkbox] { margin: 0; accent-color: var(--accent); }
+  .row .grow { flex: 1; }
+  .dim { color: var(--dim); }
+  .small { font-size: 11px; }
+  .title { font-weight: 600; letter-spacing: 0.02em; }
+  .btnrow { display: flex; gap: 4px; }
+  .good { color: var(--good); } .warn { color: var(--warn); }
+  a { color: #8ec5ff; }
+
+  #results { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
+  #results:empty { display: none; }
+  #results li { padding: 5px 8px; border-radius: 5px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
+  #results li:hover, #results li.sel { background: rgba(255, 255, 255, 0.12); }
+  #results li span:last-child { color: var(--dim); white-space: nowrap; }
+  #progress { height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); overflow: hidden; display: none; }
+  #progress div { height: 100%; width: 0; background: var(--accent); transition: width 0.15s; }
+  #updateMsg:empty, #addonMsg:empty, #guideMsg:empty, #routeMsg:empty, #ingameMsg:empty { display: none; }
+
+  label.row.off { opacity: 0.45; cursor: default; }
+  #zoomBox { margin: 0 0 0 19px; display: flex; flex-direction: column; gap: 4px; }
+  #zoomBox.off { display: none; }
+  #zoomBox label.now .grow { color: var(--accent); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #6b7380; flex: none; }
+  .dot.live { background: var(--good); box-shadow: 0 0 6px var(--good); }
+  .dot.warn { background: var(--warn); }
+  .dot.bad { background: #ff6b5e; }
+  #levelBox { display: flex; flex-direction: column; gap: 3px; }
+  #levelBox:empty, #levelPrompt:empty { display: none; }
+  button.level { text-align: left; padding: 3px 8px; }
+  button.level.chosen { border-color: var(--accent); color: var(--accent); background: rgba(243, 201, 105, 0.12); }
+  #levelPrompt { display: none; flex-direction: column; gap: 3px; padding: 7px 8px; border: 1px solid var(--accent); border-radius: 7px; background: rgba(243, 201, 105, 0.07); }
+  #levelPrompt > div:first-child { font-weight: 600; color: var(--text); }
+
+  /* the routes: one line each - shown or not, its colour, what it is, how long it takes */
+  #routeList { display: flex; flex-direction: column; gap: 4px; }
+  #routeList .rt { display: flex; align-items: center; gap: 6px; }
+  #routeList .rt input[type=checkbox] { margin: 0; accent-color: var(--accent); }
+  #routeList .rt .grow { flex: 1; cursor: pointer; }
+  #routeList .rt .when { color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #routeList .rt.none .grow { color: var(--dim); }
+
+  #dangerBody, #npcBody { display: flex; flex-direction: column; gap: 5px; }
+  #setup { display: flex; flex-direction: column; gap: 5px; padding: 8px 9px; border: 1px solid var(--line); border-radius: 7px; }
+  #appLine a { margin-left: 4px; }
+  body.setup details.sec:not([data-sec="map"]), body.setup #btnFind { display: none; }
+  body.setup #loading { bottom: 50%; }
+  #dangerBody select { width: auto; flex: 1; padding: 2px 4px; }
+  #dangerBands, #zoneKinds { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px; }
+  #dangerBands label, #zoneKinds label { display: flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
+  #dangerBands input, #zoneKinds input { margin: 0; accent-color: var(--accent); }
+  #dangerBands .chip { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+  #dangerAuto:empty, #dangerNote:empty, #zoneInfo:empty { display: none; }
+
+  .kindGroup { margin-top: 2px; }
+  .kindGroup > .head { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; margin: 3px 0 2px; }
+  .kindGroup > .head a { text-transform: none; letter-spacing: 0; }
+  .kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px; }
+  .kinds label { display: flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kinds input { margin: 0; accent-color: var(--accent); flex: none; }
+  #npcNote:empty, #npcSeen:empty, #npcFocus:empty, #npcLine:empty, #npcQuests:empty { display: none; }
+  #npcFocus { color: var(--accent); }
+  #npcCard { display: none; padding: 8px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg2); }
+  #npcCard .head { display: flex; align-items: flex-start; gap: 8px; }
+  #npcCard .head .grow { flex: 1; font-size: 14px; color: var(--accent); }
+  #npcCard .head button { width: auto; padding: 0 7px; }
+  #npcCard .sub { margin-top: 7px; font-weight: 600; }
+  #npcCard .q, #npcCard .r { margin-top: 2px; }
+  #npcCard a { text-decoration: none; }
+  #npcCard a:hover { text-decoration: underline; }
+
+  /* ---- over the map: what the pointer is on, the way back to you, and passing notes ---- */
+  .panel { position: absolute; background: rgba(16, 19, 26, 0.86); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; backdrop-filter: blur(6px); }
+  #readout { left: calc(var(--side-w) + 10px); bottom: 10px; min-width: 200px; max-width: calc(100vw - var(--side-w) - 90px); font-variant-numeric: tabular-nums; pointer-events: none; display: none; }
+  #readout.on { display: block; }
+  #place { font-weight: 600; color: var(--accent); }
+  #npcLine { color: #cfe6ff; }
+  #btnFind { position: absolute; right: 14px; bottom: 14px; width: 46px; height: 46px; padding: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(16, 19, 26, 0.86); border: 1px solid var(--line); z-index: 4; }
+  #btnFind svg { width: 24px; height: 24px; }
+  #btnFind:not(:disabled) { border-color: rgba(53, 200, 255, 0.55); color: #35c8ff; }
+  #btnFind.following:not(:disabled) { background: rgba(53, 200, 255, 0.2); }
+  #help { left: calc(var(--side-w) + (100% - var(--side-w)) / 2); top: 50%; transform: translate(-50%, -50%); width: min(430px, calc(100vw - var(--side-w) - 24px)); display: none; padding: 14px 16px; z-index: 7; }
+  #help h3 { margin: 0 0 8px; font-size: 14px; }
+  #help table { border-collapse: collapse; width: 100%; }
+  #help td { padding: 3px 0; vertical-align: top; }
+  #help td:first-child { color: var(--accent); white-space: nowrap; padding-right: 14px; }
+  #fatal { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(8, 10, 14, 0.92); padding: 24px; text-align: center; z-index: 9; }
+  #fatal div { max-width: 520px; }
+  #fatal h2 { margin: 0 0 10px; }
+  #loading, #flyhint { left: calc(var(--side-w) + (100% - var(--side-w)) / 2); transform: translateX(-50%); padding: 4px 12px; pointer-events: none; display: none; }
+  #loading { bottom: 64px; }
+  #flyhint { top: 14px; }
+  #crosshair { position: absolute; left: calc(var(--side-w) + (100% - var(--side-w)) / 2); top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 1.5px solid rgba(255,255,255,.8); border-radius: 50%; pointer-events: none; display: none; }
+  @media (max-width: 700px) { :root { --side-w: 0px; } #side { box-shadow: 8px 0 30px rgba(0,0,0,.5); } }
+</style>
+</head>
+<body>
+<canvas id="gl" tabindex="0"></canvas>
+<canvas id="labels"></canvas>
+<div id="crosshair"></div>
+
+<button id="sideToggle" title="Fold the sidebar away, or bring it back (B)">☰</button>
+<aside id="side">
+  <div id="sideHead">
+    <div class="title">WoW Forever 3D Map</div>
+    <div id="build" class="dim small">Starting…</div>
+  </div>
+  <div id="sideBody">
+
+    <details class="sec" data-sec="map" open>
+      <summary><span class="grow">Map &amp; search</span></summary>
+      <div class="secb">
+        <select id="map" title="Map"></select>
+        <input id="search" type="text" placeholder="Search places, or type map coords (e.g. 42.5 63)" autocomplete="off" spellcheck="false">
+        <ul id="results"></ul>
+        <button id="update" class="primary" disabled>Update map</button>
+        <div id="progress"><div></div></div>
+        <div id="updateMsg" class="dim small"></div>
+        <div id="setup" style="display:none">
+          <div id="setupWhy" class="warn"></div>
+          <label class="small" for="setupGame">The game's folder: the one with a file named <b>.build.info</b> in it, usually called "World of Warcraft"</label>
+          <input id="setupGame" type="text" placeholder="C:\Program Files (x86)\World of Warcraft" autocomplete="off" spellcheck="false">
+          <label class="small" for="setupData">Where to keep the map's data (about 4 GB). Leave empty for a "data" folder beside the map tool</label>
+          <input id="setupData" type="text" placeholder="(beside the map tool)" autocomplete="off" spellcheck="false">
+          <button id="setupSave" class="primary">Save and start</button>
+          <div id="setupMsg" class="small"></div>
+        </div>
+        <div id="appLine" class="dim small" style="display:none"><span id="appMsg"></span> <a href="#" id="appCheck" title="Look for a newer version of the map tool now">look now</a></div>
+        <button id="appUpdate" class="attention" style="display:none" title="Download the newer version of the map tool and put it in. Your settings and the map's data stay as they are.">Update the map tool</button>
+      </div>
+    </details>
+
+    <details class="sec" data-sec="you" open>
+      <summary><span class="grow">You</span><span id="playerDot" class="dot"></span></summary>
+      <div class="secb">
+        <div id="playerText" class="dim">Player link: connecting…</div>
+        <div class="btnrow">
+          <label class="row grow" title="The camera stays on your character. Right-drag to look around them, wheel to zoom. Moving the map (drag, W A S D) stops following; the button at the bottom right of the map starts it again"><input type="checkbox" id="optFollow">Follow me</label>
+          <label class="row grow" title="While following: keep the direction you are facing at the top of the map. Swing the view aside and it comes back when you let go"><input type="checkbox" id="optTurn">Turn with me</label>
+        </div>
+        <label class="row" title="While following: the camera's distance from you is chosen by the kind of place you are in. Zoom yourself and it comes back after about five seconds"><input type="checkbox" id="optAuto"><span class="grow">Auto-zoom</span><span id="zoomNow" class="dim small"></span></label>
+        <div id="zoomBox" class="off">
+          <label class="row" id="zoomRowIn" title="Inside a building or a cave. In Ironforge and the Undercity: inside a shop, the inn, the bank - not in the halls and streets"><span class="grow">Indoors, caves</span><input type="number" id="zoomIn" min="6" max="5000" step="5" value="35">yd</label>
+          <label class="row" id="zoomRowTown" title="In a city or town (anywhere with an innkeeper or several vendors and trainers), and near your quests: who gives them, what they have you kill or collect, where they are handed in, and where you are heading"><span class="grow">Towns, quest areas</span><input type="number" id="zoomTown" min="6" max="5000" step="5" value="110">yd</label>
+          <label class="row" id="zoomRowOut" title="Anywhere else: out in the world"><span class="grow">Everywhere else</span><input type="number" id="zoomOut" min="6" max="5000" step="5" value="300">yd</label>
+        </div>
+        <label class="row" title="Closer to the camera than this, you and the NPCs are figures standing in the world; further away, you are the arrow and they are their signs. On a flight path you are shown riding a gryphon (a wind rider for the Horde), from five times as far"><input type="checkbox" id="optFigure" checked><span class="grow">3D figures within</span><input type="number" id="figureDist" min="10" max="5000" step="10" value="150" title="Camera distance in yards">yd</label>
+        <button id="btnAddon" style="display:none"></button>
+        <div id="addonMsg" class="dim small"></div>
+        <div id="guideMsg" class="dim small"></div>
+        <div class="btnrow" id="guideRow" style="display:none">
+          <button id="btnGuides" class="attention" title="Changes one line of each guide pack's .toc file: the pack then needs the Forever Map Link addon instead of Guidelime. Nothing else of the pack is touched."></button>
+        </div>
+      </div>
+    </details>
+
+    <details class="sec" data-sec="routes" open>
+      <summary><span class="grow">Routes</span><input type="checkbox" id="optRoute" checked title="Draw routes at all"></summary>
+      <div class="secb">
+        <div id="routeList"></div>
+        <div id="routeMsg" class="dim"></div>
+        <div id="levelPrompt"></div>
+        <div id="levelBox"></div>
+        <div id="ingameMsg" class="dim small" title="The same route is drawn on the game's own map and minimap by the Forever Map Link addon"></div>
+      </div>
+    </details>
+
+    <details class="sec" data-sec="npcs">
+      <summary><span class="grow">NPCs</span><span id="npcCount" class="dim small"></span><input type="checkbox" id="optNpcs" title="Show who and what stands in the world"></summary>
+      <div class="secb">
+        <div id="npcCard"></div>
+        <div id="npcBody">
+          <input id="npcSearch" type="text" placeholder="Find by name, title or quest (Enter: go there)" autocomplete="off" spellcheck="false">
+          <div id="npcFocus" class="small"></div>
+          <div id="npcKinds"></div>
+          <label class="row" title="Leave out quests you are not yet high enough for, ones that need another quest first, and ones you have outgrown. (Quests of the other side, and with the live link the ones you have done or already have, are always left out.)"><input type="checkbox" id="npcMyQuests" checked><span class="grow">Only quests open to me now</span></label>
+          <div class="row" title="For creatures (friendly, neutral, hostile, side not recorded): only these levels. Empty = any."><span class="grow">Creature levels</span><input type="number" id="npcMin" min="1" max="63" placeholder="any">–<input type="number" id="npcMax" min="1" max="63" placeholder="any"></div>
+          <label class="row" title="Show only the ones whose height is a guess: the ones worth walking up to"><input type="checkbox" id="npcUnsure"><span class="grow">Only heights that are a guess</span></label>
+          <label class="row"><input type="checkbox" id="npcNames" checked><span class="grow">Names when close</span></label>
+          <div class="row" title="Markers further from the camera than this are not drawn (a search shows its results at any distance)"><span class="grow">Show within</span><input type="number" id="npcRange" min="50" max="60000" step="50" style="width:70px">yd</div>
+          <div id="npcSeen" class="small"></div>
+          <div id="npcNote" class="dim small"></div>
+          <div id="npcQuests" class="dim small"></div>
+        </div>
+      </div>
+    </details>
+
+    <details class="sec" data-sec="zones">
+      <summary><span class="grow">Spawn zones</span><input type="checkbox" id="optDanger" title="Paint the ground where creatures are stationed"></summary>
+      <div class="secb">
+        <div id="dangerBody">
+          <div class="row">
+            <span>My level</span><input type="number" id="dangerLevel" min="1" max="63" value="10">
+            <select id="dangerFaction" title="Which creatures are hostile depends on your faction"><option value="alliance">Alliance</option><option value="horde">Horde</option></select>
+          </div>
+          <div id="dangerAuto" class="dim small"></div>
+          <div id="zoneKinds"></div>
+          <div id="dangerBands"></div>
+          <div class="row" title="Extra distance added around every zone (creatures wander a little from where they spawn)">
+            <span class="grow">Extra margin</span><input type="number" id="dangerMargin" min="0" max="15" value="5">yd
+          </div>
+          <div id="dangerNote" class="dim small"></div>
+        </div>
+      </div>
+    </details>
+
+    <details class="sec" data-sec="quests">
+      <summary><span class="grow">Quests</span><span id="questCount" class="dim small"></span></summary>
+      <div class="secb" id="questBody"></div>
+    </details>
+
+    <details class="sec" data-sec="layers">
+      <summary><span class="grow">Layers &amp; view</span></summary>
+      <div class="secb">
+        <label class="row"><input type="checkbox" id="optBuildings" checked><span class="grow">Buildings</span></label>
+        <label class="row" title="Everything that stands in the world apart from the buildings and the trees: rocks, fences, tents, lamp posts, furniture"><input type="checkbox" id="optObjects" checked><span class="grow">Objects</span></label>
+        <label class="row" id="treesRow"><input type="checkbox" id="optTrees" checked><span class="grow">Trees</span></label>
+        <label class="row" title="Keeps your character in view (X). A hole opens in whatever stands between the camera and you - a building, a hill - and closes when nothing does. Indoors, the ceiling and the floors over the room you are in are taken off. In a city or a cave under the ground (Ironforge, the Undercity) the ground over it is taken off, so the whole of it lies open. Tree tops are hidden within this many yards of you."><input type="checkbox" id="optCut"><span class="grow">Cutaway around me</span><input type="number" id="cutRadius" min="5" max="300" value="30" title="Tree tops are hidden this many yards around you">yd</label>
+        <label class="row"><input type="checkbox" id="optLabels" checked><span class="grow">Place names</span></label>
+        <label class="row"><input type="checkbox" id="optFlights" checked><span class="grow">Flight masters</span></label>
+        <label class="row" title="The boats, zeppelins and trams whose timetable is known just now, each where it is this moment, and at their docks when the next one comes"><input type="checkbox" id="optTransit" checked><span class="grow">Boats &amp; trams</span></label>
+        <label class="row"><input type="checkbox" id="optSlope"><span class="grow">Steep slopes</span><input type="number" id="slopeDeg" min="20" max="80" value="50" title="Slope limit in degrees">°</label>
+        <label class="row"><input type="checkbox" id="optContours"><span class="grow">Contour lines</span></label>
+        <div class="btnrow">
+          <button id="btnNorth" title="Face north (N)">North</button>
+          <button id="btnTop" title="Top-down / tilted (T)">Top</button>
+          <button id="btnFly" title="Free-look flying (G)">Fly</button>
+          <button id="btnHelp" title="Controls">?</button>
+        </div>
+        <div id="perf" class="dim small">&nbsp;</div>
+      </div>
+    </details>
+
+  </div>
+</aside>
+
+<!-- what the pointer is on: there only while the pointer is on the map and on something -->
+<div id="readout" class="panel">
+  <div id="place">&nbsp;</div>
+  <div id="coords" class="dim">&nbsp;</div>
+  <div id="worldpos" class="dim">&nbsp;</div>
+  <div id="zoneInfo"></div>
+  <div id="npcLine"></div>
+</div>
+
+<button id="btnFind" disabled title="Find me: fly to your character, and follow them" aria-label="Find me">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/><path d="M12 1.5v4M12 18.5v4M1.5 12h4M18.5 12h4"/></svg>
+</button>
+
+<div id="loading" class="panel dim">Loading terrain…</div>
+<div id="flyhint" class="panel">Flying — mouse to look, WASD to move, wheel = speed, Esc to stop</div>
+
+<div id="help" class="panel">
+  <h3>Controls</h3>
+  <table>
+    <tr><td>Drag</td><td>Move the map</td></tr>
+    <tr><td>Right-drag / Alt-drag</td><td>Rotate and tilt around the point under the cursor; while moving with the keys it steers instead</td></tr>
+    <tr><td>Wheel</td><td>Zoom toward the cursor</td></tr>
+    <tr><td>Double-click</td><td>Zoom in on a point</td></tr>
+    <tr><td>Click</td><td>Drop a marker on what is under the cursor (Esc clears it); where there are several levels at that spot, you are asked which</td></tr>
+    <tr><td>Shift-click</td><td>Drop a quick marker: no question, the level nearest your own height</td></tr>
+    <tr><td>W A S D / arrows</td><td>Move &nbsp;·&nbsp; Shift = faster</td></tr>
+    <tr><td>Q / E</td><td>Turn left / right</td></tr>
+    <tr><td>R / F &nbsp;(Space / C)</td><td>Up / down</td></tr>
+    <tr><td>G</td><td>Free-look flying (mouse look, wheel changes speed)</td></tr>
+    <tr><td>N &nbsp;/&nbsp; T</td><td>Face north &nbsp;/&nbsp; top-down view</td></tr>
+    <tr><td>X</td><td>Cutaway: open up whatever hides your character (a building or a hill in the way, the ceiling of the room they are in, the ground over a city under it, the tree tops around them)</td></tr>
+    <tr><td>B</td><td>Fold the sidebar away, or bring it back</td></tr>
+    <tr><td>Following</td><td>Right-drag and Q / E look around your character, the wheel zooms on them. Dragging the map or moving with the keys stops following; the round button at the bottom right starts it again</td></tr>
+    <tr><td>/</td><td>Search</td></tr>
+  </table>
+  <div class="btnrow" style="margin-top:10px"><button id="helpClose">Close</button></div>
+</div>
+
+<div id="fatal"><div><h2 id="fatalTitle">Something went wrong</h2><p id="fatalMsg" class="dim"></p></div></div>
+<script type="module" src="js/reload.js"></script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

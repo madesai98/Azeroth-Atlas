@@ -1,0 +1,11 @@
+# This computer's own: where the game is, where the map data goes
+/config.json
+# The map data, where it is kept beside the map tool (built from your own installed game)
+/data/
+# Built or fetched on this computer when first needed
+/server/.build/
+/extractor/dbd/
+# Which version a copy without git was last updated to (server/appupdate.js)
+/.app-version.json
+node_modules/
+*.log
