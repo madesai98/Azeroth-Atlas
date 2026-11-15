@@ -28,6 +28,9 @@ const folder = path.join(out, NAME);
 fs.renameSync(built, folder);
 const appDir = path.join(folder, 'resources', 'app');
 fs.rmSync(path.join(appDir, 'node_modules'), { recursive: true, force: true }); // (nothing the application needs is in there)
+// (the packager writes a shortened package.json of its own and leaves the lock file out: put in as they are in
+// the repository, so that the application holds the repository's files exactly - its own updater goes by that)
+for (const f of ['package.json', 'package-lock.json']) fs.copyFileSync(path.join(root, f), path.join(appDir, f));
 // (the frame's own words in every language: only English is kept - the window has no menus, and the map's words are its own)
 for (const f of fs.readdirSync(path.join(folder, 'locales'))) if (f !== 'en-US.pak') fs.rmSync(path.join(folder, 'locales', f));
 // Which version this is, for the copy's own updater: the commit it was built from and the files of it
