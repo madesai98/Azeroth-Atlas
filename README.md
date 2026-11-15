@@ -16,11 +16,11 @@ Azeroth Atlas is an application for Windows that runs beside the game. You need:
 Then:
 
 1. **Download it**: https://github.com/madesai98/Azeroth-Atlas/releases/latest , the file
-   **Azeroth-Atlas-win-x64.zip**. Unpack it somewhere of your own (your Documents or Desktop:
-   not Program Files, and not inside the game's folder).
-2. Open the folder and double-click **Azeroth Atlas.exe**. (Windows may say it protected your
-   PC, because the program is not signed: **More info → Run anyway**.) The map opens in a window
-   of its own. There is nothing else to install: no Node.js, no browser.
+   **Azeroth-Atlas-Setup.exe**.
+2. **Run it.** (Windows may say it protected your PC, because the program is not signed:
+   **More info → Run anyway**.) It installs for you alone, with no questions and no
+   administrator rights, puts **Azeroth Atlas** in the Start menu and on the desktop, and opens
+   the map in a window of its own. There is nothing else to install: no Node.js, no browser.
 3. **The game is found by itself** where it is usually installed. If it cannot be found, the
    window asks for its folder (the one with `.build.info` in it, usually called "World of
    Warcraft") and for where to keep the map data.
@@ -33,8 +33,17 @@ Nothing of the game is in what you download: the map is built on your computer, 
 installation, read-only. Closing the window closes everything. What is yours is kept apart from
 the application, in `%LOCALAPPDATA%\Azeroth Atlas`: your settings (`config.json`), the map
 data unless you chose another place for it, and a log of what the map's server said
-(`server.log`, in place of a terminal). So a newer copy of the application can be unpacked
-over the old one, or anywhere else, and nothing is lost.
+(`server.log`, in place of a terminal). So a newer copy of the application can take the place
+of the old one, or be put anywhere else, and nothing is lost.
+
+**Rather not install anything?** The file **Azeroth-Atlas-win-x64.zip** on the same page is the
+same application as a folder: unpack it somewhere of your own (your Documents or Desktop: not
+Program Files, and not inside the game's folder) and double-click **Azeroth Atlas.exe**.
+
+Installed, the application is in `%LOCALAPPDATA%\Programs\Azeroth Atlas`, and is removed like
+any other (Windows' list of installed apps). Removing it, or installing a newer one over it,
+leaves what is yours where it is; delete `%LOCALAPPDATA%\Azeroth Atlas` yourself to be rid of
+the settings and the map data too.
 
 In the window: **F11** fills the screen, **F5** loads the page again, **F12** opens the
 browser's own tools. A link that leads elsewhere (Wowhead) opens in your browser.
@@ -61,7 +70,7 @@ looks at once.
 
 | Your copy | How it is updated |
 | --- | --- |
-| The application | As the next line: the map tool's files inside it (`resources\app`) are plain files. The frame round them (the window, the built-in Node and browser) only changes with a new download from the releases page, which is seldom needed |
+| The application (installed, or unpacked from its zip) | As the next line: the map tool's files inside it (`resources\app`) are plain files. The frame round them (the window, the built-in Node and browser) only changes with a new download from the releases page, run or unpacked over the old one, which is seldom needed |
 | The source, unpacked from the ZIP | The newest version's files are downloaded from GitHub and the ones that differ are written; files that are no longer part of the map tool are removed. Needs the repository to be public |
 | A git checkout | `git fetch`, then a fast-forward. A checkout with changes or commits of its own is never touched: the line says a newer version is out, and `git pull` is yours to run. Works with a private repository too (with the access your git already has) |
 
@@ -85,8 +94,8 @@ commits, and pushes.
 
 **A new download of the application** is built and published by GitHub itself when a tag is
 pushed (`.github/workflows/release.yml`): `git tag v0.3.0 && git push origin v0.3.0`. That is
-only needed when the frame should be newer; `npm run dist` builds the same zip here, into
-`dist`.
+only needed when the frame should be newer; `npm run dist` builds the same two files here
+(the installer and the zip), into `dist`.
 
 ### It keeps itself current
 

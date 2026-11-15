@@ -1,6 +1,11 @@
 #!/usr/bin/env node
-// Builds the application to hand on: dist/Azeroth-Atlas-win-x64.zip, a folder with
-// "Azeroth Atlas.exe" in it and nothing else to install (npm run dist).
+// Builds the application to hand on (npm run dist), as two files in dist/:
+//   Azeroth-Atlas-Setup.exe      one file to download and run: it installs the application for
+//                                the person who runs it (no administrator rights, no questions),
+//                                with a Start menu and a desktop shortcut and an uninstaller
+//   Azeroth-Atlas-win-x64.zip    the same application as a folder, for whoever would rather
+//                                unpack it than install it
+// Either way there is nothing else to install.
 //
 // In that folder, resources/app is this repository's files as they are, plain: the map tool
 // keeps them up to date by itself from then on (server/appupdate.js). So a build is only
@@ -11,6 +16,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { packager } from '@electron/packager';
+import { build, Platform, Arch } from 'electron-builder';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -47,3 +53,29 @@ const tar = process.platform === 'win32' ? path.join(process.env.SystemRoot ?? '
 const z = spawnSync(tar, ['-a', '-c', '-f', zip, '-C', out, NAME], { stdio: 'inherit' });
 if (z.status !== 0) { console.error('The zip could not be made.'); process.exit(1); }
 console.log(`${zip}  (${Math.round(fs.statSync(zip).size / 1e6)} MB)`);
+
+// the installer: the same folder, in one file that puts it in place
+// (For the person who runs it only: under %LOCALAPPDATA%\Programs, where the map tool can go
+// on keeping its own files up to date. What is theirs - settings, map data - is elsewhere and
+// is left alone by installing over an older copy and by uninstalling: see app/main.cjs.)
+const icon = path.join(root, 'app', 'icon.ico');
+await build({
+  prepackaged: folder,
+  targets: Platform.WINDOWS.createTarget('nsis', Arch.x64),
+  publish: 'never',
+  config: {
+    appId: 'AzerothAtlas', // (the name Windows knows the application by: the same as in app/main.cjs)
+    productName: NAME,
+    directories: { output: out, buildResources: path.join(root, 'app') },
+    publish: null,
+    win: { icon, signAndEditExecutable: false }, // (the program has its icon and its name already: the packager above gave them)
+    nsis: {
+      oneClick: true, perMachine: false, artifactName: 'Azeroth-Atlas-Setup.${ext}', shortcutName: NAME, uninstallDisplayName: NAME,
+      createDesktopShortcut: true, createStartMenuShortcut: true, runAfterFinish: true, deleteAppDataOnUninstall: false,
+      installerIcon: icon, uninstallerIcon: icon,
+    },
+  },
+});
+for (const f of fs.readdirSync(out)) if (/\.blockmap$|^builder-.*\.ya?ml$/.test(f)) fs.rmSync(path.join(out, f)); // (the builder's own notes: no part of what is handed on)
+const setup = path.join(out, 'Azeroth-Atlas-Setup.exe');
+console.log(`${setup}  (${Math.round(fs.statSync(setup).size / 1e6)} MB)`);
