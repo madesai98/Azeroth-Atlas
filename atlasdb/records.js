@@ -73,8 +73,10 @@ export const LAYERS = ['w'];
  * quest's reputation as a step on a scale, not an amount (the amount is worked out from a table
  * and is right about nineteen times in twenty), and Wowhead names only the factions a quest is
  * for, not what spills over to their friends: QuestieDB's amounts are believed before both.
+ * A quest's experience as players' own sessions measured it in this game is believed before any
+ * table of it (of 3,556 quests both know, Wowhead's figure is the same for all but five).
  */
-const PREFER = { quest: { rep: 'q' } };
+const PREFER = { quest: { rep: 'q', xp: 'x' } };
 
 /**
  * The fields for which Wowhead is asked only after QuestieDB: where things stand, and who gives
