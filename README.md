@@ -7,24 +7,22 @@ positions, water, zone names and in-game map coordinates.
 
 ## Get it and run it
 
-It runs on Windows, beside the game. You need:
+Azeroth Atlas is an application for Windows that runs beside the game. You need:
 
 - **WoW Forever** installed through Battle.net;
-- **Node.js 20 or newer** (the LTS version from https://nodejs.org, or `winget install OpenJS.NodeJS.LTS`);
-- a current **Chrome or Edge**;
 - about **4 GB** of disk space for the map data;
 - for NPCs, spawn zones and quests: the **QuestieDB** addon in the game (the map works without).
 
 Then:
 
-1. **Get the map tool.** At https://github.com/madesai98/Azeroth-Atlas : **Code → Download ZIP**,
-   and unpack it wherever you like (not inside the game's folder). Or, with git:
-   `git clone https://github.com/madesai98/Azeroth-Atlas.git`.
-2. Double-click **`Start Map.bat`**. (Windows may warn about a file from the internet the first
-   time: **More info → Run anyway**.) A window opens and stays open, and the map opens in your
-   browser at `http://localhost:5173/`.
+1. **Download it**: https://github.com/madesai98/Azeroth-Atlas/releases/latest , the file
+   **Azeroth-Atlas-win-x64.zip**. Unpack it somewhere of your own (your Documents or Desktop:
+   not Program Files, and not inside the game's folder).
+2. Open the folder and double-click **Azeroth Atlas.exe**. (Windows may say it protected your
+   PC, because the program is not signed: **More info → Run anyway**.) The map opens in a window
+   of its own. There is nothing else to install: no Node.js, no browser.
 3. **The game is found by itself** where it is usually installed. If it cannot be found, the
-   page asks for its folder (the one with `.build.info` in it, usually called "World of
+   window asks for its folder (the one with `.build.info` in it, usually called "World of
    Warcraft") and for where to keep the map data.
 4. Press **Build map**. The first build reads the whole world out of your own installed game
    and takes a good while; after that, updates only rebuild what has changed.
@@ -32,7 +30,26 @@ Then:
    you are and draws the map's routes in the game.
 
 Nothing of the game is in what you download: the map is built on your computer, from your own
-installation, read-only. The server only listens on this computer (`127.0.0.1`).
+installation, read-only. Closing the window closes everything. What is yours is kept apart from
+the application, in `%LOCALAPPDATA%\Azeroth Atlas`: your settings (`config.json`), the map
+data unless you chose another place for it, and a log of what the map's server said
+(`server.log`, in place of a terminal). So a newer copy of the application can be unpacked
+over the old one, or anywhere else, and nothing is lost.
+
+In the window: **F11** fills the screen, **F5** loads the page again, **F12** opens the
+browser's own tools. A link that leads elsewhere (Wowhead) opens in your browser.
+
+**From the source instead** (for working on it): `git clone` the repository (or download its
+ZIP), and either
+
+- `npm install` once, then `npm run app`: the same window, run straight from the folder; or
+- double-click **`Start Map.bat`** (needs [Node.js](https://nodejs.org) 20 or newer and Chrome
+  or Edge): the server in a terminal window, the map in a browser tab at
+  `http://localhost:5173/`.
+
+Run this way, `config.json` and the map data are in the folder itself. The server only listens
+on this computer (`127.0.0.1`) either way, and the map can be opened in a browser at that
+address while the application is running, too.
 
 ### Updates
 
@@ -44,7 +61,8 @@ looks at once.
 
 | Your copy | How it is updated |
 | --- | --- |
-| Unpacked from the ZIP | The newest version's files are downloaded from GitHub and the ones that differ are written; files that are no longer part of the map tool are removed. Needs the repository to be public |
+| The application | As the next line: the map tool's files inside it (`resources\app`) are plain files. The frame round them (the window, the built-in Node and browser) only changes with a new download from the releases page, which is seldom needed |
+| The source, unpacked from the ZIP | The newest version's files are downloaded from GitHub and the ones that differ are written; files that are no longer part of the map tool are removed. Needs the repository to be public |
 | A git checkout | `git fetch`, then a fast-forward. A checkout with changes or commits of its own is never touched: the line says a newer version is out, and `git pull` is yours to run. Works with a private repository too (with the access your git already has) |
 
 What is yours is never touched by an update: `config.json`, the map data, your notes of where
@@ -62,16 +80,21 @@ An update is not put in while a map build is running (it waits), and `"autoUpdat
 **Publishing a new version** (for whoever keeps the repository): commit and push to the `main`
 branch. Everyone's copy picks it up within six hours, or at its next start. The first time,
 `node tools/publish.mjs https://github.com/<you>/<repository>` writes the address into
-`package.json` (copies unpacked from a ZIP look there for where they came from), commits, and
-pushes.
+`package.json` (copies that are not git checkouts look there for where they came from),
+commits, and pushes.
+
+**A new download of the application** is built and published by GitHub itself when a tag is
+pushed (`.github/workflows/release.yml`): `git tag v0.3.0 && git push origin v0.3.0`. That is
+only needed when the frame should be newer; `npm run dist` builds the same zip here, into
+`dist`.
 
 ### It keeps itself current
 
-Leave the window that `Start Map.bat` opens running. When the map's own code is updated,
-nothing has to be restarted or reloaded by hand:
+When the map's own code is updated, nothing has to be restarted or reloaded by hand (run from
+`Start Map.bat`, leave the window it opens running):
 
-- **The server starts itself again.** `Start Map.bat` runs `server/watch.js`, which runs the
-  server and watches the code it is made of (the `server` and `extractor` folders, and
+- **The server starts itself again.** The application and `Start Map.bat` both run
+  `server/watch.js`, which runs the server and watches the code it is made of (the `server` and `extractor` folders, and
   `config.json`). A change there, and the server is stopped and started anew, a second or so
   later. A map update that is running is left to finish first. If the new code does not start
   (a mistake in it), the error stays on show in the window and the server is started again as
@@ -86,13 +109,14 @@ nothing has to be restarted or reloaded by hand:
 
 Everything you set on the page is kept in the browser, and comes back however the page is
 opened again: after a restart of the server or the browser, after the page has reloaded itself,
-or opened afresh by `Start Map.bat`. That is every switch and number in the sidebar (Follow me,
+or opened afresh. That is every switch and number in the sidebar (Follow me,
 Turn with me, Auto-zoom and its three distances, the NPC filters, the spawn zones, each route's
 switch and colour, the figures, buildings, trees, cutaway, place names, flight masters, boats,
 slopes, contour lines), the sidebar itself (folded away or not, and which of its sections are
 open), and where you were looking: the map, the spot, the direction and tilt. It is
 kept per browser (in its storage for `localhost:5173`); another browser, or a private window,
-starts from the defaults.
+starts from the defaults. The application counts as a browser of its own: it keeps these with
+the rest of what is yours, and remembers where its window was besides.
 
 ## Updating after a game patch
 
@@ -189,9 +213,10 @@ The map only redraws when the view changes, so it uses no GPU while you are just
 
 | Key | Meaning |
 | --- | --- |
+| (where it is) | The application: `%LOCALAPPDATA%\Azeroth Atlas\config.json`. Run from the source: `config.json` in the folder itself |
 | `installRoot` | Game folder that contains `.build.info`. Not set, or no longer there: the game is looked for where it is usually installed (the registry, Battle.net's own list, a "World of Warcraft" folder on any drive), and asked for on the page if it cannot be found |
 | `product` | Battle.net product code (`wowf`) |
-| `dataDir` | Where extracted map data is written (about 4 GB). Never inside the game folder. Not set: a `data` folder beside the map tool |
+| `dataDir` | Where extracted map data is written (about 4 GB). Never inside the game folder. Not set: a `data` folder beside `config.json` |
 | `port` | Local web server port |
 | `reference` | `false` = never download the reference database used for NPC heights (see "NPCs") |
 | `referenceFile` | A copy of that database of your own to use instead of downloading one |
@@ -215,6 +240,9 @@ extractor/   reads the game archives and writes map data        (node extractor/
   navread.js   reads the walkable-ground data back in (what is there to stand on at a spot)
 server/      local web server + update endpoint
 viewer/      WebGPU renderer (no build step, plain ES modules)
+app/         the application's frame (Electron): one window with the map in it, the server run
+             behind it with the Node that is built in
+addon/       the addon that tells the map where you are and draws its routes in the game
 ```
 
 Accuracy checks built into the pipeline:
@@ -574,7 +602,7 @@ guide moves on to its next step the route follows the guide again; take a pin of
 step is back. A quick waypoint that something newer has taken the place of is gone for good.
 With none of them, click the 3D map to drop a marker and the route goes there instead.
 
-`/maplink clear` in the game (or a key you bind to *Clear the route*, or a right-click on the
+`/atlas clear` in the game (or a key you bind to *Clear the route*, or a right-click on the
 route's end on the game's map) drops the waypoint you have now: the route goes, here and in the
 game, and stays gone until the guide moves on to another step or you set a new waypoint. A pin or
 quick waypoint you travelled to is taken away when you get within ten yards of it at the end of
@@ -626,7 +654,7 @@ With **more than one level**, the choice is yours:
 
 Whatever was chosen can be changed for as long as the waypoint stands: in the Routes section here
 (the levels are listed under the route, the one in use marked), or in the game with
-`/maplink level` or a click on the "Level:" line of the step list. The marker and the route's end
+`/atlas level` or a click on the "Level:" line of the step list. The marker and the route's end
 are drawn on the level chosen, not on the terrain underneath.
 
 **On foot** the route is searched over the map's navigation data, which the extractor builds from
@@ -768,7 +796,7 @@ would have you walk and swim from Stormwind to Southshore with both flight point
 the looking is done the game is told the route is still being worked out, and asks again a
 moment later.
 
-To follow it without the map open (`addon/ForeverMapLink/Guide.lua`):
+To follow it without the map open (`addon/AzerothAtlas/Guide.lua`):
 
 - **the arrow**, top middle of the screen: which way the route goes from where you stand (it
   aims a dozen yards further along the line, so it leads you round corners and back onto the
@@ -800,12 +828,12 @@ room under it, it goes over it, and failing that beside it. Near the screen's ri
 lines are wrapped rather than run off the screen. While Questie hides its list, the step list
 stays where it hung. Nothing of the addon's is ever anchored to Questie's list (that can break
 Questie's own dragging): it is only asked where it is. Without Questie, or after
-`/maplink pin`, the step list stands on its own, on a dark ground.
+`/atlas pin`, the step list stands on its own, on a dark ground.
 
 The arrow and the steps are click-through (the header and the "Level:" line take a click).
-`/maplink arrow` and `/maplink list` switch each off or on, `/maplink pin` takes the step list
-out from under Questie's list or puts it back, `/maplink move` lets you drag the arrow, and the
-step list where it stands on its own (type it again when done), `/maplink reset` puts them
+`/atlas arrow` and `/atlas list` switch each off or on, `/atlas pin` takes the step list
+out from under Questie's list or puts it back, `/atlas move` lets you drag the arrow, and the
+step list where it stands on its own (type it again when done), `/atlas reset` puts them
 back.
 
 There is one router, the 3D map's, so the two cannot disagree. The route is not worked out
@@ -815,13 +843,13 @@ placed through OpenMap's own interface for other addons, so it sits right there 
 **How it gets there.** Nothing can be sent to an addon while the game runs. What an addon can do
 is load another addon on demand, and the game reads that addon's file from the disk at that
 moment. So beside the addon sit 300 tiny load-on-demand addons, the **route mailboxes**
-(`ForeverMapLink_Mail001` ... `300`, grouped under Forever Map Link in the game's addon list;
+(`AzerothAtlas_Mail001` ... `300`, grouped under Azeroth Atlas in the game's addon list;
 there is nothing to switch on or off in them). The map page hands each new route to the local
 server as a track (`viewer/js/ingame.js`: stretches of x, y points with the height of each,
 thinned to within about half a yard of the real line and a yard of its height, so 600 yd of
 level road is some 25 points), the server keeps the next
 six mailboxes filled with it (`server/mail.js`), and the addon opens one when it wants the
-route (`addon/ForeverMapLink/Route.lua`).
+route (`addon/AzerothAtlas/Route.lua`).
 
 A mailbox can be opened once per login or `/reload`, so they are opened sparingly:
 
@@ -833,12 +861,12 @@ A mailbox can be opened once per login or `/reload`, so they are opened sparingl
   from where you are by then);
 - when the addon cannot tell which of two levels you are on, or you stand at your waypoint's spot
   while the route says you have not reached it (see "One level over another" below);
-- when you say so: `/maplink route`, or a key bound to *Fetch the route from the 3D map*. That is
+- when you say so: `/atlas route`, or a key bound to *Fetch the route from the 3D map*. That is
   how a marker you dropped on the 3D map itself gets into the game, since the game cannot know
   you did that.
 
 Walking along the route costs nothing; where you are on it is worked out in the game. A normal
-hour of questing uses a few dozen. `/maplink status` says how many are left, and the map page
+hour of questing uses a few dozen. `/atlas status` says how many are left, and the map page
 says so when they run low; `/reload` gives them all back.
 
 The addon tells the server (through the strip) which mailbox it will open next and which
@@ -849,7 +877,7 @@ half a minute old the 3D map is evidently not running, and the mailboxes are the
 
 Installing the mailboxes is part of **Update addon**. The game only notices new addons when it
 starts, so restart it once after that update. The server writes only into folders named
-`ForeverMapLink_Mail###`, and only while it is reading the strip of a running game.
+`AzerothAtlas_Mail###`, and only while it is reading the strip of a running game.
 
 What the addon says back goes through the strip: which mailbox it opens next, and the level you
 chose in the game's question (repeated for a minute so that it is sure to arrive).
@@ -894,7 +922,7 @@ The 3D map follows your place on its own route by height as well (a yard above o
 as four beside it), so it does not hide the way up either, and works out a new route when you
 are a floor off the one shown.
 
-Not there: a marker dropped on the 3D map needs `/maplink route` to reach the game; nothing is
+Not there: a marker dropped on the 3D map needs `/atlas route` to reach the game; nothing is
 drawn on the minimap inside dungeons, where the game does not tell addons where you are; and
 the arrow is a compass on the screen, not a marker standing in the world.
 
@@ -934,10 +962,10 @@ into one answer, with nothing to set up:
 | --- | --- |
 | **The timetables** (`viewer/transit.json`; the addon's copy is written from it by `tools/make-transit-lua.mjs`) | How long each line's round takes, each leg, each stop, and where the craft is every couple of seconds of a leg: eleven boat and zeppelin lines and both tram cars as DockWatch's players recorded them in this game (MIT licence), and the Feathermoon ferry from the game's own path and the round Nauticus measured for it (its times are rough). The game's own path of each line is where the craft is drawn; all 695 recorded moments of the eleven lines lie on those paths. |
 | **Your own rides** | Something is carrying you when you move without moving yourself. Carried along a line's track where the boat is under way, each spot you pass says how long ago it left; five of them over five seconds that agree to the second are when it left, wherever you boarded. |
-| **Other players' sightings** | Three addons pass sightings from player to player, each in its own way, and each is read as that addon writes it, without being installed: **DockWatch** (the moment a boat left a dock, by where the dock is; over its own hidden channel, the guild and whispers), **ForeverTransport** (when it arrived, by a line's number) and **Nauticus** (how far into its round a boat is as the message is sent). The addon **only listens**: it never sends, so it cannot put a wrong time into anyone's timers. `/maplink boats listen` turns the listening off. |
+| **Other players' sightings** | Three addons pass sightings from player to player, each in its own way, and each is read as that addon writes it, without being installed: **DockWatch** (the moment a boat left a dock, by where the dock is; over its own hidden channel, the guild and whispers), **ForeverTransport** (when it arrived, by a line's number) and **Nauticus** (how far into its round a boat is as the message is sent). The addon **only listens**: it never sends, so it cannot put a wrong time into anyone's timers. `/atlas boats listen` turns the listening off. |
 | **The server's restarts** | A restart starts every boat afresh. The warning the server gives in chat ("restart in 15:00") is read, and a ride of your own that no longer fits a well-founded timetable says one has happened. |
 
-**Voices that differ** (`addon/ForeverMapLink/Transit.lua`). Sightings that agree (give or
+**Voices that differ** (`addon/AzerothAtlas/Transit.lua`). Sightings that agree (give or
 take what a round's own uncertainty allows) make a timetable. Each is weighed by how exact it
 is: your own ride to under a second, a DockWatch sighting to a second and a half, a
 ForeverTransport arrival to three, a Nauticus one to four (it is counted on from the moment of
@@ -957,7 +985,7 @@ the wait, up to half a round unsure, where it says nothing).
   page says so ("the boat from Booty Bay to Ratchet, it leaves in 2 min 30 s").
 - **In the game**, the step that waits for a boat counts down to it second by second
   ("Boat to Ratchet 6:10 · leaves in 4:07"), in the step list and under the arrow, and once
-  you are aboard to when you get there ("arrives in 1:32"). `/maplink boats` lists every line
+  you are aboard to when you get there ("arrives in 1:32"). `/atlas boats` lists every line
   that is timed: when it leaves each of its stops, what that rests on, and when it was last
   seen.
 - **On the 3D map**, every timed craft is shown where it is this moment, moving along its line,
@@ -999,12 +1027,12 @@ sees such packs in the game's AddOns folder and offers **Convert guide packs**. 
 the one line (`server/addon.js`):
 
 ```
-## RequiredDeps: Guidelime, QuestieDB        becomes        ## RequiredDeps: ForeverMapLink, QuestieDB
+## RequiredDeps: Guidelime, QuestieDB        becomes        ## RequiredDeps: AzerothAtlas, QuestieDB
                                                              ## OptionalDeps: Guidelime
-                                                             ## X-ForeverMapLink-Converted: by the 3D map. Before: RequiredDeps: Guidelime, QuestieDB
+                                                             ## X-AzerothAtlas-Converted: by the 3D map. Before: RequiredDeps: Guidelime, QuestieDB
 ```
 
-The pack then needs Forever Map Link, and names Guidelime only as an addon to load after if it
+The pack then needs Azeroth Atlas, and names Guidelime only as an addon to load after if it
 is there. Nothing else of a pack is touched: its guides are the files its maker wrote. Restart
 the game afterwards (leave it altogether: which addon needs which is read when it starts). A
 pack you install or update later is as its maker wrote it again; the page offers it again
@@ -1021,9 +1049,9 @@ not load.
   copied (Guidelime's saved file is its own): back in Guidelime, the steps the game itself can
   tell are done are done, and a step you ticked by hand in the addon's window is not.
 
-A converted pack needs Forever Map Link switched on, also for Guidelime to get its guides.
+A converted pack needs Azeroth Atlas switched on, also for Guidelime to get its guides.
 
-**The window** (`addon/ForeverMapLink/GuideWindow.lua`): the steps of the guide, the ones you are
+**The window** (`addon/AzerothAtlas/GuideWindow.lua`): the steps of the guide, the ones you are
 on bright and scrolled into view, with what a quest still asks for listed under its step. Each
 step has a box: tick a step off yourself, or take a tick away. Drag the window by its title and
 size it by its corner. **Guides** in its title opens the list of every guide the installed packs
@@ -1034,11 +1062,11 @@ use the item it names; keys can be bound to the first of each, and to showing th
 
 | In the game | |
 | --- | --- |
-| `/maplink guide` | the window, shown or hidden (`/lime` does the same while Guidelime is not switched on) |
-| `/maplink guides` | the list of guides, and the settings |
-| `/maplink guide skip` | tick off the steps you are on |
-| `/maplink guide reset` | take every tick of this guide away |
-| `/maplink guide lock` | the window stays where it is (again: it can be moved) |
+| `/atlas guide` | the window, shown or hidden (`/lime` does the same while Guidelime is not switched on) |
+| `/atlas guides` | the list of guides, and the settings |
+| `/atlas guide skip` | tick off the steps you are on |
+| `/atlas guide reset` | take every tick of this guide away |
+| `/atlas guide lock` | the window stays where it is (again: it can be moved) |
 
 **What a step is, and when it is done** (`GuideBook.lua` reads the guides, `GuideSteps.lua`
 follows them). Every code Guidelime knows is read the way Guidelime reads it, and the rules are
@@ -1079,12 +1107,23 @@ The map can show where you are in real time, along with your party members.
 
 Addons cannot talk to other programs, so this works in two halves:
 
-1. The **ForeverMapLink** addon (`addon/ForeverMapLink`, installed into the game's AddOns folder
+1. The **AzerothAtlas** addon (`addon/AzerothAtlas`, installed into the game's AddOns folder
    with the **Install addon** button) draws a thin strip of coloured squares along the top-left
    edge of the game window (6 px tall; 348 px wide when you are alone with no waypoint, 676 px at
    most).
-   `/maplink` in game turns it on or off. After the map updates the addon (the button turns
+   `/atlas` in game turns it on or off. After the map updates the addon (the button turns
    orange), type `/reload` in game; until then the older addon keeps working.
+
+   The addon's commands all begin with `/atlas`. If another addon has that word already (there
+   is an old and well-known one called Atlas), it is left to it, the addon says so once when you
+   log in, and `/azatlas` does the same everywhere this page says `/atlas`. (`/azatlas` and
+   `/azerothatlas` always work.)
+
+   Before 14 November 2026 the addon was called Forever Map Link. A copy under that name goes
+   on working with the map until it is replaced: close the game, press **Update addon**, start
+   the game. What it had saved (your settings, your place in your guides) and the guide packs
+   converted for it are carried over to the new name, and the old copy is removed
+   (`server/legacy.js`).
 2. While a map page is open, the server runs a small helper (`server/strip-reader.cs`, compiled
    on first use with the C# compiler that ships with Windows) that reads that row of pixels
    about 18 times a second and decodes it.
@@ -1098,7 +1137,7 @@ which needs the game's top-left corner uncovered.
 
 Either way it is only picture capture. It does not read the game's memory, does not modify the
 game, and sends it no input; nothing leaves this computer. The only thing it writes on the
-game's side is its own addon: the ForeverMapLink folder, and the route mailboxes beside it (see
+game's side is its own addon: the AzerothAtlas folder, and the route mailboxes beside it (see
 "The same route in the game"). It is still a third-party tool outside what the game officially
 supports, so use it at your own discretion.
 
@@ -1400,7 +1439,7 @@ The map is built from your own installed game. What else it draws on, and where 
 | NPC heights, what quests ask for, drop rates, creature health and respawn times | **cmangos classic-db** | Downloaded when the map is built, kept in the map data. Not included |
 | The layout of the game's data tables | **WoWDBDefs** (wowdev) | Each definition is fetched the first time it is needed, kept in `extractor/dbd/`. Not included |
 | The doorways between maps (`extractor/doorways.json`) | **ShortestPathForever** by cjber, `Data/Portals.lua` (GPL-3.0-or-later) | Included; the addon's own, newer list is read instead where it is installed |
-| The timetables of boats, zeppelins and the tram (`viewer/transit.json`, `addon/ForeverMapLink/TransitData.lua`) | **DockWatch** by Wyveryx (MIT), recorded in the game; **NauticusClassicResurrected** (MIT) by way of **ForeverTransport** by Stilo | Included |
+| The timetables of boats, zeppelins and the tram (`viewer/transit.json`, `addon/AzerothAtlas/TransitData.lua`) | **DockWatch** by Wyveryx (MIT), recorded in the game; **NauticusClassicResurrected** (MIT) by way of **ForeverTransport** by Stilo | Included |
 | Guides in the game | Guide packs written for **Guidelime** | Read from your game's AddOns folder. Not included |
 
 ## Known limits

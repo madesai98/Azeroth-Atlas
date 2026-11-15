@@ -11,7 +11,14 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 export const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const CONFIG_FILE = path.join(PROJECT_ROOT, 'config.json');
+/**
+ * Where what is yours is kept: config.json, and the map data unless config.json names another
+ * place. The map tool's own folder - except in the installed application, which keeps them
+ * outside itself (app/main.cjs says where), so that a new copy of the application can take the
+ * place of an old one and nothing is lost.
+ */
+export const HOME = process.env.AZEROTH_ATLAS_HOME ? path.resolve(process.env.AZEROTH_ATLAS_HOME) : PROJECT_ROOT;
+export const CONFIG_FILE = path.join(HOME, 'config.json');
 
 const DEFAULTS = {
   // Folder that contains ".build.info" (the Battle.net game folder, not the _forever_ subfolder).
@@ -20,7 +27,7 @@ const DEFAULTS = {
   // Battle.net product code of the installed game flavour.
   product: 'wowf',
   // Where extracted map data is written. Never inside the game folder.
-  dataDir: path.join(PROJECT_ROOT, 'data'),
+  dataDir: path.join(HOME, 'data'),
   port: 5173,
   // Worker threads used by the extractor (0 = automatic).
   workers: 0,
@@ -119,7 +126,7 @@ export function loadConfig(file = CONFIG_FILE) {
     cfg.installRoot = found[0];
     cfg.foundGame = true; // (found, not named in config.json)
   }
-  cfg.dataDir = path.resolve(PROJECT_ROOT, cfg.dataDir);
+  cfg.dataDir = path.resolve(HOME, cfg.dataDir);
   const gameData = path.resolve(cfg.installRoot);
   if (cfg.dataDir.toLowerCase().startsWith(gameData.toLowerCase() + path.sep)) {
     throw new Error('dataDir must not be inside the game folder');

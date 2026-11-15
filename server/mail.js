@@ -1,13 +1,13 @@
 // The route's way into the game.
 //
 // An addon cannot be sent anything while the game runs, but it can load another addon on demand,
-// and the game reads that addon's file from the disk at that moment. So next to the ForeverMapLink
-// addon sits a row of tiny load-on-demand addons, the "mailboxes" (ForeverMapLink_Mail001, 002,
+// and the game reads that addon's file from the disk at that moment. So next to the AzerothAtlas
+// addon sits a row of tiny load-on-demand addons, the "mailboxes" (AzerothAtlas_Mail001, 002,
 // ...), each holding one Lua file. This module keeps the next few of them filled with the route
 // as it is now; the addon opens one when it wants the route (each can be opened once per login or
 // /reload) and says through the strip which one it will open next and which delivery it last read.
 //
-// Only folders named ForeverMapLink_Mail### in the game's AddOns folder are ever written.
+// Only folders named AzerothAtlas_Mail### in the game's AddOns folder are ever written.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -19,7 +19,9 @@ const STEP_LIMIT = 12;          // steps of a journey listed in one delivery
 const ALSO_LIMIT = 3200;        // numbers' worth of the lines that are only shown (on other continents, across the sea)
 const ALSO_PIECES = 60;         // of those lines, at most
 const LEVEL_LIMIT = 6;          // levels of one spot offered to choose between
-export const mailName = (i) => `ForeverMapLink_Mail${String(i).padStart(3, '0')}`;
+export const NAME = 'AzerothAtlas'; // the addon the mailboxes belong to
+/** A mailbox's folder. (prefix: the addon it belongs to - another only while a copy from before the addon's new name is still the one installed: see legacy.js) */
+export const mailName = (i, prefix = NAME) => `${prefix}_Mail${String(i).padStart(3, '0')}`;
 
 // (cut to length first, so that an escape is never cut in half)
 const luaString = (s) => `"${String(s).slice(0, 900).replace(/[\x00-\x1f\x7f]/g, ' ').replace(/[\\"]/g, '\\$&')}"`;
@@ -33,23 +35,27 @@ export function mailFiles(i, interfaceVersion) {
   return {
     [`${mailName(i)}.toc`]: [
       `## Interface: ${interfaceVersion}`,
-      `## Title: Forever Map Link |cff888888(route mailbox ${no})|r`,
-      '## Notes: One delivery of the route from the 3D map. Forever Map Link opens it when it needs one; there is nothing to turn on or off here.',
-      '## Group: ForeverMapLink',
-      '## Dependencies: ForeverMapLink',
+      `## Title: Azeroth Atlas |cff888888(route mailbox ${no})|r`,
+      '## Notes: One delivery of the route from the 3D map. Azeroth Atlas opens it when it needs one; there is nothing to turn on or off here.',
+      '## Group: AzerothAtlas',
+      '## Dependencies: AzerothAtlas',
       '## LoadOnDemand: 1',
       '',
       'mail.lua',
       '',
     ].join('\r\n'),
-    'mail.lua': `ForeverMapLinkMail = { v = 1, box = ${i}, written = 0, at = 0, state = "idle" }\n`,
+    'mail.lua': `AzerothAtlasMail = { v = 1, box = ${i}, written = 0, at = 0, state = "idle" }\n`,
   };
 }
 
 export class RouteMail {
-  /** @param addonsDir the game's Interface/AddOns folder (or null when the game was not found) */
-  constructor(addonsDir) {
+  /**
+   * @param addonsDir the game's Interface/AddOns folder (or null when the game was not found)
+   * @param prefix    the name of the addon whose mailboxes these are
+   */
+  constructor(addonsDir, prefix = NAME) {
     this.dir = addonsDir;
+    this.prefix = prefix;
     this.size = 0;
     this.report = null;   // what the addon last said: { session, next, size, have, flags }
     this.target = null;   // the waypoint the game reports: { tk, tm, tx, ty } or null
@@ -69,9 +75,15 @@ export class RouteMail {
   /** How many mailboxes are installed. */
   count() {
     let n = 0;
-    if (this.dir) while (n < 999 && fs.existsSync(path.join(this.dir, mailName(n + 1), 'mail.lua'))) n++;
+    if (this.dir) while (n < 999 && fs.existsSync(path.join(this.dir, mailName(n + 1, this.prefix), 'mail.lua'))) n++;
     this.size = n;
     return n;
+  }
+
+  /** The addon has been installed afresh (perhaps under its new name): its mailboxes are the ones written from now on. */
+  use(prefix = NAME) {
+    if (prefix !== this.prefix) { this.prefix = prefix; this.filled = ''; this.boxes.clear(); this.stale = 0; }
+    return this.count();
   }
 
   /** From the strip: the addon's own account of its mailboxes. */
@@ -190,7 +202,7 @@ export class RouteMail {
       if (!answers) return { state: R ? 'pending' : 'idle', ...T, lua: '' };
       return { state: R.state, ...T, lua: this.#routeLua(R) };
     }
-    // No waypoint in the game: what the map shows of its own (a marker dropped on it), for "/maplink route".
+    // No waypoint in the game: what the map shows of its own (a marker dropped on it), for "/atlas route".
     if (R && !R.game && R.at) return { state: R.state, tk: 0, tm: 0, tx: 0, ty: 0, lua: this.#routeLua(R) };
     return { state: R ? 'none' : 'idle', tk: 0, tm: 0, tx: 0, ty: 0, lua: R ? ` text = ${luaString('no waypoint')},` : '' };
   }
@@ -247,8 +259,8 @@ export class RouteMail {
       if (put.written.length > 12) put.written.shift();
       this.boxes.set(i, put);
       if (this.boxes.size > 40) this.boxes.delete(this.boxes.keys().next().value);
-      const file = path.join(this.dir, mailName(i), 'mail.lua');
-      const lua = `ForeverMapLinkMail = { v = 1, box = ${i}, written = ${this.written}, at = ${at}, ${text} }\n`;
+      const file = path.join(this.dir, mailName(i, this.prefix), 'mail.lua');
+      const lua = `${this.prefix}Mail = { v = 1, box = ${i}, written = ${this.written}, at = ${at}, ${text} }\n`;
       try {
         // (whole or not at all: the game may open the file at any moment)
         const tmp = `${file}.new`;

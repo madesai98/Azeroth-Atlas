@@ -1,4 +1,4 @@
--- Forever Map Link: when the boats, zeppelins and tram run.
+-- Azeroth Atlas: when the boats, zeppelins and tram run.
 --
 -- A boat sails the same round over and over, to the second, until the server restarts. So one
 -- moment at which it was seen to leave a dock fixes its whole timetable: when it is next at
@@ -25,10 +25,10 @@
 -- The 3D map is told what is known (through the strip's messages), counts boats and trams into
 -- the journeys it plans, and shows them moving. The step list counts down to a departure.
 --
--- /maplink boats           what is known, line by line
--- /maplink boats listen    other players' sightings: taken, or not
+-- /atlas boats           what is known, line by line
+-- /atlas boats listen    other players' sightings: taken, or not
 
-local shared = ForeverMapLink
+local shared = AzerothAtlas
 if type(shared) ~= "table" or type(shared.TransitData) ~= "table" then return end
 
 local floor, ceil, abs, sqrt, max, min = math.floor, math.ceil, math.abs, math.sqrt, math.max, math.min
@@ -50,7 +50,7 @@ local PREFIX_DW, PREFIX_FT, PREFIX_NAU = "DockWatch2", "FTrans2", "NauticSync"
 local T = { lines = {}, rev = 0 }
 shared.Transit = T
 
-local function say(msg) print("|cff7fd4ffForever Map Link|r: " .. msg) end
+local function say(msg) print("|cff7fd4ffAzeroth Atlas|r: " .. msg) end
 local function secret(v) return issecretvalue ~= nil and issecretvalue(v) end
 local function plain(v)
   if v == nil or secret(v) or type(v) ~= "number" or v ~= v or v == math.huge or v == -math.huge then return nil end
@@ -131,16 +131,16 @@ local function ByFt(id)
 end
 
 -- ---- what has been seen ----------------------------------------------------------------------------
--- Kept with the addon's settings, for every character: ForeverMapLinkDB.transit = { sight =
+-- Kept with the addon's settings, for every character: AzerothAtlasDB.transit = { sight =
 -- { [line] = { { t (when it left stop s, or got there), s, arr (true: got there), src, who, lane,
 -- e (when that boat left stop 1 on that round) } } }, restart (the server restarted then, or
 -- will), before (the restart known before that one), listen }.
 local function Store()
-  if type(ForeverMapLinkDB) ~= "table" then ForeverMapLinkDB = {} end
-  local s = ForeverMapLinkDB.transit
+  if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end
+  local s = AzerothAtlasDB.transit
   if type(s) ~= "table" then
     s = {}
-    ForeverMapLinkDB.transit = s
+    AzerothAtlasDB.transit = s
   end
   if type(s.sight) ~= "table" then s.sight = {} end
   return s
@@ -670,7 +670,7 @@ local function Listen(on)
   end
 end
 
--- ---- what the 3D map is told (through the strip's messages, see ForeverMapLink.lua) -----------------
+-- ---- what the 3D map is told (through the strip's messages, see AzerothAtlas.lua) -----------------
 -- { key, 9 bytes } each: how far the server's clock is from this computer's (key 8), and, three
 -- lines a round in turn, each line's timetable (key 15 + its number): what it rests on, the
 -- moment its newest boat left stop 1 (hundredths of a second), how far its gap is off the
@@ -755,7 +755,7 @@ function shared.TransitWord(word, rest)
 end
 
 -- ---- starting ------------------------------------------------------------------------------------
-local frame = CreateFrame("Frame", "ForeverMapLinkTransit", UIParent)
+local frame = CreateFrame("Frame", "AzerothAtlasTransit", UIParent)
 local since, applied = 0, nil
 frame:SetScript("OnUpdate", function(_, dt)
   Tick()
@@ -764,7 +764,7 @@ frame:SetScript("OnUpdate", function(_, dt)
   since = 0
   pcall(Sample)
   -- a restart that was announced has come: what was seen before it no longer holds
-  local restart = type(ForeverMapLinkDB) == "table" and type(ForeverMapLinkDB.transit) == "table" and ForeverMapLinkDB.transit.restart
+  local restart = type(AzerothAtlasDB) == "table" and type(AzerothAtlasDB.transit) == "table" and AzerothAtlasDB.transit.restart
   if restart and restart ~= applied then
     local now = T.Now()
     if now >= restart then
@@ -799,7 +799,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
   end
 end)
 
--- (for the tests, and for a look from the game with /dump ForeverMapLink.Transit.Peek())
+-- (for the tests, and for a look from the game with /dump AzerothAtlas.Transit.Peek())
 function T.Peek()
   return { Solve = Solve, Sample = Sample, TryFix = TryFix, FromDockWatch = FromDockWatch, FromForeverTransport = FromForeverTransport,
     FromNauticus = FromNauticus, OnAddonMessage = OnAddonMessage, OnSystemMessage = OnSystemMessage, Store = Store, LegBetween = LegBetween, Tick = Tick }

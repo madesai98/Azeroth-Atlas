@@ -1,5 +1,5 @@
 // The route, handed to the game: the same route this map draws, seen from above, for the
-// ForeverMapLink addon to draw on the game's world map and minimap.
+// AzerothAtlas addon to draw on the game's world map and minimap.
 //
 // Whenever the route or the waypoint changes, what is shown here is sent to the local server
 // (as a flat track: stretches of x, y points), which leaves it where the addon can pick it up
@@ -244,6 +244,6 @@ export class InGameRoute {
     if (m.showing && m.read) return `In the game: showing this route.${left}`;
     if (m.showing) return `In the game: showing the route it last fetched.${left}`;
     if (m.waiting) return `In the game: fetching the route.${left}`;
-    return m.state === 'route' ? `In the game: ready (shown when your waypoint changes, or /maplink route).${left}` : '';
+    return m.state === 'route' ? `In the game: ready (shown when your waypoint changes, or /atlas route).${left}` : '';
   }
 }

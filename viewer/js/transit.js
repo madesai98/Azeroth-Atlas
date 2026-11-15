@@ -4,7 +4,7 @@
 // each leg and each stop, and where the craft is every couple of seconds of a leg. A craft
 // sails that round to the second until the server restarts, so one moment at which it was seen
 // to leave a stop says where it is at any time. Those moments come from the game, by way of the
-// addon (addon/ForeverMapLink/Transit.lua): your own rides, and other players' sightings as
+// addon (addon/AzerothAtlas/Transit.lua): your own rides, and other players' sightings as
 // DockWatch, ForeverTransport and Nauticus pass them on, cross-checked there.
 //
 // Here that becomes: when a craft next leaves a stop (for the journeys route.js plans), and

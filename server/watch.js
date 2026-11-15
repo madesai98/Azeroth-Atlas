@@ -47,6 +47,7 @@ function start() {
   mine.on('message', (m) => {
     if (child !== mine || typeof m?.busy !== 'boolean') return;
     busy = m.busy;
+    process.send?.({ busy }); // (the application, where it is what runs this, waits with starting itself again too)
     if (!busy && waiting) restart();
   });
   mine.on('exit', (code) => {
@@ -106,7 +107,21 @@ try {
   watchers.push(fs.watch(path.dirname(CONFIG), (event, name) => { if (name && name.toLowerCase() === path.basename(CONFIG).toLowerCase()) changed(); }));
 } catch { /* the settings file is read when the server starts */ }
 
-const quit = () => { quitting = true; child?.kill(); process.exit(0); };
+// (asked first, so that the server can put its helpers away; made to, should it not answer)
+const quit = () => {
+  if (quitting) return;
+  quitting = true;
+  const mine = child;
+  if (!mine) process.exit(0);
+  mine.once('exit', () => process.exit(0));
+  try { mine.send({ stop: true }); } catch { /* it is going anyway */ }
+  setTimeout(() => { try { mine.kill(); } catch { /* gone */ } process.exit(0); }, 2000);
+};
+// Run by the application (app/main.cjs): told to go when its window is closed, and not left behind should it go without saying.
+if (process.send) {
+  process.on('message', (m) => { if (m?.quit) quit(); });
+  process.on('disconnect', quit);
+}
 process.on('SIGINT', quit);
 process.on('SIGTERM', quit);
 start();

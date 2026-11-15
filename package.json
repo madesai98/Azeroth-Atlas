@@ -1,13 +1,21 @@
 {
   "name": "azeroth-atlas",
+  "productName": "Azeroth Atlas",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Azeroth Atlas: a local 3D map of the WoW Forever world, built from your own installed game.",
+  "main": "app/main.cjs",
   "scripts": {
     "start": "node server/watch.js",
     "serve": "node server/server.js",
-    "extract": "node extractor/extract.js"
+    "extract": "node extractor/extract.js",
+    "app": "node tools/app.mjs",
+    "dist": "node tools/dist.mjs"
   },
-  "repository": "github:madesai98/Azeroth-Atlas"
+  "repository": "github:madesai98/Azeroth-Atlas",
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^45.3.2"
+  }
 }

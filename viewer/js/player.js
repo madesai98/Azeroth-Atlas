@@ -1,5 +1,5 @@
 // Live link to the game: where you and your party are.
-// Data comes from the local server (server/tracker.js), which reads the ForeverMapLink addon's
+// Data comes from the local server (server/tracker.js), which reads the AzerothAtlas addon's
 // coded strip from the game window. How high you are is worked out in height.js.
 //
 // The following camera is here too. With "Follow me" on, the camera is tied to your character:

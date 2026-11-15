@@ -1,7 +1,0 @@
-<Bindings>
-	<Binding name="CLICK ForeverMapLinkClearButton:LeftButton" header="BINDING_HEADER_FOREVERMAPLINK" category="ADDONS"/>
-	<Binding name="CLICK ForeverMapLinkFetchButton:LeftButton" category="ADDONS"/>
-	<Binding name="CLICK ForeverMapLinkGuideToggle:LeftButton" category="ADDONS"/>
-	<Binding name="CLICK ForeverMapLinkGuideTarget1:LeftButton" category="ADDONS"/>
-	<Binding name="CLICK ForeverMapLinkGuideItem1:LeftButton" category="ADDONS"/>
-</Bindings>

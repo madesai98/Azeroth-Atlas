@@ -887,9 +887,9 @@ function showPlayer() {
     else if (s.reason === 'stalled') msg = 'The game window has stopped updating';
     else if (s.reason === 'server') msg = 'No word from the map server (it is starting again, or has been closed)';
     // Reading the game window itself works with other windows in front; reading the screen does not.
-    else if (s.capture === 'window') msg = s.reason === 'covered' || s.reason === 'checksum' ? 'Cannot read the strip (is something drawn over the top-left of the game?)' : 'No signal: is the addon enabled (/maplink) and your character in the world?';
+    else if (s.capture === 'window') msg = s.reason === 'covered' || s.reason === 'checksum' ? 'Cannot read the strip (is something drawn over the top-left of the game?)' : 'No signal: is the addon enabled (/atlas) and your character in the world?';
     else if (s.reason === 'covered' || s.reason === 'checksum') msg = 'Strip partly hidden (something covering the top-left of the game?)';
-    else msg = 'No signal: is the addon enabled (/maplink) and the game visible?';
+    else msg = 'No signal: is the addon enabled (/atlas) and the game visible?';
   } else if (s.status === 'error') { cls = 'bad'; msg = `Player link problem: ${s.reason}`; }
   else msg = 'Player link: starting…';
   dot.className = `dot ${cls}`;
@@ -1160,7 +1160,8 @@ async function refreshAddon(what) {
     const st = await res.json();
     if (st.error) throw new Error(st.error);
     app.addon = st;
-    if (what === 'install') msg.textContent = !before?.installed ? 'Addon installed: restart the game so it loads (new addons are only picked up at start).'
+    if (what === 'install') msg.textContent = st.carried ? `Addon installed under its new name, Azeroth Atlas. Carried over from the old one: your settings and guide progress (${st.carried.saved} file${st.carried.saved === 1 ? '' : 's'})${st.carried.packs.length ? `, ${st.carried.packs.length} converted guide pack${st.carried.packs.length === 1 ? '' : 's'}` : ''}. Start the game.`
+      : !before?.installed ? 'Addon installed: restart the game so it loads (new addons are only picked up at start).'
       : st.restart ? 'Addon updated. Restart the game once (leave it altogether, not /reload): this update brings new files, and the game only finds those when it starts.'
       : 'Addon updated: type /reload in the game.';
     if (what === 'guides') msg.textContent = `Converted ${packs(st.done?.length ?? 0)}. Restart the game once (leave it altogether, not /reload): it reads which addon needs which only when it starts.`;
@@ -1171,14 +1172,16 @@ async function refreshAddon(what) {
   const g = a?.installed ? a.guides : null;
   const needs = g?.needs?.length ?? 0, converted = g?.converted?.length ?? 0;
   $('guideMsg').textContent = needs ? `Guides: ${packs(needs)} only ${needs === 1 ? 'loads' : 'load'} with Guidelime switched on. Converted, ${needs === 1 ? 'it runs' : 'they run'} in the addon's own guide window, with or without Guidelime.`
-    : converted ? `Guides: ${packs(converted)} ${converted === 1 ? 'runs' : 'run'} in the addon's own guide window (/maplink guide).${g.guidelime ? ' While Guidelime is switched on in the game, it runs them instead.' : ''}`
+    : converted ? `Guides: ${packs(converted)} ${converted === 1 ? 'runs' : 'run'} in the addon's own guide window (/atlas guide).${g.guidelime ? ' While Guidelime is switched on in the game, it runs them instead.' : ''}`
     : '';
   $('guideMsg').title = needs ? `To convert: ${g.needs.join(', ')}` : converted ? `Converted: ${g.converted.join(', ')}` : '';
   $('guideRow').style.display = needs ? '' : 'none';
   $('btnGuides').textContent = `Convert ${packs(needs)}`;
   if (a?.available && !a.current) {
     btn.style.display = '';
-    btn.textContent = a.installed ? 'Update addon' : 'Install addon';
+    btn.textContent = a.legacy ? 'Update addon (it has a new name)' : a.installed ? 'Update addon' : 'Install addon';
+    // (a copy from before the addon's new name: it goes on working, and is replaced while the game is closed)
+    if (a.legacy && !what) msg.textContent = 'The addon has a new name, Azeroth Atlas. The one in the game goes on working until you replace it: close the game, press Update addon, start the game again. Your settings and guide progress are carried over.';
     btn.className = 'attention';
     // (not to be missed in a section that is shut: opened once, when it first has something to say)
     if (!app.addonTold) { app.addonTold = true; document.querySelector('details.sec[data-sec="you"]').open = true; }

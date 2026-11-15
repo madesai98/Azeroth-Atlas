@@ -5,14 +5,15 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { loadConfig, PROJECT_ROOT, CONFIG_FILE } from '../extractor/config.js';
+import { loadConfig, readConfigFile, PROJECT_ROOT, CONFIG_FILE } from '../extractor/config.js';
 import { DATA_STAMP } from '../extractor/stamp.js';
 import { installedBuild } from '../extractor/casc/casc.js';
 import { findQuestieDb, questieStamp } from '../extractor/questie.js';
 import { PlayerTracker } from './tracker.js';
 import { addonStatus, installAddon, convertGuides, flavourFolder, addonsDir } from './addon.js';
 import { SeenStore } from './seen.js';
-import { RouteMail } from './mail.js';
+import { RouteMail, NAME as ADDON } from './mail.js';
+import { OLD as OLD_ADDON, legacyInstalled } from './legacy.js';
 import { Changes } from './changes.js';
 import { AppUpdate } from './appupdate.js';
 import { MIME, sendFile, safeJoin } from './http.js';
@@ -31,7 +32,10 @@ try { cfg = loadConfig(configFile); } catch (err) {
   if (err.code !== 'NO_GAME') throw err;
   // The game could not be found: the page asks where it is (setup.js), and this starts again once it has been told.
   const { runSetup } = await import('./setup.js');
-  const app = new AppUpdate(PROJECT_ROOT, { busy: (on) => { updating = on; busy(); } });
+  // (whether it may update itself is in the settings all the same, and holds here as anywhere)
+  let auto = true;
+  try { auto = readConfigFile(configFile).autoUpdate !== false; } catch { /* settings that cannot be read: asked about on the page */ }
+  const app = new AppUpdate(PROJECT_ROOT, { auto, busy: (on) => { updating = on; busy(); } });
   app.start();
   await runSetup(err, configFile, app);
 }
@@ -40,7 +44,9 @@ appUpdate.start();
 // Live player link: only watches the screen while a map page is open (see tracker.js).
 // The route's way into the game: mailboxes beside the addon, kept filled while you play (see mail.js).
 // ("ingame": false in config.json switches it off)
-const mail = new RouteMail(cfg.ingame === false ? null : addonsDir(cfg));
+// (a copy of the addon from before its new name, not yet replaced: its mailboxes are the ones the game opens - see legacy.js)
+const oldAddon = legacyInstalled(addonsDir(cfg)) && !fs.existsSync(path.join(addonsDir(cfg), ADDON, `${ADDON}.toc`));
+const mail = new RouteMail(cfg.ingame === false ? null : addonsDir(cfg), oldAddon ? OLD_ADDON : ADDON);
 const tracker = new PlayerTracker({ pathHint: flavourFolder(cfg) ?? '', ...(cfg.tracker ?? {}), mail });
 // Where NPCs really stand, as you have seen for yourself in the game (see seen.js).
 const seen = new SeenStore(cfg.dataDir);
@@ -56,6 +62,7 @@ function startUpdate(force) {
   const args = [path.join(PROJECT_ROOT, 'extractor', 'extract.js'), '--json'];
   if (force) args.push('--force');
   const child = spawn(process.execPath, args, { cwd: PROJECT_ROOT, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  job.child = child;
   busy(); // (not to be started again by watch.js in the middle of this)
   let pending = '';
   child.stdout.on('data', (chunk) => {
@@ -102,7 +109,7 @@ function status() {
     extracted: manifest ? { build: manifest.build, revision: manifest.revision, extractedAt: manifest.extractedAt, formatVersion: manifest.formatVersion } : null,
     updateAvailable: newBuild || newCreatureData || newTool,
     updateReason: newBuild ? 'build' : newCreatureData ? 'creatures' : newTool ? 'tool' : null,
-    job,
+    job: { ...job, child: undefined },
     app: appUpdate.status(),
     game: { folder: cfg.installRoot, found: !!cfg.foundGame },
   };
@@ -202,8 +209,8 @@ const server = http.createServer((req, res) => {
       if (origin && new URL(origin).host !== req.headers.host) { res.writeHead(403); res.end(); return; }
     }
     try {
-      const st = install ? installAddon(cfg) : guides ? convertGuides(cfg) : addonStatus(cfg);
-      if (install) mail.count();
+      const st = install ? installAddon(cfg, { gameSeen: ['live', 'minimized', 'nosignal'].includes(tracker.state.status) }) : guides ? convertGuides(cfg) : addonStatus(cfg);
+      if (install) mail.use(ADDON);
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(st));
     } catch (err) {
@@ -236,7 +243,8 @@ const server = http.createServer((req, res) => {
 // Run by server/watch.js: asked to make way when the map's code has changed (the helper that
 // reads the game window is put away first), and not left behind should the watcher go.
 if (process.send) {
-  const leave = () => { try { tracker.stop(); } catch { /* going anyway */ } process.exit(0); };
+  // (a map build in hand goes with it: nobody would see it finish, and the next one picks up where it stopped)
+  const leave = () => { try { tracker.stop(); } catch { /* going anyway */ } try { if (job.running) job.child?.kill(); } catch { /* gone */ } process.exit(0); };
   process.on('message', (m) => { if (m?.stop) leave(); });
   process.on('disconnect', leave);
 }

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; script-src 'unsafe-inline'">
+<title>Azeroth Atlas</title>
+<style>
+  html, body { height: 100%; margin: 0; background: #0b0e14; color: #d7dde8; font: 14px/1.5 "Segoe UI", system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+  img { width: 96px; height: 96px; }
+  h1 { margin: 0; font-size: 22px; font-weight: 600; color: #ffd98a; }
+  #what { color: #8f9bb3; }
+  #said { display: none; max-width: 760px; margin: 6px 24px 0; padding: 10px 14px; border: 1px solid #263044; border-radius: 8px; background: #10141d; color: #c2cad8; font: 12px/1.5 Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+  #where { display: none; color: #6b7690; font-size: 12px; }
+</style>
+</head>
+<body>
+<img src="icon.png" alt="">
+<h1>Azeroth Atlas</h1>
+<div id="what">Starting the map…</div>
+<div id="said"></div>
+<div id="where"></div>
+<script>
+  // (told by the application when the map's server is taking its time: what the server has said so far)
+  window.say = (text, log) => {
+    document.getElementById('what').textContent = 'The map is taking a while to start. What its server has said:';
+    const said = document.getElementById('said');
+    said.textContent = text || '(nothing yet)';
+    said.style.display = 'block';
+    const where = document.getElementById('where');
+    where.textContent = 'All of it: ' + log;
+    where.style.display = 'block';
+  };
+</script>
+</body>
+</html>

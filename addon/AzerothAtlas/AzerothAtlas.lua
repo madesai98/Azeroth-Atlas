@@ -1,11 +1,11 @@
--- Forever Map Link
+-- Azeroth Atlas
 -- Shows your character (and your party), where you are heading and how you can travel to the
 -- local "WoW Forever 3D Map" viewer.
 --
 -- Addons cannot talk to other programs, so the data is drawn as a thin strip of coloured
 -- squares along the top-left edge of the game window, and the map's local server reads that
 -- strip off the screen. Nothing is sent over the network and the game is not modified.
--- Type /maplink to turn the strip on or off (/maplink help lists what else it can be told).
+-- Type /atlas to turn the strip on or off (/atlas help lists what else it can be told).
 --
 -- Strip format (must match server/strip.js). Squares are BLOCK_W x BLOCK_H physical pixels and
 -- each shows one base-8 digit as a colour: red = 4, green = 2, blue = 1 (black = 0, white = 7).
@@ -66,7 +66,7 @@ local strbyte, strchar = string.byte, string.char
 local TWO_PI = 2 * math.pi
 local PARTY_UNITS = { "party1", "party2", "party3", "party4" }
 
-local strip = CreateFrame("Frame", "ForeverMapLinkStrip", WorldFrame)
+local strip = CreateFrame("Frame", "AzerothAtlasStrip", WorldFrame)
 strip:SetFrameStrata("TOOLTIP")
 strip:SetFrameLevel(9000)
 
@@ -136,8 +136,8 @@ local function clamp(v, max)
 end
 
 -- What this addon's other file (Route.lua, the route drawn in the game) reads and calls.
-ForeverMapLink = ForeverMapLink or {}
-local shared = ForeverMapLink
+AzerothAtlas = AzerothAtlas or {}
+local shared = AzerothAtlas
 
 -- ---- what we know ---------------------------------------------------------------------------
 -- (world, north, west: where you are in yards, for Route.lua; the rest is as the strip sends it)
@@ -178,11 +178,11 @@ function shared.ClearHeading() heading.cleared = GetTime() end
 local quick = { on = false, map = 0, north = 0, west = 0, serial = 0 }
 function shared.Quick(map, north, west)
   quick.on, quick.map, quick.north, quick.west, quick.serial = true, map, north, west, quick.serial + 1
-  if type(ForeverMapLinkCharDB) == "table" then ForeverMapLinkCharDB.quick = { map = map, north = north, west = west } end
+  if type(AzerothAtlasCharDB) == "table" then AzerothAtlasCharDB.quick = { map = map, north = north, west = west } end
 end
 function shared.QuickOff()
   quick.on = false
-  if type(ForeverMapLinkCharDB) == "table" then ForeverMapLinkCharDB.quick = nil end
+  if type(AzerothAtlasCharDB) == "table" then AzerothAtlasCharDB.quick = nil end
 end
 
 -- A source names a place. `a b c` are three numbers that identify the place; the time kept is
@@ -469,7 +469,7 @@ local function KnownFlights()
       end
     end
   end
-  add(ForeverMapLinkCharDB and ForeverMapLinkCharDB.taxi)
+  add(AzerothAtlasCharDB and AzerothAtlasCharDB.taxi)
   add(type(ShortestPathForeverCharDB) == "table" and ShortestPathForeverCharDB.taxi)
   table.sort(ids)
   return ids
@@ -479,15 +479,15 @@ local function ScanFlightMaster()
   if not (C_TaxiMap and C_TaxiMap.GetAllTaxiNodes and GetTaxiMapID and NumTaxiNodes and TaxiNodeGetType) then return end
   local uiMap = GetTaxiMapID()
   local nodes = uiMap and C_TaxiMap.GetAllTaxiNodes(uiMap)
-  if type(nodes) ~= "table" or type(ForeverMapLinkCharDB) ~= "table" then return end
-  ForeverMapLinkCharDB.taxi = ForeverMapLinkCharDB.taxi or {}
+  if type(nodes) ~= "table" or type(AzerothAtlasCharDB) ~= "table" then return end
+  AzerothAtlasCharDB.taxi = AzerothAtlasCharDB.taxi or {}
   local count = NumTaxiNodes()
   for _, node in ipairs(nodes) do
     local slot, id = node.slotIndex, node.nodeID
     if type(slot) == "number" and type(id) == "number" and slot >= 1 and slot <= count then
       -- a point you have is CURRENT (where you stand) or REACHABLE; DISTANT means not discovered
       local kind = TaxiNodeGetType(slot)
-      if kind == "CURRENT" or kind == "REACHABLE" then ForeverMapLinkCharDB.taxi[id] = true end
+      if kind == "CURRENT" or kind == "REACHABLE" then AzerothAtlasCharDB.taxi[id] = true end
     end
   end
 end
@@ -741,7 +741,7 @@ local function BuildMessages()
   local bind = GetBindLocation and text(GetBindLocation())
   if bind then
     list[#list + 1] = { T_BIND, 0, bind }
-    local saved = ForeverMapLinkCharDB and ForeverMapLinkCharDB.bind
+    local saved = AzerothAtlasCharDB and AzerothAtlasCharDB.bind
     if type(saved) == "table" and saved.name == bind and saved.x and saved.y then
       list[#list + 1] = { T_BINDPOS, 0, Byte2(saved.map or 0) .. Byte3((saved.x + 32768) * 128) .. Byte3((saved.y + 32768) * 128) .. strchar(1) }
     end
@@ -960,13 +960,35 @@ strip:SetScript("OnUpdate", function(_, dt)
 end)
 
 local function Apply()
-  if ForeverMapLinkDB.enabled then
+  if AzerothAtlasDB.enabled then
     Layout()
     lastSum = -1
     strip:Show()
   else
     strip:Hide()
   end
+end
+
+-- /atlas is a short word, and another addon may have it (there is an old and well-known one
+-- called Atlas). /azatlas and /azerothatlas are this addon's whatever else is installed; /atlas
+-- is taken as well once every addon has loaded, unless another has it - and then it is said, once.
+local function ClaimSlash()
+  if type(SlashCmdList) ~= "table" then return end
+  for name in pairs(SlashCmdList) do
+    if name ~= "AZEROTHATLAS" then
+      local i = 1
+      while true do
+        local word = _G["SLASH_" .. tostring(name) .. i]
+        if type(word) ~= "string" then break end
+        if string.lower(word) == "/atlas" then
+          print("|cff7fd4ffAzeroth Atlas|r: another addon uses /atlas. Type /azatlas instead wherever /atlas is named.")
+          return
+        end
+        i = i + 1
+      end
+    end
+  end
+  SLASH_AZEROTHATLAS3 = "/atlas"
 end
 
 strip:RegisterEvent("PLAYER_LOGIN")
@@ -980,11 +1002,12 @@ for event in pairs(TALK_EVENTS) do pcall(strip.RegisterEvent, strip, event) end
 for event in pairs(QUEST_EVENTS) do pcall(strip.RegisterEvent, strip, event) end
 strip:SetScript("OnEvent", function(_, event)
   if event == "PLAYER_LOGIN" then
-    if type(ForeverMapLinkDB) ~= "table" then ForeverMapLinkDB = {} end
-    if ForeverMapLinkDB.enabled == nil then ForeverMapLinkDB.enabled = true end
-    if type(ForeverMapLinkCharDB) ~= "table" then ForeverMapLinkCharDB = {} end
+    pcall(ClaimSlash)
+    if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end
+    if AzerothAtlasDB.enabled == nil then AzerothAtlasDB.enabled = true end
+    if type(AzerothAtlasCharDB) ~= "table" then AzerothAtlasCharDB = {} end
     -- the quick waypoint you had before the /reload
-    local q = ForeverMapLinkCharDB.quick
+    local q = AzerothAtlasCharDB.quick
     if type(q) == "table" and type(q.map) == "number" and type(q.north) == "number" and type(q.west) == "number" then
       quick.on, quick.map, quick.north, quick.west, quick.serial = true, q.map, q.north, q.west, 1
     end
@@ -1005,22 +1028,22 @@ strip:SetScript("OnEvent", function(_, event)
     local x, y, _, map = UnitPosition("player")
     x, y, map = plain(x), plain(y), plain(map)
     local name = GetBindLocation and text(GetBindLocation())
-    if x and y and name and type(ForeverMapLinkCharDB) == "table" then
-      ForeverMapLinkCharDB.bind = { name = name, map = map or 0, x = x, y = y }
+    if x and y and name and type(AzerothAtlasCharDB) == "table" then
+      AzerothAtlasCharDB.bind = { name = name, map = map or 0, x = x, y = y }
     end
     messagesAt = -100
     return
   end
   if event == "PLAYER_ENTERING_WORLD" then quests.dirty = true; quests.retry = 3 end
-  if ForeverMapLinkDB then Apply() end
+  if AzerothAtlasDB then Apply() end
 end)
 
 -- (sends the next round of messages straight away: Route.lua calls it when its report changes)
 function shared.Tell() messagesAt = -100 end
 
-SLASH_FOREVERMAPLINK1 = "/maplink"
-SlashCmdList["FOREVERMAPLINK"] = function(msg)
-  -- /maplink clear, /maplink route, /maplink status: the route in the game (Route.lua)
+SLASH_AZEROTHATLAS1, SLASH_AZEROTHATLAS2 = "/azatlas", "/azerothatlas" -- (and /atlas: see ClaimSlash)
+SlashCmdList["AZEROTHATLAS"] = function(msg)
+  -- /atlas clear, /atlas route, /atlas status: the route in the game (Route.lua)
   local word, rest = "", ""
   if type(msg) == "string" then
     word, rest = string.match(string.lower(msg), "^%s*(%S*)%s*(%S*)")
@@ -1030,8 +1053,8 @@ SlashCmdList["FOREVERMAPLINK"] = function(msg)
     if shared.Command then pcall(shared.Command, word, rest) end
     return
   end
-  if type(ForeverMapLinkDB) ~= "table" then ForeverMapLinkDB = {} end
-  ForeverMapLinkDB.enabled = not ForeverMapLinkDB.enabled
+  if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end
+  AzerothAtlasDB.enabled = not AzerothAtlasDB.enabled
   Apply()
-  print("|cff7fd4ffForever Map Link|r: " .. (ForeverMapLinkDB.enabled and "on - your position is shown to the 3D map" or "off"))
+  print("|cff7fd4ffAzeroth Atlas|r: " .. (AzerothAtlasDB.enabled and "on - your position is shown to the 3D map" or "off"))
 end

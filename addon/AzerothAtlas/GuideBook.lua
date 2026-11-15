@@ -1,4 +1,4 @@
--- Forever Map Link: the guides.
+-- Azeroth Atlas: the guides.
 --
 -- A leveling guide written for the Guidelime addon is plain text: one line is one step, and
 -- codes in square brackets say what the step is - [QA123] accept a quest, [QT123] hand it in,
@@ -22,7 +22,7 @@
 -- GuideSteps.lua follows a guide through the game; GuideWindow.lua shows it.
 -- While Guidelime is switched on this stays out of its way: it runs the guides then.
 
-local shared = ForeverMapLink
+local shared = AzerothAtlas
 if type(shared) ~= "table" then return end
 
 local floor = math.floor
@@ -575,7 +575,7 @@ book.Register = Register
 if not (type(Guidelime) == "table" and type(Guidelime.registerGuide) == "function") then
   local api = type(Guidelime) == "table" and Guidelime or {}
   api.registerGuide = Register
-  api.ForeverMapLink = true
+  api.AzerothAtlas = true
   Guidelime = api
   book.api = api
 end
@@ -646,9 +646,9 @@ end
 -- progress[guide name][line] = { stepText, skip, completed } and currentGuide.
 function book.Store()
   if book.store then return book.store end
-  if type(ForeverMapLinkCharDB) ~= "table" then ForeverMapLinkCharDB = {} end
-  if type(ForeverMapLinkCharDB.guide) ~= "table" then ForeverMapLinkCharDB.guide = {} end
-  local s = ForeverMapLinkCharDB.guide
+  if type(AzerothAtlasCharDB) ~= "table" then AzerothAtlasCharDB = {} end
+  if type(AzerothAtlasCharDB.guide) ~= "table" then AzerothAtlasCharDB.guide = {} end
+  local s = AzerothAtlasCharDB.guide
   if type(s.progress) ~= "table" then s.progress = {} end
   book.store = s
   return s

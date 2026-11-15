@@ -9,3 +9,6 @@
 /.app-version.json
 node_modules/
 *.log
+# The application as built to hand on (npm run dist), and a shortcut to it of your own
+/dist/
+*.lnk

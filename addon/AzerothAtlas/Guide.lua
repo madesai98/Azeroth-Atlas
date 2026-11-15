@@ -1,4 +1,4 @@
--- Forever Map Link: following the route in the game.
+-- Azeroth Atlas: following the route in the game.
 --
 -- Route.lua brings the 3D map's route into the game and draws it on the world map and the
 -- minimap. This file is what you follow it by:
@@ -13,13 +13,13 @@
 --   Shift-click    on the world map: a quick waypoint there, no question asked - it goes to
 --                  the level nearest your own height.
 --
--- /maplink arrow, /maplink list   each on or off
--- /maplink pin                    the step list under Questie's quest list, or on its own
--- /maplink move                   drag the two where you want them (again: done)
--- /maplink reset                  back where they were
--- /maplink level                  the question about the level, again
+-- /atlas arrow, /atlas list   each on or off
+-- /atlas pin                    the step list under Questie's quest list, or on its own
+-- /atlas move                   drag the two where you want them (again: done)
+-- /atlas reset                  back where they were
+-- /atlas level                  the question about the level, again
 
-local shared = ForeverMapLink
+local shared = AzerothAtlas
 if type(shared) ~= "table" or type(shared.Route) ~= "function" then return end
 
 local floor, sqrt, abs, pi, exp = math.floor, math.sqrt, math.abs, math.pi, math.exp
@@ -27,7 +27,7 @@ local atan2 = math.atan2 or math.atan
 local format = string.format
 
 local BREAK = 8               -- (as in Route.lua) kind flag: this point starts a new stretch
-local F_TAXI = 16             -- (as in ForeverMapLink.lua) player flag: on a flight path
+local F_TAXI = 16             -- (as in AzerothAtlas.lua) player flag: on a flight path
 local LOOK = 12               -- yards further along the route that the arrow points at
 local RADIUS = 30             -- how far from the middle the arrow's head circles
 local BEHIND, AHEAD = 120, 100 -- degrees off your facing: the head dims past the first, and brightens again within the second
@@ -41,10 +41,10 @@ local BESIDE = 8              -- the room between Questie's list and the step li
 local ARROW_AT = { "TOP", 0, -110 }
 local LIST_AT = { "TOPRIGHT", -255, -250 }
 
-local function say(msg) print("|cff7fd4ffForever Map Link|r: " .. msg) end
+local function say(msg) print("|cff7fd4ffAzeroth Atlas|r: " .. msg) end
 local function Settings()
-  if type(ForeverMapLinkDB) ~= "table" then ForeverMapLinkDB = {} end
-  return ForeverMapLinkDB
+  if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end
+  return AzerothAtlasDB
 end
 local function Clock(s)
   s = floor((s or 0) + 0.5)
@@ -225,7 +225,7 @@ local function ArrowUpdate(f, dt)
       if arrow.distance ~= "move" then
         arrow.distance, arrow.words = "move", ""
         f.dist:SetText("the arrow")
-        f.text:SetText("Drag it where you want it, then /maplink move again.")
+        f.text:SetText("Drag it where you want it, then /atlas move again.")
       end
       DrawHead(f, 0)
       HeadAlpha(f, 1)
@@ -286,7 +286,7 @@ end
 
 local function EnsureArrow()
   if arrow.frame then return arrow.frame end
-  local f = CreateFrame("Frame", "ForeverMapLinkArrow", UIParent)
+  local f = CreateFrame("Frame", "AzerothAtlasArrow", UIParent)
   f:SetSize(120, 120)
   f:SetFrameStrata("LOW")
   Movable(f, "arrowAt", ARROW_AT)
@@ -335,7 +335,7 @@ end
 -- Questie's own ("Current Route: 2/5": the step you are on, of how many), under it the journey's
 -- name as Questie writes a quest's, and its steps as Questie writes what a quest asks for. A click
 -- on the header folds the steps away, as a click on Questie's header folds its quests away.
--- Without Questie (or with /maplink pin off) the list stands where you put it.
+-- Without Questie (or with /atlas pin off) the list stands where you put it.
 --
 -- Questie's list is only ever asked where it is. Nothing here is anchored to it: a frame of
 -- another addon's in its anchor family can leave Questie's own drag code nothing to read (as the
@@ -519,7 +519,7 @@ local function ListFill(f, r, look, limit, least, docked, secs, total, far)
         add(f.level, BLUE .. f.level.words .. "|r", look.goalFont, look.goalSize, LINE_X + look.goal, 1)
       end
     else
-      f.title.words, f.title.clock = "Drag the step list where you want it, then /maplink move again.", ""
+      f.title.words, f.title.clock = "Drag the step list where you want it, then /atlas move again.", ""
       add(f.title, WHITE .. f.title.words .. "|r", look.questFont, look.questSize, LINE_X + look.quest, 4)
     end
     -- (the room Questie leaves under each quest)
@@ -655,7 +655,7 @@ end
 
 local function EnsureList()
   if list.frame then return list.frame end
-  local f = CreateFrame("Frame", "ForeverMapLinkSteps", UIParent)
+  local f = CreateFrame("Frame", "AzerothAtlasSteps", UIParent)
   f:SetSize(LIST_W, 40)
   f:SetFrameStrata("MEDIUM") -- (as Questie's list)
   list.docked = nil -- (not placed yet)
@@ -716,7 +716,7 @@ local MAX_LEVELS = 6
 
 local function EnsureAsk()
   if ask.frame then return ask.frame end
-  local f = CreateFrame("Frame", "ForeverMapLinkLevels", UIParent)
+  local f = CreateFrame("Frame", "AzerothAtlasLevels", UIParent)
   f:SetSize(400, 100)
   f:SetFrameStrata("DIALOG")
   f:SetPoint("TOP", UIParent, "TOP", 0, -240)
@@ -764,7 +764,7 @@ local function EnsureAsk()
     f.buttons[i] = b
   end
   -- (Escape closes it, as it does the game's own windows)
-  if type(UISpecialFrames) == "table" then table.insert(UISpecialFrames, "ForeverMapLinkLevels") end
+  if type(UISpecialFrames) == "table" then table.insert(UISpecialFrames, "AzerothAtlasLevels") end
   f:Hide()
   ask.frame = f
   return f
@@ -941,12 +941,12 @@ function shared.GuideCommand(word)
     db.pin = db.pin == false
     list.sig = ""
     if moving then SetMoving(false) end
-    say(db.pin and "the step list hangs under Questie's quest list (where Questie shows one)." or "the step list stands on its own: /maplink move lets you drag it.")
+    say(db.pin and "the step list hangs under Questie's quest list (where Questie shows one)." or "the step list stands on its own: /atlas move lets you drag it.")
   elseif word == "move" then
     SetMoving(not moving)
     local pinned = list.docked and QuestieList() ~= nil
-    say(moving and ("drag the arrow" .. (pinned and "" or " and the step list") .. " where you want " .. (pinned and "it" or "them") .. ", then type /maplink move again."
-      .. (pinned and " (The step list hangs under Questie's quest list: /maplink pin sets it free.)" or "")) or "the arrow and the step list stay where they are now.")
+    say(moving and ("drag the arrow" .. (pinned and "" or " and the step list") .. " where you want " .. (pinned and "it" or "them") .. ", then type /atlas move again."
+      .. (pinned and " (The step list hangs under Questie's quest list: /atlas pin sets it free.)" or "")) or "the arrow and the step list stay where they are now.")
   elseif word == "reset" then
     db.arrowAt, db.listAt = nil, nil
     for i = 1, #movers do
@@ -959,7 +959,7 @@ function shared.GuideCommand(word)
   return true
 end
 
--- (for the tests, and for a look from the game with /dump ForeverMapLink.GuidePeek())
+-- (for the tests, and for a look from the game with /dump AzerothAtlas.GuidePeek())
 function shared.GuidePeek()
   return { arrow = arrow, list = list, ask = ask, moving = moving, hooked = hooked, AimPoint = AimPoint, StepLeft = StepLeft, Look = Look }
 end

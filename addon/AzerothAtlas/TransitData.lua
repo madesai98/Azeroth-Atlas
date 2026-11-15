@@ -1,4 +1,4 @@
--- Forever Map Link: the timetables of the boats, zeppelins and tram.
+-- Azeroth Atlas: the timetables of the boats, zeppelins and tram.
 -- Written by tools/make-transit-lua.mjs from viewer/transit.json: do not edit by hand.
 --
 -- Tracks, leg times, stop times and rounds: DockWatch by Wyveryx (MIT licence), recorded in the game. https://discord.gg/NYDA5BFzWq
@@ -11,7 +11,7 @@
 -- so many seconds after leaving: { seconds, map, x, y }; track2 is the tram's other track),
 -- ft and ftStops (ForeverTransport's and Nauticus' number for the line, and which of our
 -- stops each of their docks is), cars and lanes (the tram: two cars, each on a track of its own).
-local shared = ForeverMapLink
+local shared = AzerothAtlas
 if type(shared) ~= "table" then return end
 
 shared.TransitData = {

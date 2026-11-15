@@ -1,14 +1,15 @@
-// Installs / updates the ForeverMapLink addon in the game's AddOns folder.
-// Only ever writes its own folders: <game>/<flavour>/Interface/AddOns/ForeverMapLink and the
-// route mailboxes beside it, ForeverMapLink_Mail001 ... (see mail.js). One thing more, and only
+// Installs / updates the AzerothAtlas addon in the game's AddOns folder.
+// Only ever writes its own folders: <game>/<flavour>/Interface/AddOns/AzerothAtlas and the
+// route mailboxes beside it, AzerothAtlas_Mail001 ... (see mail.js). One thing more, and only
 // when you ask for it ("Convert guide packs"): the line of a guide pack's toc that names the
 // addon it needs (see "guide packs made for Guidelime" below).
 import fs from 'node:fs';
 import path from 'node:path';
 import { PROJECT_ROOT, flavourFolder } from '../extractor/config.js';
 import { MAIL_COUNT, mailName, mailFiles } from './mail.js';
+import { OLD, legacyInstalled, gameRunning, carryOver } from './legacy.js';
 
-const NAME = 'ForeverMapLink';
+const NAME = 'AzerothAtlas';
 const BUNDLED = path.join(PROJECT_ROOT, 'addon', NAME);
 
 export { flavourFolder };
@@ -20,7 +21,7 @@ export function addonsDir(cfg) {
 }
 
 // ---- guide packs made for Guidelime -------------------------------------------------------------
-// The addon follows guides written for Guidelime itself (addon/ForeverMapLink/GuideBook.lua). A
+// The addon follows guides written for Guidelime itself (addon/AzerothAtlas/GuideBook.lua). A
 // guide pack names Guidelime in its toc as the addon it needs, and the game loads no addon whose
 // needed addon is missing or switched off. Converting a pack changes that: it then needs Forever
 // Map Link, and names Guidelime only as an addon to load after if it is there. So a converted
@@ -28,7 +29,7 @@ export function addonsDir(cfg) {
 // hands its guides to Guidelime wherever Guidelime is switched on. Nothing else of a pack is
 // touched. A pack you install or update again is as its maker wrote it, and is offered again.
 const LIME = 'Guidelime';
-const MARK = 'X-ForeverMapLink-Converted';
+const MARK = 'X-AzerothAtlas-Converted';
 // (the game reads "Dependencies", "RequiredDeps" and any other word that starts so the same way)
 const NEEDED = /^##[ \t]*((?:Required)?Dep\w*)[ \t]*:(.*)$/i;
 const AFTER = /^##[ \t]*(OptionalDep\w*)[ \t]*:(.*)$/i;
@@ -67,7 +68,7 @@ function guidePacks(dir) {
   let folders;
   try { folders = fs.readdirSync(dir, { withFileTypes: true }); } catch { return packs; }
   for (const d of folders) {
-    if (!d.isDirectory() || d.name === NAME || d.name.startsWith(NAME + '_Mail')) continue;
+    if (!d.isDirectory() || d.name === NAME || d.name.startsWith(NAME + '_Mail') || d.name === OLD || d.name.startsWith(OLD + '_Mail')) continue;
     let files;
     try { files = fs.readdirSync(path.join(dir, d.name)).filter((f) => /\.toc$/i.test(f)); } catch { continue; }
     const tocs = [];
@@ -119,12 +120,22 @@ export function addonStatus(cfg) {
   const current = installed && mail && files.every((f) => {
     try { return fs.readFileSync(path.join(target, f)).equals(fs.readFileSync(path.join(BUNDLED, f))); } catch { return false; }
   });
-  return { available: true, installed, current, mail, guides: guideStatus(dir), target, version: version(BUNDLED), installedVersion: installed ? version(target) : null };
+  // (legacy: a copy from before the addon's new name is installed - see legacy.js)
+  return { available: true, installed, current, mail, legacy: legacyInstalled(dir), guides: guideStatus(dir), target, version: version(BUNDLED), installedVersion: installed ? version(target) : null };
 }
 
-export function installAddon(cfg) {
+/** @param opts  gameSeen: the map can see the game's window just now (where whether the game runs cannot be asked of Windows) */
+export function installAddon(cfg, opts = {}) {
   const st = addonStatus(cfg);
   if (!st.available) throw new Error(st.reason);
+  // A copy under the addon's old name: what belongs to it is carried over to the new one, and
+  // it is removed. Only while the game is closed (legacy.js says why).
+  let carried = null;
+  if (st.legacy) {
+    const flavour = path.join(cfg.installRoot, flavourFolder(cfg));
+    if (gameRunning(flavour) ?? !!opts.gameSeen) throw new Error('close the game first, then press this again. The addon has a new name, Azeroth Atlas: your settings and your place in your guides are carried over to it, and that can only be done while the game is closed');
+    carried = carryOver(flavour);
+  }
   fs.mkdirSync(st.target, { recursive: true });
   // (a file the installed addon did not have before: the game only finds new files when it starts, not on /reload)
   const added = st.installed && fs.readdirSync(BUNDLED).some((f) => !fs.existsSync(path.join(st.target, f)));
@@ -142,7 +153,7 @@ export function installAddon(cfg) {
       if (name === 'mail.lua' ? !fs.existsSync(file) : !same(file, text)) fs.writeFileSync(file, text);
     }
   }
-  return { ...addonStatus(cfg), restart: fresh || added };
+  return { ...addonStatus(cfg), restart: fresh || added, carried };
 }
 
 /** "Convert guide packs": every installed pack that names Guidelime as needed is made to need this addon instead. */

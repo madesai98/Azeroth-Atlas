@@ -1,5 +1,5 @@
-// Decoder for the coded strip the ForeverMapLink addon draws along the top-left edge of the
-// game window. Format (must match addon/ForeverMapLink/ForeverMapLink.lua): squares showing one
+// Decoder for the coded strip the AzerothAtlas addon draws along the top-left edge of the
+// game window. Format (must match addon/AzerothAtlas/AzerothAtlas.lua): squares showing one
 // base-8 digit each as a colour (red = 4, green = 2, blue = 1):
 //   7 0 7 0 4 2 1     sync pattern + colour check
 //   version(1) layout(1) seq(1) flags(5) map(5) x(8) y(8) facing(4) zoneMap(5) level(2) height(6)

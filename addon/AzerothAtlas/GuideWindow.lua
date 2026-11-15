@@ -1,4 +1,4 @@
--- Forever Map Link: the guide's window.
+-- Azeroth Atlas: the guide's window.
 --
 -- GuideSteps.lua follows your guide. This file shows it:
 --   the window    the guide's steps, the ones you are on bright and scrolled into view, each with
@@ -9,13 +9,13 @@
 --   the buttons   beside the window: target who the step is about, use the item it names (keys
 --                 can be bound to the first of each).
 --
--- /maplink guide            the window, shown or hidden      (/lime does the same when Guidelime is not switched on)
--- /maplink guides           the list of guides
--- /maplink guide skip       tick off the steps you are on
--- /maplink guide reset      take every tick of this guide away
+-- /atlas guide            the window, shown or hidden      (/lime does the same when Guidelime is not switched on)
+-- /atlas guides           the list of guides
+-- /atlas guide skip       tick off the steps you are on
+-- /atlas guide reset      take every tick of this guide away
 -- Drag the window by its title; drag its corner to size it.
 
-local shared = ForeverMapLink
+local shared = AzerothAtlas
 local book = type(shared) == "table" and shared.Book
 local run = type(shared) == "table" and shared.Guide
 if type(book) ~= "table" or type(run) ~= "table" then return end
@@ -40,11 +40,11 @@ local TARGET_ICON = "Interface\\Icons\\Ability_Hunter_Snipershot"
 local MODES = { "Off", "Current", "Guide", "All" }
 local MODE_WORDS = { Off = "no", Current = "those of the step you are on", Guide = "any the guide speaks of", All = "every quest" }
 
-local function say(msg) print("|cff7fd4ffForever Map Link|r: " .. msg) end
+local function say(msg) print("|cff7fd4ffAzeroth Atlas|r: " .. msg) end
 local function Options() return shared.GuideOptions() end
 local function Char()
-  if type(ForeverMapLinkCharDB) ~= "table" then ForeverMapLinkCharDB = {} end
-  return ForeverMapLinkCharDB
+  if type(AzerothAtlasCharDB) ~= "table" then AzerothAtlasCharDB = {} end
+  return AzerothAtlasCharDB
 end
 local function Fighting() return InCombatLockdown ~= nil and InCombatLockdown() end
 
@@ -329,7 +329,7 @@ end
 local function EnsureWindow()
   if win.frame then return win.frame end
   local o = Options()
-  local f = CreateFrame("Frame", "ForeverMapLinkGuide", UIParent)
+  local f = CreateFrame("Frame", "AzerothAtlasGuide", UIParent)
   f:SetFrameStrata("LOW")
   f:SetClampedToScreen(true)
   f:SetMovable(true)
@@ -439,7 +439,7 @@ end
 -- They do what only a key or a click of yours may do (target someone, use an item), so the game
 -- lets them be changed only while you are not in a fight: what a step brings waits until then.
 local function SideButton(kind, i)
-  local b = CreateFrame("Button", "ForeverMapLinkGuide" .. kind .. i, side.holder, "SecureActionButtonTemplate")
+  local b = CreateFrame("Button", "AzerothAtlasGuide" .. kind .. i, side.holder, "SecureActionButtonTemplate")
   b:SetSize(SIDE, SIDE)
   b:RegisterForClicks("AnyUp", "AnyDown")
   local icon = b:CreateTexture(nil, "ARTWORK")
@@ -510,7 +510,7 @@ SideUpdate = function()
   side.sig, side.late = sig, false
   if not side.holder then
     if not on then return end
-    side.holder = CreateFrame("Frame", "ForeverMapLinkGuideButtons", UIParent)
+    side.holder = CreateFrame("Frame", "AzerothAtlasGuideButtons", UIParent)
     side.holder:SetSize(SIDE, SIDE)
     for i = 1, SIDE_COUNT do
       side.targets[i] = SideButton("Target", i)
@@ -626,7 +626,7 @@ end
 
 local function EnsurePicker()
   if pick.frame then return pick.frame end
-  local f = CreateFrame("Frame", "ForeverMapLinkGuides", UIParent)
+  local f = CreateFrame("Frame", "AzerothAtlasGuides", UIParent)
   f:SetSize(PICK_W, TITLE_H + PICK_ROWS * PICK_H + 124)
   f:SetFrameStrata("DIALOG")
   f:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
@@ -717,7 +717,7 @@ local function EnsurePicker()
   count:SetWidth(PICK_W - PAD * 2)
   count:SetTextColor(0.6, 0.6, 0.6)
   f.count = count
-  if type(UISpecialFrames) == "table" then table.insert(UISpecialFrames, "ForeverMapLinkGuides") end
+  if type(UISpecialFrames) == "table" then table.insert(UISpecialFrames, "AzerothAtlasGuides") end
   f:Hide()
   pick.frame = f
   return f
@@ -809,8 +809,8 @@ end
 -- Guidelime's own command, while Guidelime is not there to answer it.
 local function LimeCommand()
   if run.state ~= "on" or SlashCmdList == nil or SlashCmdList.Guidelime ~= nil then return end
-  SLASH_FOREVERMAPLINKGUIDE1, SLASH_FOREVERMAPLINKGUIDE2 = "/lime", "/guidelime"
-  SlashCmdList.FOREVERMAPLINKGUIDE = function(msg)
+  SLASH_AZEROTHATLASGUIDE1, SLASH_AZEROTHATLASGUIDE2 = "/lime", "/guidelime"
+  SlashCmdList.AZEROTHATLASGUIDE = function(msg)
     local word = type(msg) == "string" and string.lower(string.match(msg, "^%s*(%S*)") or "") or ""
     pcall(shared.GuideWord, "guide", word == "complete" and "skip" or word)
   end
@@ -831,15 +831,15 @@ boot:SetScript("OnEvent", function()
 end)
 
 -- Keys can be set for these under Options > Keybindings > AddOns.
-_G["BINDING_NAME_CLICK ForeverMapLinkGuideToggle:LeftButton"] = "Show or hide the guide"
-_G["BINDING_NAME_CLICK ForeverMapLinkGuideTarget1:LeftButton"] = "Target who the guide's step is about"
-_G["BINDING_NAME_CLICK ForeverMapLinkGuideItem1:LeftButton"] = "Use the item the guide's step names"
-local toggle = CreateFrame("Button", "ForeverMapLinkGuideToggle", UIParent)
+_G["BINDING_NAME_CLICK AzerothAtlasGuideToggle:LeftButton"] = "Show or hide the guide"
+_G["BINDING_NAME_CLICK AzerothAtlasGuideTarget1:LeftButton"] = "Target who the guide's step is about"
+_G["BINDING_NAME_CLICK AzerothAtlasGuideItem1:LeftButton"] = "Use the item the guide's step names"
+local toggle = CreateFrame("Button", "AzerothAtlasGuideToggle", UIParent)
 toggle:SetSize(1, 1)
 toggle:Hide()
 toggle:SetScript("OnClick", function() pcall(shared.GuideWord, "guide", "") end)
 
--- (for the tests, and for a look from the game with /dump ForeverMapLink.GuideWin())
+-- (for the tests, and for a look from the game with /dump AzerothAtlas.GuideWin())
 function shared.GuideWin()
   return { win = win, pick = pick, side = side, StepText = StepText, Listed = Listed, Message = Message, Fill = Fill, SideWanted = SideWanted, PickList = PickList }
 end

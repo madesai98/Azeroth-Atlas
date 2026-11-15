@@ -1,4 +1,4 @@
--- Forever Map Link: following a guide through the game.
+-- Azeroth Atlas: following a guide through the game.
 --
 -- GuideBook.lua reads the guides. This file follows the one you chose: which of its steps are
 -- done, which you are on, and where that step sends you. The rules are Guidelime's, so a guide
@@ -17,10 +17,10 @@
 -- That is what the route in the game knows (Route.lua); with the 3D map not running there is
 -- nothing to tell the level by, and the spot on the map decides, as it does in Guidelime.
 --
--- The step you are on is your waypoint (ForeverMapLink.lua asks GuideGoal): the 3D map routes to
+-- The step you are on is your waypoint (AzerothAtlas.lua asks GuideGoal): the 3D map routes to
 -- it, and the route, the arrow and the journey's steps lead you there.
 
-local shared = ForeverMapLink
+local shared = AzerothAtlas
 local book = type(shared) == "table" and shared.Book
 if type(book) ~= "table" then return end
 
@@ -40,18 +40,18 @@ local TAXI_ICON = 132057
 local run = { state = "wait", guide = nil, steps = {}, quests = {}, log = {}, now = {}, wide = {}, dirty = false, rev = 0, sig = "", goal = nil, goalStep = nil }
 shared.Guide = run
 
-local function say(msg) print("|cff7fd4ffForever Map Link|r: " .. msg) end
+local function say(msg) print("|cff7fd4ffAzeroth Atlas|r: " .. msg) end
 
 -- ---- how you have it set ----------------------------------------------------------------------------
 -- accept, turnin: "Off", "Current" (the quests of the steps you are on), "Guide" (every quest
 -- the guide and the guides after it speak of), "All". The first time, as you had Guidelime set.
 local MODES = { Off = true, Current = true, Guide = true, All = true }
 local function Options()
-  if type(ForeverMapLinkDB) ~= "table" then ForeverMapLinkDB = {} end
-  local o = ForeverMapLinkDB.guide
+  if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end
+  local o = AzerothAtlasDB.guide
   if type(o) ~= "table" then
     o = {}
-    ForeverMapLinkDB.guide = o
+    AzerothAtlasDB.guide = o
   end
   -- (taken over once, the first time Guidelime's settings are there to be read - unless you have
   -- set something here yourself by then)
@@ -377,7 +377,7 @@ local function FindGoal()
   return nil
 end
 
--- Your waypoint, for ForeverMapLink.lua: map, north, west, and three numbers that name the place.
+-- Your waypoint, for AzerothAtlas.lua: map, north, west, and three numbers that name the place.
 -- false: no guide is being followed here (Guidelime's own arrow is looked at instead).
 function shared.GuideGoal()
   if run.state ~= "on" or not run.guide then return false end
@@ -647,7 +647,7 @@ local function OnTaxiMap()
   end
 end
 
-local frame = CreateFrame("Frame", "ForeverMapLinkGuideEvents", UIParent)
+local frame = CreateFrame("Frame", "AzerothAtlasGuideEvents", UIParent)
 local handlers = {}
 
 local function Dirty() run.dirty = true end
@@ -771,7 +771,7 @@ frame:SetScript("OnUpdate", function(_, dt)
   end
 end)
 
--- (for the tests, and for a look from the game with /dump ForeverMapLink.GuideState())
+-- (for the tests, and for a look from the game with /dump AzerothAtlas.GuideState())
 function shared.GuideState()
   return { run = run, Evaluate = Evaluate, Settle = Settle, Walk = Walk, Load = Load, Happened = Happened, Wanted = Wanted, TaxiNode = TaxiNode, handlers = handlers, Start = Start }
 end

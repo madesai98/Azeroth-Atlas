@@ -1,5 +1,5 @@
 // Live player link. Starts a tiny screen-reader helper (server/strip-reader.cs) that watches the
-// coded strip the ForeverMapLink addon draws in the game window, decodes it, and streams the
+// coded strip the AzerothAtlas addon draws in the game window, decodes it, and streams the
 // result to the viewer. The helper only runs while a map page is listening.
 import { spawn, execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';

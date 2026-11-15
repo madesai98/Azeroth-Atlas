@@ -1,0 +1,24 @@
+# Builds the application and publishes it as a release, when a tag v* is pushed.
+# (A release is only needed when the application's frame should be newer: every copy keeps the
+# map tool itself up to date from the main branch, by itself.)
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run dist
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "dist/Azeroth-Atlas-win-x64.zip" --title "Azeroth Atlas ${GITHUB_REF_NAME#v}" --notes-file tools/release-notes.md

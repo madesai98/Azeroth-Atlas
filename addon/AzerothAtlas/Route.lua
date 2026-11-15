@@ -1,4 +1,4 @@
--- Forever Map Link: the route, shown in the game.
+-- Azeroth Atlas: the route, shown in the game.
 --
 -- The 3D map works out the way to your waypoint over the real ground - stairs, bridges, caves,
 -- flight paths, boats. This file draws that same route, seen from above, on the game's world
@@ -6,10 +6,10 @@
 --
 -- An addon cannot be sent anything while the game runs. What it can do is load another addon
 -- on demand, and the game reads that addon's file from the disk at that moment. So the route
--- comes in through "mailboxes": a row of tiny load-on-demand addons (ForeverMapLink_Mail001,
+-- comes in through "mailboxes": a row of tiny load-on-demand addons (AzerothAtlas_Mail001,
 -- 002, ...) whose one file the map's local server keeps rewriting with the route as it is now.
 -- A mailbox can be opened once per login or /reload, so they are opened sparingly: when your
--- waypoint changes, when you have left the route, or when you ask (/maplink route).
+-- waypoint changes, when you have left the route, or when you ask (/atlas route).
 --
 -- The game tells an addon where you are on the map but not how high. Seen from above, the floor
 -- under a waypoint and the gallery the waypoint is on are one spot, and a road is on the bridge
@@ -23,18 +23,18 @@
 -- and, where the spot you are heading for has more than one level, which levels there are:
 -- Guide.lua shows those as the arrow, the step list and the question about the level.
 --
--- /maplink clear    stop heading for the waypoint you have now (also: right-click the route's end on the map)
--- /maplink route    fetch the route the 3D map shows now (for a marker you dropped on the 3D map)
--- /maplink status   how the route's way into the game is doing
--- /maplink level    choose again which level your waypoint is on
+-- /atlas clear    stop heading for the waypoint you have now (also: right-click the route's end on the map)
+-- /atlas route    fetch the route the 3D map shows now (for a marker you dropped on the 3D map)
+-- /atlas status   how the route's way into the game is doing
+-- /atlas level    choose again which level your waypoint is on
 
-local shared = ForeverMapLink
+local shared = AzerothAtlas
 if type(shared) ~= "table" then return end
 
 local floor, sqrt, huge = math.floor, math.sqrt, math.huge
 local strchar, strbyte, format = string.char, string.byte, string.format
 
-local MAIL_NAME, MAIL_MAX = "ForeverMapLink_Mail%03d", 999
+local MAIL_NAME, MAIL_MAX = "AzerothAtlas_Mail%03d", 999
 local FIRST_WAIT = 1.8        -- seconds from a new waypoint to opening the first mailbox for it
 local RETRY = { 2.5, 5, 10, 20, 40 } -- then these, while the 3D map is still working the route out
 local LATE = 30               -- seconds: a delivery older than this means nobody is writing them
@@ -52,17 +52,17 @@ local TRAIL = 300             -- of your steps are remembered: a minute's worth
 local APART = 30              -- yards of route between two parts of it that count as two
 local NEAR_FOR = 3            -- seconds at a waypoint's spot with the route saying you are not at it, before the 3D map is asked
 local NEAR_HOLD, NEAR_HOLD_MAX = 30, 600 -- seconds from the last word on that waypoint to asking (doubling each time)
-local W_GUIDE, W_PIN, W_QUICK = 1, 3, 4 -- the waypoint is your guide's step, a pin on the game's map, or a quick one of ours (as in ForeverMapLink.lua)
+local W_GUIDE, W_PIN, W_QUICK = 1, 3, 4 -- the waypoint is your guide's step, a pin on the game's map, or a quick one of ours (as in AzerothAtlas.lua)
 local LEVEL_WAIT = 2          -- seconds from choosing another level to opening a mailbox for the route to it
 local BARE_MOVED = 60         -- yards you move before a journey with nothing to draw here is asked about again
 local NEXT_AT = 8             -- yards from the end of what can be walked here: the boat, the portal is the step you are on
-local F_TAXI = 16             -- (as in ForeverMapLink.lua) player flag: on a flight path
+local F_TAXI = 16             -- (as in AzerothAtlas.lua) player flag: on a flight path
 local BREAK = 8               -- kind flag: this point starts a new stretch
 -- kinds of stretch: on foot, swimming, one no longer sent (it was "through a danger zone"), in the air, carried by a boat or zeppelin
 local COLOUR = { [0] = { 1, 0.82, 0.1 }, { 0.35, 0.75, 1 }, { 1, 0.4, 0.25 }, { 0.8, 0.92, 1 }, { 0.76, 0.61, 1 } }
 local ALSO_MAX = 60           -- lines of a journey that are only shown (on other continents, across the sea), at most
 
-local function say(msg) print("|cff7fd4ffForever Map Link|r: " .. msg) end
+local function say(msg) print("|cff7fd4ffAzeroth Atlas|r: " .. msg) end
 
 -- ---- the mailboxes --------------------------------------------------------------------------
 local Addons = C_AddOns or {}
@@ -119,10 +119,10 @@ local function Open(now)
   local name = format(MAIL_NAME, mail.next)
   mail.next = mail.next + 1
   mail.opened, mail.at = mail.opened + 1, now
-  ForeverMapLinkMail = nil
+  AzerothAtlasMail = nil
   local loaded, reason = LoadMail(name)
-  local m = ForeverMapLinkMail
-  ForeverMapLinkMail = nil
+  local m = AzerothAtlasMail
+  AzerothAtlasMail = nil
   if shared.Tell then shared.Tell() end
   if type(m) ~= "table" then return nil, loaded and "empty" or tostring(reason or "unreadable") end
   mail.have = type(m.written) == "number" and m.written % 65536 or 0
@@ -136,7 +136,7 @@ end
 local route, rev = nil, 0
 local want = nil      -- a delivery is wanted: { why, tm, tx, ty, tries, at (when to open the next mailbox) }
 local gave = nil      -- the waypoint the 3D map had no route for: { tm, tx, ty, north, west }
-local note = nil      -- why there is no route, for /maplink status
+local note = nil      -- why there is no route, for /atlas status
 local quietUntil, quietFor = -1, QUIET
 local offSince, strayHold = nil, -1
 -- the pin or quick waypoint you have now: far (you have been away from it since it was set), near
@@ -629,7 +629,7 @@ end
 
 local EnsureMap, EnsureMini -- (below)
 
--- Five times a second, after the waypoint has been read (called by ForeverMapLink.lua).
+-- Five times a second, after the waypoint has been read (called by AzerothAtlas.lua).
 function shared.Scan(now)
   if not mail.counted then Count() end
   local t, p = shared.target, shared.player
@@ -788,7 +788,7 @@ local function Status()
     say(note or (shared.target.kind == 0 and "no waypoint: a guide step, or a Shift-click or Ctrl-click on the map, sets one." or "no route."))
   end
   if route and route.lv then
-    say(format("your waypoint is on level %d of %d there (/maplink level to choose another).", route.lv.at, #route.lv.list))
+    say(format("your waypoint is on level %d of %d there (/atlas level to choose another).", route.lv.at, #route.lv.list))
   end
   if route and route.doubt then
     say("one level lies over another where you are, and the game does not say which you are on: the 3D map is asked.")
@@ -803,27 +803,27 @@ function shared.Command(word, rest)
   elseif shared.GuideWord and shared.GuideWord(word, rest or "") then return
   elseif shared.TransitWord and shared.TransitWord(word, rest or "") then return
   else
-    say("/maplink (strip on or off)   /maplink clear   /maplink route   /maplink status   /maplink level")
-    say("/maplink arrow, /maplink list (each on or off)   /maplink move (drag them where you want them)   /maplink reset")
-    say("/maplink pin (the step list under Questie's quest list, or on its own)   A click on \"Current Route\" folds its steps away.")
-    say("/maplink boats (when the boats, zeppelins and tram leave, as far as known)   /maplink boats listen (other players' sightings: taken or not)")
-    say("/maplink guide (the guide's window, shown or hidden)   /maplink guides (pick a guide)   /maplink guide skip   /maplink guide reset")
+    say("/atlas (strip on or off)   /atlas clear   /atlas route   /atlas status   /atlas level")
+    say("/atlas arrow, /atlas list (each on or off)   /atlas move (drag them where you want them)   /atlas reset")
+    say("/atlas pin (the step list under Questie's quest list, or on its own)   A click on \"Current Route\" folds its steps away.")
+    say("/atlas boats (when the boats, zeppelins and tram leave, as far as known)   /atlas boats listen (other players' sightings: taken or not)")
+    say("/atlas guide (the guide's window, shown or hidden)   /atlas guides (pick a guide)   /atlas guide skip   /atlas guide reset")
     say("Shift-click the world map: a quick waypoint.   Ctrl-click: a pin, and you are asked which level where there are several.")
   end
 end
 
 -- Keys can be set for these under Options > Keybindings > AddOns (Bindings.xml names the buttons).
-BINDING_HEADER_FOREVERMAPLINK = "Forever Map Link"
-_G["BINDING_NAME_CLICK ForeverMapLinkClearButton:LeftButton"] = "Clear the route"
-_G["BINDING_NAME_CLICK ForeverMapLinkFetchButton:LeftButton"] = "Fetch the route from the 3D map"
+BINDING_HEADER_AZEROTHATLAS = "Azeroth Atlas"
+_G["BINDING_NAME_CLICK AzerothAtlasClearButton:LeftButton"] = "Clear the route"
+_G["BINDING_NAME_CLICK AzerothAtlasFetchButton:LeftButton"] = "Fetch the route from the 3D map"
 local function KeyButton(name, run)
   local b = CreateFrame("Button", name, UIParent)
   b:SetSize(1, 1)
   b:Hide()
   b:SetScript("OnClick", function() pcall(run) end)
 end
-KeyButton("ForeverMapLinkClearButton", function() shared.Clear() end)
-KeyButton("ForeverMapLinkFetchButton", function() shared.Ask() end)
+KeyButton("AzerothAtlasClearButton", function() shared.Clear() end)
+KeyButton("AzerothAtlasFetchButton", function() shared.Ask() end)
 
 -- ---- drawing --------------------------------------------------------------------------------
 -- A stroke is two lines: a dark one underneath so that the coloured one reads on any ground.
@@ -1045,7 +1045,7 @@ EnsureMap = function()
   if not (WorldMapFrame and WorldMapFrame.GetCanvas and WorldMapFrame.GetMapID and C_Map and C_Map.GetWorldPosFromMapPos and CreateVector2D) then return nil end
   local canvas = WorldMapFrame:GetCanvas()
   if not canvas then return nil end
-  local f = CreateFrame("Frame", "ForeverMapLinkOnMap", canvas)
+  local f = CreateFrame("Frame", "AzerothAtlasOnMap", canvas)
   f:SetAllPoints(canvas)
   -- under the map's own icons, over its ground
   local level
@@ -1191,7 +1191,7 @@ end
 EnsureMini = function()
   if onMini.frame then return onMini.frame end
   if not Minimap then return nil end
-  local f = CreateFrame("Frame", "ForeverMapLinkOnMinimap", Minimap)
+  local f = CreateFrame("Frame", "AzerothAtlasOnMinimap", Minimap)
   f:SetAllPoints(Minimap)
   f:SetFrameLevel(Minimap:GetFrameLevel() + 2)
   onMini.frame, onMini.strokes = f, Strokes(f)
@@ -1206,7 +1206,7 @@ EnsureMini = function()
   return f
 end
 
--- (for the tests, and for a look from the game with /dump ForeverMapLink.Peek())
+-- (for the tests, and for a look from the game with /dump AzerothAtlas.Peek())
 function shared.Peek()
   return { route = route, want = want, gave = gave, note = note, mail = mail, quietUntil = quietUntil, onMap = onMap, onMini = onMini }
 end

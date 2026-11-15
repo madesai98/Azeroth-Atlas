@@ -1,5 +1,5 @@
 // Reads one thin row of pixels from the top-left corner of the game window and prints it, so
-// the map server can decode the strip the ForeverMapLink addon draws there.
+// the map server can decode the strip the AzerothAtlas addon draws there.
 //
 // Two ways of looking, both of them plain picture capture:
 //   window  the game window's own picture, through the Windows capture API that streaming and

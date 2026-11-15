@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { PROJECT_ROOT, checkInstall, readConfigFile } from '../extractor/config.js';
+import { PROJECT_ROOT, HOME, checkInstall, readConfigFile } from '../extractor/config.js';
 import { Changes } from './changes.js';
 import { sendFile, safeJoin, localOnly, ownPage, json, readJson, MIME } from './http.js';
 
@@ -22,7 +22,7 @@ export function runSetup(problem, file, app) {
   const product = problem.product ?? 'wowf', port = problem.port ?? 5173;
   const idle = { running: false, phase: '', done: 0, total: 0, log: [], summary: null, error: null, startedAt: null, finishedAt: null };
   const status = () => ({
-    setup: { message: problem.message, configured: problem.configured ?? null, dataDir: path.join(PROJECT_ROOT, 'data') },
+    setup: { message: problem.message, configured: problem.configured ?? null, dataDir: path.join(HOME, 'data') },
     installed: null, installError: problem.message, extracted: null, updateAvailable: false, updateReason: null, job: idle, app: app?.status() ?? null,
   });
 
@@ -74,6 +74,7 @@ export function runSetup(problem, file, app) {
         if (typeof a === 'string') { json(res, 200, { ok: false, error: a }); return; }
         let had = {};
         try { had = readConfigFile(file); } catch { /* one that could not be read is written anew */ }
+        fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(file, JSON.stringify({ ...had, ...a, product: had.product ?? product }, null, 2) + '\n');
         json(res, 200, { ok: true, ...a });
         // (server/watch.js starts the server again when config.json changes; run on its own, there is nobody to)
