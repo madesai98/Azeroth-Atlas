@@ -1179,7 +1179,7 @@ function shared.Command(word, rest)
   else
     say("/atlas (strip on or off)   /atlas clear   /atlas route   /atlas status   /atlas level   /atlas options")
     say("/atlas arrow, /atlas list (each on or off)   /atlas arrow unlock (drag the arrow with the mouse; /atlas arrow lock when it is there)   /atlas move (drag both where you want them)   /atlas reset")
-    say("/atlas pin (the list of routes under Questie's quest list, or on its own)   A click on \"Routes\", or on a route's name, folds its steps away.")
+    say("/atlas pin (the list of routes pinned under Questie's quest list, or free: drag it with the mouse where you want it)   A click on \"Routes\", or on a route's name, folds its steps away.")
     say("/atlas hearth (your hearthstone: used in routes, or left out)   /atlas strip (where the coded strip is: /atlas strip topright 0 40)")
     say("/atlas boats (when the boats, zeppelins and tram leave, as far as known)   /atlas boats listen (other players' sightings: taken or not)")
     say("/atlas guide (the guide's window, shown or hidden)   /atlas guides (pick a guide)   /atlas guide skip   /atlas guide reset")

@@ -907,19 +907,28 @@ follows Questie's list as that grows, shrinks, is dragged or is folded away; whe
 room under it, it goes over it, and failing that beside it. Near the screen's right edge its
 lines are wrapped rather than run off the screen. While Questie hides its list, the list of
 routes stays where it hung. Nothing of the addon's is ever anchored to Questie's list (that can
-break Questie's own dragging): it is only asked where it is. Without Questie, or after
-`/atlas pin`, the list stands on its own, on a dark ground.
+break Questie's own dragging): it is only asked where it is. Without Questie the list stands
+on its own, on a dark ground.
+
+**Pinned, or free to be moved.** The list is pinned under Questie's quest list unless you say
+otherwise. In the options (Esc > Options > AddOns > Azeroth Atlas) untick "Pin it under
+Questie's quest list" - or type `/atlas pin` - and it is **free: it stands on its own, and you
+drag it with the mouse to wherever you want it**, at any time, by any part of it (the header
+and the routes' names still take a click; letting go of a drag does not count as one). Set
+free for the first time it stays where it hung until you drag it; where you put it is
+remembered, also while it is pinned again. Free, the left button is the list's own over all of
+it, to drag it by; pinned, clicks go through its steps to the game, as before.
 
 The arrow and the steps are click-through (the header, the routes' names, the hearthstone and
-the "Level:" line take a click). `/atlas arrow` and `/atlas list` switch each off or on,
-`/atlas pin` takes the list out from under Questie's list or puts it back, `/atlas move` lets
-you drag the arrow, and the list where it stands on its own (type it again when done),
-`/atlas reset` puts them back.
+the "Level:" line take a click) - unless the arrow is unlocked or the list is free.
+`/atlas arrow` and `/atlas list` switch each off or on, `/atlas pin` sets the list free or
+pins it under Questie's list again, `/atlas move` lets you drag a locked arrow, and a list
+that stands on its own (type it again when done), `/atlas reset` puts them back.
 
 **Options.** All of this is also under **Esc > Options > AddOns > Azeroth Atlas** (or
 `/atlas options`): the strip (shown or not, and where: see "Live player link"), your
-hearthstone, the arrow (shown or not; unlocked, to be dragged, or locked), the list, whether
-it hangs under Questie's, and moving the two.
+hearthstone, the arrow (shown or not; unlocked, to be dragged, or locked), the list (shown or
+not; pinned under Questie's, or free, to be dragged), and moving the two.
 
 There is one router, the 3D map's, so the two cannot disagree. The route is not worked out
 again inside the game. With the **OpenMap** addon showing its stitched world map, the route is

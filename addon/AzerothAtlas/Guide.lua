@@ -73,37 +73,62 @@ local function Place(f, key, default)
     f:SetPoint(default[1], UIParent, default[1], default[2], default[3])
   end
 end
--- (f.free: it is unlocked - it can be dragged at any time, with no /atlas move: the arrow, where
--- you have unlocked it in the options. The pointer on it then shows what can be dragged.)
-local function Movable(f, key, default)
+-- (f.free: it can be dragged at any time, with no /atlas move: the arrow, where you have unlocked
+-- it in the options; the list of routes, where it is not pinned under Questie's quest list.
+-- f.pinned: it is not to be dragged at all just now - the list, while it hangs under Questie's.
+-- `hint`: what the pointer on it says while it is free, with a shade to show what can be dragged;
+-- without one, nothing shows.)
+local function Movable(f, key, default, hint)
   f:SetMovable(true)
   f:SetClampedToScreen(true)
   f:RegisterForDrag("LeftButton")
-  f:SetScript("OnDragStart", function(self) if moving or self.free then self:StartMoving() end end)
+  f:SetScript("OnDragStart", function(self)
+    if (moving or self.free) and not self.pinned then
+      self.held = true
+      self:StartMoving()
+    end
+  end)
   -- (only the left button is its own - to drag it by: turning the camera with the right one goes on through it)
   if f.SetPassThroughButtons then pcall(f.SetPassThroughButtons, f, "RightButton", "MiddleButton") end
   f:SetScript("OnDragStop", function(self)
+    if not self.held then return end -- (it was not being dragged)
+    self.held, self.letGo = nil, GetTime()
     self:StopMovingOrSizing()
+    -- (where it stands is kept here, not by the game)
+    if self.SetUserPlaced then pcall(self.SetUserPlaced, self, false) end
     local left, top = self:GetLeft(), self:GetTop()
-    if left and top then Settings()[key] = { left, top } end
+    if left and top then
+      Settings()[key] = { left, top }
+      -- (held by its top left corner from here on, wherever the game hung it when it was let go:
+      -- a list that gets longer then grows downwards, as it does after a /reload)
+      Place(self, key, default)
+    end
   end)
-  f:EnableMouse(moving) -- (clicks go through it to the game, except while it is being moved, or is unlocked)
+  -- (taken off the screen while it is being dragged: that is the end of the drag)
+  f:SetScript("OnHide", function(self)
+    if self.held then
+      self.held = nil
+      self:StopMovingOrSizing()
+    end
+  end)
+  f:EnableMouse(moving) -- (clicks go through it to the game, except while it is being moved, or is free)
   local shade = f:CreateTexture(nil, "BACKGROUND")
   shade:SetAllPoints(f)
   shade:SetColorTexture(0.1, 0.3, 0.6, 0.45)
   if not moving then shade:Hide() end
   f:SetScript("OnEnter", function(self)
-    if moving or not self.free then return end
+    if moving or not self.free or not hint then return end
     shade:SetAlpha(0.45)
     shade:Show()
     if GameTooltip then
       GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
       GameTooltip:AddLine("Drag to move it")
-      GameTooltip:AddLine("Lock it again under Esc > Options > AddOns > Azeroth Atlas (or /atlas arrow lock): clicks then go through it.", 1, 1, 1, true)
+      GameTooltip:AddLine(hint, 1, 1, 1, true)
       GameTooltip:Show()
     end
   end)
   f:SetScript("OnLeave", function(self)
+    if not hint then return end
     if GameTooltip then GameTooltip:Hide() end
     shade:SetAlpha(1)
     if not moving then shade:Hide() end
@@ -111,6 +136,34 @@ local function Movable(f, key, default)
   f.shade, f.placeKey, f.placeDefault = shade, key, default
   movers[#movers + 1] = f
   Place(f, key, default)
+end
+
+-- A part of such a frame that takes the mouse itself (a line of the list that takes a click):
+-- dragged, it drags the frame it is a part of. Only while that can be dragged (f.loose: see
+-- Dragging) - otherwise a click on it is a click and nothing else, however the pointer moves.
+local function Dragging(f, on)
+  f.loose = on
+  f:EnableMouse(on)
+  for _, part in ipairs(f.parts or {}) do
+    if on then part:RegisterForDrag("LeftButton") else pcall(part.RegisterForDrag, part) end
+  end
+end
+local function DragBy(part, f)
+  f.parts = f.parts or {}
+  f.parts[#f.parts + 1] = part
+  if f.loose then part:RegisterForDrag("LeftButton") end
+  part:SetScript("OnDragStart", function()
+    local go = f:GetScript("OnDragStart")
+    if go then go(f) end
+  end)
+  part:SetScript("OnDragStop", function()
+    local stop = f:GetScript("OnDragStop")
+    if stop then stop(f) end
+  end)
+end
+-- Letting go of what you dragged is not a click on the line you held it by.
+local function Dragged(f)
+  return f.held == true or (f.letGo ~= nil and GetTime() - f.letGo < 0.2)
 end
 
 -- A small gold diamond: the waypoint's own mark, as on the map.
@@ -312,7 +365,7 @@ local function EnsureArrow()
   local f = CreateFrame("Frame", "AzerothAtlasArrow", UIParent)
   f:SetSize(120, 120)
   f:SetFrameStrata("LOW")
-  Movable(f, "arrowAt", ARROW_AT)
+  Movable(f, "arrowAt", ARROW_AT, "Lock it again under Esc > Options > AddOns > Azeroth Atlas (or /atlas arrow lock): clicks then go through it.")
   local mark = Diamond(f, 14)
   mark:SetPoint("CENTER", f, "CENTER", 0, 14)
   f.mark = mark
@@ -360,7 +413,9 @@ end
 -- quest asks for. A click on a route's name folds its steps away, as a click on a zone folds
 -- its quests away in Questie; a click on the header folds everything away. Beside the header is
 -- your hearthstone: a click on it leaves it out of every route (it is struck through then).
--- Without Questie (or with /atlas pin off) the list stands where you put it.
+-- Without Questie the list stands where you put it (/atlas move). Not pinned (the options, or
+-- /atlas pin) it is free: it stands on its own and is dragged with the mouse, by any part of it,
+-- at any time - as Questie's own list is where that is not locked.
 --
 -- Questie's list is only ever asked where it is. Nothing here is anchored to it: a frame of
 -- another addon's in its anchor family can leave Questie's own drag code nothing to read (as the
@@ -533,8 +588,9 @@ local function ListGroup(f, rows)
   end
   title.label:ClearAllPoints()
   title:RegisterForClicks("LeftButtonUp")
+  DragBy(title, f)
   title:SetScript("OnClick", function(self)
-    if not self.key then return end
+    if not self.key or Dragged(f) then return end
     local db = Settings()
     if type(db.shut) ~= "table" then db.shut = {} end
     db.shut[self.key] = (not db.shut[self.key]) or nil
@@ -871,12 +927,19 @@ local function ListUpdate(f)
     ListPoint(f)
   end
   ListPlace(f, q)
-  -- it can be dragged while the two are being moved, unless it hangs under Questie's list
-  local loose = moving and not list.docked
-  if f.loose ~= loose then
-    f.loose = loose
-    f:EnableMouse(loose)
-    if loose then f.shade:Show() else f.shade:Hide() end
+  -- It can be dragged with the mouse where it is free (not pinned under Questie's quest list: the
+  -- options, or /atlas pin) - at any time, by any part of it - and, wherever it stands on its
+  -- own, while the two are being moved. Never while it hangs under Questie's list. Where it
+  -- cannot be dragged, clicks go through it (but for the lines that take one).
+  local free = Settings().pin == false
+  local hangs = list.docked and true or false
+  f.free, f.pinned = free, hangs
+  local loose = (moving or free) and not hangs
+  if f.loose ~= loose then Dragging(f, loose) end
+  local shaded = moving and not hangs
+  if f.shaded ~= shaded then
+    f.shaded = shaded
+    if shaded then f.shade:Show() else f.shade:Hide() end
   end
 end
 
@@ -906,7 +969,9 @@ local function EnsureList()
   head.edge, head.fill = edge, fill
   head.label:ClearAllPoints()
   head:RegisterForClicks("LeftButtonUp")
+  DragBy(head, f)
   head:SetScript("OnClick", function()
+    if Dragged(f) then return end
     local db = Settings()
     db.listShut = not db.listShut
     list.sig = ""
@@ -940,7 +1005,9 @@ local function EnsureList()
   bar:Hide()
   hearth.under, hearth.bar = under, bar
   hearth:RegisterForClicks("LeftButtonUp")
+  DragBy(hearth, f)
   hearth:SetScript("OnClick", function()
+    if Dragged(f) then return end
     if shared.SetHearth and shared.HearthOff then shared.SetHearth(shared.HearthOff()) end
     list.sig = ""
     if PlaySound and SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON then pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON) end
@@ -967,7 +1034,9 @@ local function EnsureList()
   -- (with the header and the routes' names, the one part of the list that takes a click)
   local level = ListRow(f, true)
   level:RegisterForClicks("LeftButtonUp")
+  DragBy(level, f)
   level:SetScript("OnClick", function()
+    if Dragged(f) then return end
     local r = shared.Route()
     if r and r.lv then pcall(ShowAsk, r) end
   end)
@@ -1224,6 +1293,36 @@ function shared.GuideScan(now)
   end
 end
 
+-- The list of routes pinned under Questie's quest list (as it is unless you say otherwise), or
+-- free: standing on its own, to be dragged with the mouse wherever you want it. Set free for the
+-- first time it stays where it hung, until you drag it; after that, it goes where you last put it.
+function shared.SetPin(on)
+  local db = Settings()
+  on = on and true or false
+  if not on and db.pin ~= false and type(db.listAt) ~= "table" then
+    local f, left, top = list.frame, nil, nil
+    if f and list.docked then
+      local scale = f:GetScale() or 1
+      left, top = f:GetLeft(), f:GetTop()
+      if left and top then left, top = left * scale, top * scale end
+    end
+    if not (left and top) then
+      -- (no list on the screen just now: where it would hang)
+      local q = QuestieList()
+      local l, _, _, b
+      if q then l, _, _, b = QuestieEdges(q) end
+      if l and b then
+        local scale = q:GetEffectiveScale() / UIParent:GetEffectiveScale()
+        left, top = l * scale, b * scale
+      end
+    end
+    if left and top then db.listAt = { left, top } end
+  end
+  db.pin = on
+  list.sig = ""
+  if moving then SetMoving(false) end
+end
+
 -- ---- what you can tell it ------------------------------------------------------------------------
 function shared.GuideCommand(word, rest)
   local db = Settings()
@@ -1249,10 +1348,9 @@ function shared.GuideCommand(word, rest)
     db.list = db.list == false
     say(db.list and "the list of routes is on." or "the list of routes is off.")
   elseif word == "pin" then
-    db.pin = db.pin == false
-    list.sig = ""
-    if moving then SetMoving(false) end
-    say(db.pin and "the list of routes hangs under Questie's quest list (where Questie shows one)." or "the list of routes stands on its own: /atlas move lets you drag it.")
+    shared.SetPin(db.pin == false)
+    say(db.pin and "the list of routes hangs under Questie's quest list again (where Questie shows one)."
+      or "the list of routes stands on its own now: drag it with the mouse where you want it (/atlas pin hangs it under Questie's quest list again).")
   elseif word == "move" then
     SetMoving(not moving)
     local pinned = list.docked and QuestieList() ~= nil
@@ -1457,8 +1555,10 @@ do
       Check("Show the arrow (the compass that points along the route you follow)", 14, -324, function() return DB().arrow ~= false end, function(on) DB().arrow = on end)
       Check("Unlock it: drag it with the mouse to where you want it (locked, clicks go through it)", 38, -350,
         function() return DB().arrowFree == true end, function(on) DB().arrowFree = on or nil end)
+      -- the list: shown or not at all; and pinned under Questie's quest list, or free (it can be dragged with the mouse at any time)
       Check("Show the list of routes", 14, -376, function() return DB().list ~= false end, function(on) DB().list = on end)
-      Check("Hang the list of routes under Questie's quest list", 14, -402, function() return DB().pin ~= false end, function(on) DB().pin = on end)
+      Check("Pin it under Questie's quest list (unticked, it is free: drag it where you want it)", 38, -402,
+        function() return DB().pin ~= false end, function(on) shared.SetPin(on) end)
     end)
     piece(function()
       local move
@@ -1472,7 +1572,7 @@ do
         local peek = shared.GuidePeek and shared.GuidePeek()
         move:SetText(peek and peek.moving and "Done moving them" or "Move the arrow and the list")
       end
-      Words("While they are being moved, drag each where you want it (close this window to see them). A list that hangs under Questie's quest list moves with that.",
+      Words("Or move both in one go, locked and pinned as they are: while they are being moved, drag each where you want it (close this window to see them), then press the button again. A list that hangs under Questie's quest list moves with that.",
         "GameFontHighlightSmall", 20, -466, WIDE)
     end)
 
