@@ -11,6 +11,9 @@ const BREAK = 8;         // (route.js) kind bit: this point starts a new stretch
 const RIDE = 32;         // (route.js) kind bit: a crossing by boat or zeppelin
 const ALSO_TOLERANCE = 4; // yards: the lines that are only shown (on other continents, across the sea) are seen from far off
 const ALSO_BUDGET = 1200; // points of them in one delivery
+const OTHER_TOLERANCE = 1.5; // yards: the other routes (shown, not followed) are lines on a map
+const OTHER_BUDGET = 900;    // points of them in one delivery
+const OTHER_EVERY = 4000;    // ms: the other routes change as you move, and are sent on no more often than this
 const STACKED = 16;      // (navworker.js) kind bit: another level lies over or under this point
 const Z_TOLERANCE = 1;   // yards a point's height may differ from the line through its neighbours and be left out
 const THERE = 10;        // yards from the waypoint within which you are at it (as the addon's ARRIVE)...
@@ -147,9 +150,29 @@ export function stepsOf(route, ends, goal) {
   });
 }
 
+/**
+ * The other routes there are just now - to your guide's step while a waypoint of yours leads,
+ * to the quest you track, to your party - for the game to draw beside the one it follows:
+ * [{ kind, color: '#rrggbb', pieces: [{ map, kind, points: [x, y, ...] }] }], thinned to fit.
+ */
+export function othersOf(app) {
+  const routes = (app.trips?.active() ?? []).filter((x) => !x.lead && x.planner.route);
+  for (let tol = OTHER_TOLERANCE; ; tol *= 1.6) {
+    const out = routes.map((x) => {
+      const r = x.planner.route, pieces = [];
+      for (const s of trackOf(r, tol).stretches) pieces.push({ map: x.planner.mapId ?? 0, kind: s.kind, points: s.points });
+      for (const a of alsoOf(r)) pieces.push({ map: a.map, kind: a.kind, points: a.points });
+      return { kind: x.kind, color: x.color, pieces };
+    });
+    if (out.reduce((sum, o) => sum + o.pieces.reduce((n, p) => n + p.points.length / 2, 0), 0) <= OTHER_BUDGET || tol > 40) return out;
+  }
+}
+
 export class InGameRoute {
   constructor(app) {
     this.app = app;
+    this.others = '';     // which other routes were last sent on, and when
+    this.othersAt = 0;
     this.plan = 0;        // goes up with every new route (not as you walk along one)
     this.seen = null;
     this.sig = '';
@@ -175,7 +198,9 @@ export class InGameRoute {
   #payload() {
     const app = this.app, r = app.route, t = app.routeTarget ?? null;
     const target = t ? { map: t.map, x: t.x, y: t.y, source: t.source ?? 'marker', name: t.name ?? null } : null;
-    const base = { target, plan: this.plan, map: r.mapId ?? 0, text: '', state: 'none', detached: false, stretches: [], ...this.#where(t) };
+    // (marker: the marker dropped on this map, for the game to take up as its waypoint - or word
+    // that it has been taken off: main.js. It goes with whatever else is said.)
+    const base = { target, plan: this.plan, map: r.mapId ?? 0, text: '', state: 'none', detached: false, stretches: [], marker: app.markerForGame ?? null, ...this.#where(t) };
     if (!r.enabled) return { ...base, text: 'Routes are switched off on the 3D map.' };
     if (!t) return { ...base, text: 'No waypoint.' };
     // (which level of the spot the waypoint is on comes first: a route to another level is not the route)
@@ -191,6 +216,8 @@ export class InGameRoute {
         ...base, state: 'route', text: app.routeText ?? '', detached: !!r.route.detached, stretches: track.stretches,
         // the rest of the journey, for the game's world map: its lines on other continents and across the sea
         also: alsoOf(r.route),
+        // the colour this route has here, and the other routes there are, each in its own: drawn in the game as they are here
+        color: app.trips?.color(app.trips.leadKind) ?? null, others: othersOf(app),
         // the same journey as a list of things to do, for the arrow and the step list in the game
         title: `Journey to ${t.name ?? app.placeAt?.(t) ?? goal}`, seconds: Math.round(app.route.remaining()?.seconds ?? r.route.seconds ?? 0),
         steps: stepsOf(r.route, track.ends, goal),
@@ -216,7 +243,13 @@ export class InGameRoute {
     const t = app.routeTarget;
     const a = r.asked;
     const w = this.#where(t);
-    const sig = `${this.plan}|${r.enabled}|${t ? `${t.map},${t.x},${t.y},${t.z ?? ''},${t.source},${t.name ?? ''}` : '-'}|${a ? `${a.id},${+!!a.done},${+!!a.settled}` : '-'}|${r.status}|${app.levels?.rev ?? 0}|${+!!w.there}${+!!w.sure}`;
+    // (the other routes: which there are, in what colour, and how each stands - looked at now and then, as they change with every step you take)
+    const now = performance.now();
+    const others = (app.trips?.active() ?? []).filter((x) => !x.lead).map((x) => `${x.slot}${x.color}${x.planner.route ? x.planner.rev : '-'}`).join(',');
+    const which = others.replace(/\d+(,|$)/g, '$1');
+    if (which !== this.othersWhich || now - this.othersAt > OTHER_EVERY) { this.others = others; this.othersWhich = which; this.othersAt = now; }
+    const m = app.markerForGame;
+    const sig = `${this.plan}|${r.enabled}|${t ? `${t.map},${t.x},${t.y},${t.z ?? ''},${t.source},${t.name ?? ''}` : '-'}|${a ? `${a.id},${+!!a.done},${+!!a.settled}` : '-'}|${r.status}|${app.levels?.rev ?? 0}|${+!!w.there}${+!!w.sure}|${this.others}|${app.trips?.color(app.trips.leadKind) ?? ''}|${m ? `${m.stamp}${m.off ? 'x' : ''}` : ''}`;
     if (sig === this.sig) return;
     this.sig = sig;
     clearTimeout(this.timer);

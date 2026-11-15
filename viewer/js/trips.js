@@ -130,6 +130,11 @@ export class Trips {
     }
   }
 
+  /** Their lines as something for the water to be behind (before the water: see RouteRenderer.cover). */
+  cover(pass) {
+    for (const x of this.extra.values()) if (x.target) x.renderer.cover(pass);
+  }
+
   /** ...and what of them lies on the other continent or across the sea (after the water: see RouteRenderer.drawRest). */
   drawRest(pass) {
     for (const x of this.extra.values()) if (x.target) x.renderer.drawRest(pass);

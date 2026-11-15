@@ -96,6 +96,9 @@ export class AppUpdate {
   constructor(root, opts = {}) {
     this.root = root;
     this.auto = opts.auto !== false;
+    // (never: this copy is not to be written over by an update, whoever asks - a working copy,
+    // with work in it that is not published: "autoUpdate": "never" in config.json)
+    this.never = !!opts.never;
     this.hold = opts.hold ?? (() => false);
     this.busy = opts.busy ?? (() => {});
     this.api = opts.api ?? 'https://api.github.com';
@@ -166,6 +169,7 @@ export class AppUpdate {
    */
   check({ apply = this.auto } = {}) {
     if (this.running) return this.running;
+    if (this.never) apply = false;
     this.s.state = 'checking';
     this.s.error = null;
     this.running = (this.git ? this.#git(apply) : this.#zip(apply))
@@ -173,6 +177,7 @@ export class AppUpdate {
       .then(() => {
         this.running = null;
         this.s.state = 'idle';
+        if (this.never && this.s.available) { this.s.canApply = false; this.s.note = 'A newer version is out, but this copy is set never to update itself ("autoUpdate": "never" in config.json).'; }
         this.s.checkedAt = Date.now();
         this.#remember();
         return this.status();

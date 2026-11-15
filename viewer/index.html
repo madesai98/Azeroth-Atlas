@@ -102,6 +102,17 @@
   #dangerBody, #npcBody { display: flex; flex-direction: column; gap: 5px; }
   #setup { display: flex; flex-direction: column; gap: 5px; padding: 8px 9px; border: 1px solid var(--line); border-radius: 7px; }
   #appLine a { margin-left: 4px; }
+  #sideFoot { flex: none; padding: 9px 12px 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+  #checkLines { display: flex; flex-direction: column; gap: 2px; }
+  #checkLines:empty { display: none; }
+  #checkLines div { padding-left: 15px; text-indent: -15px; }
+  #checkLines div::before { content: '•'; display: inline-block; width: 15px; text-indent: 0; }
+  #checkLines div.busy::before { content: '…'; }
+  #checkLines div.good::before { content: '✓'; }
+  #checkLines div.warn::before { content: '!'; }
+  #fatalMore { opacity: .7; word-break: break-word; }
+  #fatalMore:empty { display: none; }
+  #fatalAgain { width: auto; padding: 6px 22px; margin-top: 6px; }
   body.setup details.sec:not([data-sec="map"]), body.setup #btnFind { display: none; }
   body.setup #loading { bottom: 50%; }
   #dangerBody select { width: auto; flex: 1; padding: 2px 4px; }
@@ -291,6 +302,10 @@
     </details>
 
   </div>
+  <div id="sideFoot">
+    <button id="checkAll" class="primary" title="Brings everything up to date, in turn, and leaves alone what already is: Azeroth Atlas itself, the map's data, the addon in the game, your guide packs">Check for updates</button>
+    <div id="checkLines" class="small"></div>
+  </div>
 </aside>
 
 <!-- what the pointer is on: there only while the pointer is on the map and on something -->
@@ -331,7 +346,7 @@
   <div class="btnrow" style="margin-top:10px"><button id="helpClose">Close</button></div>
 </div>
 
-<div id="fatal"><div><h2 id="fatalTitle">Something went wrong</h2><p id="fatalMsg" class="dim"></p></div></div>
+<div id="fatal"><div><h2 id="fatalTitle">Something went wrong</h2><p id="fatalMsg" class="dim"></p><p id="fatalMore" class="dim small"></p><button id="fatalAgain" class="primary" style="display:none">Try again</button></div></div>
 <script type="module" src="js/reload.js"></script>
 <script type="module" src="js/main.js"></script>
 </body>

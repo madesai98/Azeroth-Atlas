@@ -18,6 +18,9 @@ const POINT_LIMIT = 6000;       // numbers' worth of route points (x and y) in o
 const STEP_LIMIT = 12;          // steps of a journey listed in one delivery
 const ALSO_LIMIT = 3200;        // numbers' worth of the lines that are only shown (on other continents, across the sea)
 const ALSO_PIECES = 60;         // of those lines, at most
+const OTHER_LIMIT = 2400;       // numbers' worth of the other routes (shown beside the one that is followed)
+const OTHER_PIECES = 80;        // of their lines, at most
+const rgb = (v) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? parseInt(v.slice(1), 16) : null);
 const LEVEL_LIMIT = 6;          // levels of one spot offered to choose between
 export const NAME = 'AzerothAtlas'; // the addon the mailboxes belong to
 /** A mailbox's folder. (prefix: the addon it belongs to - another only while a copy from before the addon's new name is still the one installed: see legacy.js) */
@@ -60,6 +63,7 @@ export class RouteMail {
     this.report = null;   // what the addon last said: { session, next, size, have, flags }
     this.target = null;   // the waypoint the game reports: { tk, tm, tx, ty } or null
     this.route = null;    // what the map page last sent (see setRoute)
+    this.marker = null;   // the marker dropped on the 3D map, for the game to take up as its waypoint: { stamp, map, x, y, placed } or { stamp, off, placed }
     this.written = (Math.floor(Date.now() / 1000) % 60000) + 1; // number of the delivery now in the mailboxes
     this.text = '';
     this.filled = '';     // which mailboxes hold it
@@ -170,7 +174,27 @@ export class RouteMail {
     const lv = r.levels;
     const levels = lv && Array.isArray(lv.list) && lv.list.length > 1 && lv.list.length <= LEVEL_LIMIT && lv.list.every((s) => typeof s === 'string')
       ? { id: lv.id | 0, at: Math.min(lv.list.length, Math.max(1, lv.at | 0)), ask: !!lv.ask, list: lv.list.map((s) => s.slice(0, 80)) } : null;
+    // the other routes there are, for the game to draw beside the one it follows: each line with the map it is on, its kind of going and its route's colour
+    const others = [];
+    let extra = 0;
+    for (const o of Array.isArray(r.others) ? r.others : []) {
+      const color = rgb(o?.color);
+      if (color === null) continue;
+      for (const s of Array.isArray(o.pieces) ? o.pieces : []) {
+        const pts = Array.isArray(s?.points) ? s.points.filter((v) => Number.isFinite(v)) : [];
+        if (!Number.isInteger(s?.map) || s.map < 0 || s.map > 65535 || pts.length < 4 || pts.length % 2 || extra + pts.length > OTHER_LIMIT || others.length >= OTHER_PIECES) continue;
+        extra += pts.length;
+        others.push({ map: s.map, kind: [0, 1, 2, 3, 4].includes(s.kind) ? s.kind : 0, color, points: pts });
+      }
+    }
+    // the marker dropped on the 3D map (or word that it has been taken off)
+    const mk = r.marker;
+    this.marker = mk && Number.isFinite(mk.stamp) && Number.isFinite(mk.placed)
+      ? (mk.off ? { stamp: mk.stamp, off: true, placed: mk.placed }
+        : Number.isInteger(mk.map) && Number.isFinite(mk.x) && Number.isFinite(mk.y) ? { stamp: mk.stamp, map: mk.map, x: mk.x, y: mk.y, placed: mk.placed } : null)
+      : null;
     this.route = {
+      color: rgb(r.color), others,
       game: !!t && ['guide', 'journey', 'pin', 'quick'].includes(t.source),
       steps, levels,
       title: typeof r.title === 'string' ? r.title.slice(0, 90) : '',
@@ -226,6 +250,9 @@ export class RouteMail {
       lua += `\n track = {\n${R.stretches.map((s) => `  { ${s.kind}, ${s.points.map(num).join(', ')} },`).join('\n')}\n },`;
       // (also: lines to show on the world map and not to follow - the map each is on, its kind (16 more: it goes on from the line before, over the sea), its points)
       if (R.also.length) lua += `\n also = {\n${R.also.map((s) => `  { ${s.map}, ${s.kind + (s.joins ? 16 : 0)}, ${s.points.map(num).join(', ')} },`).join('\n')}\n },`;
+      // (rc: the colour this route has on the 3D map; more: the other routes there are, to show beside it - the map each line is on, its kind, its route's colour, its points)
+      if (R.color !== null) lua += ` rc = ${R.color},`;
+      if (R.others.length) lua += `\n more = {\n${R.others.map((s) => `  { ${s.map}, ${s.kind}, ${s.color}, ${s.points.map(num).join(', ')} },`).join('\n')}\n },`;
       // (zs: how high each point of each stretch is; am: '1' where another level lies over or under it)
       if (R.tall) lua += `\n zs = {\n${R.stretches.map((s) => `  { ${s.heights.map(num).join(', ')} },`).join('\n')}\n },\n am = { ${R.stretches.map((s) => `"${s.stack}"`).join(', ')} },`;
     }
@@ -237,7 +264,11 @@ export class RouteMail {
     // (only while this server is hearing from the game: nothing is written for a game that is not there)
     if (!this.dir || !this.size || !this.live) return;
     const b = this.#body();
-    const text = `state = "${b.state}", tk = ${b.tk}, tm = ${b.tm}, tx = ${b.tx}, ty = ${b.ty},${b.lua}`;
+    // (mk: the marker dropped on the 3D map - its number, where it is, when it was dropped - for the
+    // game to take up as its waypoint; or its number and when alone: it has been taken off, and the game lets go of its waypoint)
+    const k = this.marker;
+    const mark = !k ? '' : k.off ? ` mk = { ${k.stamp}, false, false, false, ${k.placed} },` : ` mk = { ${k.stamp}, ${k.map}, ${Math.round(k.x * 1000) / 1000}, ${Math.round(k.y * 1000) / 1000}, ${k.placed} },`;
+    const text = `state = "${b.state}", tk = ${b.tk}, tm = ${b.tm}, tx = ${b.tx}, ty = ${b.ty},${mark}${b.lua}`;
     const next = Math.max(1, Math.min(this.report?.next ?? 1, this.size + 1));
     const boxes = [];
     for (let i = next; i < next + WINDOW && i <= this.size; i++) boxes.push(i);

@@ -158,8 +158,12 @@ shared.player, shared.target = player, target
 --   guide  the step your guide has you on: this addon's own guide (GuideSteps.lua), or, while
 --          Guidelime is switched on, the step its arrow points at - when Shortest Path is not
 --          following the guide for you.
--- The newest of them leads, for as long as it is still there, which is how the game itself
--- behaves: placing a pin stops Shortest Path's guidance, and a new guide step replaces both.
+-- Two of them are places of your own choosing, and there is only ever one such waypoint: a
+-- quick waypoint takes the place of a pin, a pin of a quick waypoint (and a marker dropped on
+-- the 3D map of either: Route.lua takes it up as a quick waypoint). A waypoint of your own
+-- leads for as long as it is there - you put it there to go to it. Your guide's step leads
+-- when you have none. Neither does away with the other: the 3D map sends the route to each,
+-- and both are drawn (Route.lua), the one that leads being the one the arrow follows.
 -- Clear the journey to a guide's step and there is nothing to head for until the guide moves
 -- on, exactly as Shortest Path's own path stays cleared until then.
 local GUIDE_OWNER = "Guidelime" -- the name Shortest Path's guide bridge plans its journeys under
@@ -175,10 +179,35 @@ function shared.ClearHeading() heading.cleared = GetTime() end
 
 -- The quick waypoint: a spot in the world, kept through a /reload (and numbered, so that
 -- clicking the same spot again counts as a new one).
-local quick = { on = false, map = 0, north = 0, west = 0, serial = 0 }
-function shared.Quick(map, north, west)
-  quick.on, quick.map, quick.north, quick.west, quick.serial = true, map, north, west, quick.serial + 1
+-- (placed: when it counts as placed, by GetTime - before now for one that was put down on the
+-- 3D map a while ago and has only just reached the game; nil for one placed this moment)
+local quick = { on = false, map = 0, north = 0, west = 0, serial = 0, placed = nil }
+function shared.Quick(map, north, west, placed)
+  quick.on, quick.map, quick.north, quick.west, quick.serial, quick.placed = true, map, north, west, quick.serial + 1, placed
   if type(AzerothAtlasCharDB) == "table" then AzerothAtlasCharDB.quick = { map = map, north = north, west = west } end
+  -- (one waypoint: a pin on the game's own map from before is done with)
+  if C_Map and C_Map.GetUserWaypoint and C_Map.ClearUserWaypoint and C_Map.GetUserWaypoint() then
+    pcall(C_Map.ClearUserWaypoint)
+    if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then pcall(C_SuperTrack.SetSuperTrackedUserWaypoint, false) end
+  end
+end
+-- When the waypoint of your own that you have now was placed (by GetTime); nil: you have none.
+function shared.OwnAt()
+  local h, at = heading, nil
+  if h.quick.on then at = h.quick.at end
+  if h.pin.on and (not at or h.pin.at > at) then at = h.pin.at end
+  return at
+end
+-- Let go of the waypoint of your own, whichever it is.
+function shared.OwnOff()
+  if quick.on then shared.QuickOff() end
+  if C_Map and C_Map.GetUserWaypoint and C_Map.ClearUserWaypoint and C_Map.GetUserWaypoint() then
+    pcall(C_Map.ClearUserWaypoint)
+    if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then pcall(C_SuperTrack.SetSuperTrackedUserWaypoint, false) end
+  end
+end
+function shared.QuickIs(map, north, west)
+  return quick.on and quick.map == map and (quick.north - north) ^ 2 + (quick.west - west) ^ 2 < 1
 end
 function shared.QuickOff()
   quick.on = false
@@ -413,7 +442,7 @@ local function ReadTarget()
   if pinned and wMap then Says(h.pin, now, W_PIN, wMap, wNorth, wWest, wa, wb, wc) else Silent(h.pin, true) end
 
   -- your quick waypoint
-  if quick.on then Says(h.quick, now, W_QUICK, quick.map, quick.north, quick.west, quick.serial, 0, 0) else Silent(h.quick, true) end
+  if quick.on then Says(h.quick, quick.placed or now, W_QUICK, quick.map, quick.north, quick.west, quick.serial, 0, 0) else Silent(h.quick, true) end
 
   -- the guide's step, when no journey stands for it
   local dropped = p.da ~= nil and p.da == ga and p.db == gb and p.dc == gc
@@ -440,13 +469,19 @@ local function ReadTarget()
   hd.quest = okq and quest or 0
 
   if wait then return end
+  -- A waypoint of your own leads while it is there: the newest of them (a journey of your own
+  -- that Shortest Path shows counts as one). Your guide's step - or the journey Shortest Path
+  -- plans to it - leads when you have none.
   local best, since = nil, h.cleared
-  if h.path.on and h.path.at > since then best = h.path end
+  if h.path.on and h.path.kind == W_PATH and h.path.at > since then best = h.path end
   if h.quick.on and h.quick.at > since and (not best or h.quick.at > best.at) then best = h.quick end
   if h.pin.on and h.pin.at > since and (not best or h.pin.at > best.at) then best = h.pin end
-  if h.guide.on and h.guide.at > since and (not best or h.guide.at > best.at) then best = h.guide end
-  -- (a quick waypoint that something newer has taken the place of is gone for good)
-  if quick.on and best ~= h.quick then shared.QuickOff() end
+  -- (one waypoint: a quick one that a newer pin or journey of yours has taken the place of is gone for good)
+  if quick.on and best and best ~= h.quick then shared.QuickOff() end
+  if not best then
+    if h.path.on and h.path.at > since then best = h.path end
+    if h.guide.on and h.guide.at > since and (not best or h.guide.at > best.at) then best = h.guide end
+  end
   if not best then
     t.kind = 0
     return

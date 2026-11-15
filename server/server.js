@@ -33,13 +33,13 @@ try { cfg = loadConfig(configFile); } catch (err) {
   // The game could not be found: the page asks where it is (setup.js), and this starts again once it has been told.
   const { runSetup } = await import('./setup.js');
   // (whether it may update itself is in the settings all the same, and holds here as anywhere)
-  let auto = true;
-  try { auto = readConfigFile(configFile).autoUpdate !== false; } catch { /* settings that cannot be read: asked about on the page */ }
-  const app = new AppUpdate(PROJECT_ROOT, { auto, busy: (on) => { updating = on; busy(); } });
+  let how = true;
+  try { how = readConfigFile(configFile).autoUpdate; } catch { /* settings that cannot be read: asked about on the page */ }
+  const app = new AppUpdate(PROJECT_ROOT, { auto: how !== false && how !== 'never', never: how === 'never', busy: (on) => { updating = on; busy(); } });
   app.start();
   await runSetup(err, configFile, app);
 }
-const appUpdate = new AppUpdate(PROJECT_ROOT, { auto: cfg.autoUpdate !== false, hold: () => job.running, busy: (on) => { updating = on; busy(); } });
+const appUpdate = new AppUpdate(PROJECT_ROOT, { auto: cfg.autoUpdate !== false && cfg.autoUpdate !== 'never', never: cfg.autoUpdate === 'never', hold: () => job.running, busy: (on) => { updating = on; busy(); } });
 appUpdate.start();
 // Live player link: only watches the screen while a map page is open (see tracker.js).
 // The route's way into the game: mailboxes beside the addon, kept filled while you play (see mail.js).

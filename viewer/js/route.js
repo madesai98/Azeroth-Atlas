@@ -833,6 +833,8 @@ export class RouteRenderer {
     const buffers = [{ arrayStride: 36, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 12, format: 'float32x3' }, { shaderLocation: 2, offset: 24, format: 'float32x2' }, { shaderLocation: 3, offset: 32, format: 'float32' }] }];
     const common = { layout: device.createPipelineLayout({ bindGroupLayouts: [gpu.globalsLayout, layout] }), vertex: { module, entryPoint: 'vs', buffers }, primitive: { topology: 'triangle-list', cullMode: 'none' }, multisample: { count: gpu.sampleCount } };
     this.solid = device.createRenderPipeline({ label: 'route', ...common, fragment: { module, entryPoint: 'fs', targets: targets(gpu) }, depthStencil: depthState(gpu, false) });
+    // (cover: the line's depth and no colour - see cover())
+    this.coverPipeline = device.createRenderPipeline({ label: 'route-cover', ...common, fragment: { module, entryPoint: 'fs', targets: [{ format: gpu.colorFormat, writeMask: 0 }] }, depthStencil: depthState(gpu, true) });
     this.ghost = device.createRenderPipeline({ label: 'route-ghost', ...common, fragment: { module, entryPoint: 'fs', targets: targets(gpu, ALPHA_BLEND), constants: { GHOST: 0.3 } }, depthStencil: { format: gpu.depthFormat, depthWriteEnabled: false, depthCompare: 'less' } });
     // the line you follow (made again as you go along it), and the rest of the journey (made once)
     this.vertices = null;
@@ -954,5 +956,22 @@ export class RouteRenderer {
    */
   drawRest(pass) {
     if (this.more) this.#lines(pass, this.groupRest, this.rest, this.more);
+  }
+
+  /**
+   * The line, as something for the water to be behind: its depth is written and nothing is
+   * painted. Water is see-through, and is drawn after everything solid; a line writes no depth
+   * when it is drawn (your figure, drawn after it, is to show in front of the line at its
+   * feet), so without this the water was painted over a line that is in front of it - a flight
+   * high over a river looked as if it ran under the water.
+   * (Call after draw, and after what is to show in front of the line whatever; before the water.)
+   */
+  cover(pass) {
+    if (!this.count) return;
+    pass.setBindGroup(0, this.gpu.globalsGroup);
+    pass.setBindGroup(1, this.group);
+    pass.setVertexBuffer(0, this.vertices);
+    pass.setPipeline(this.coverPipeline);
+    pass.draw(this.count);
   }
 }

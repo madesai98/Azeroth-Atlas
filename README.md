@@ -62,7 +62,21 @@ address while the application is running, too.
 
 ### Updates
 
-**The map tool keeps itself up to date.** When it starts, and every six hours while it runs, it
+**Check for updates** (the button at the bottom of the sidebar) sees to everything in one go,
+in turn, and leaves alone whatever is already up to date:
+
+1. **Azeroth Atlas itself**: looks whether a newer version is out, and puts it in.
+2. **The map's data**: builds again what has changed - a new game patch, a newer QuestieDB, a
+   map tool that builds some of it differently. (The first time, this is the whole map.)
+3. **The addon in the game**: installs it, or updates it to the one that came with this version.
+4. **Your guide packs**: converts any made for Guidelime that the addon cannot run yet.
+
+Each is reported in a line under the button, with what is left for you to do in the game
+(`/reload`, or a restart). The page may load itself again in the middle (after an update of
+itself, or a new map): it carries on from where it was. The separate buttons further up - Update
+map, Update addon, Convert guide packs - do the same things one at a time.
+
+**The map tool also keeps itself up to date without being asked.** When it starts, and every six hours while it runs, it
 looks whether there is a newer version where it came from, and if so puts it in by itself: the
 server starts itself again and the page reloads, with nothing to restart by hand. The line under
 the **Update map** button says which version you have and when it last looked; **look now**
@@ -84,7 +98,9 @@ and the page says so when there are:
   newer than the one in the game. Press it, then type `/reload` in the game.
 
 An update is not put in while a map build is running (it waits), and `"autoUpdate": false` in
-`config.json` makes it only say that a newer version is out, with a button to put it in.
+`config.json` makes it only say that a newer version is out, with a button to put it in (and
+**Check for updates** puts it in). `"autoUpdate": "never"` is for a working copy of your own
+that is not a git checkout: nothing will ever write a published version over it.
 
 **Publishing a new version** (for whoever keeps the repository): commit and push to the `main`
 branch. Everyone's copy picks it up within six hours, or at its next start. The first time,
@@ -230,7 +246,7 @@ The map only redraws when the view changes, so it uses no GPU while you are just
 | `reference` | `false` = never download the reference database used for NPC heights (see "NPCs") |
 | `referenceFile` | A copy of that database of your own to use instead of downloading one |
 | `ingame` | `false` = never write the route into the game's route mailboxes (see "The same route in the game") |
-| `autoUpdate` | `false` = the map tool only says when a newer version of itself is out, and puts it in when you press the button (see "Updates") |
+| `autoUpdate` | `false` = the map tool only says when a newer version of itself is out, and puts it in when you press the button (see "Updates"). `"never"` = it is never put in, whatever is pressed |
 
 `config.json` is each computer's own: it need not exist, it is not part of what is published,
 and an update never touches it.
@@ -587,15 +603,20 @@ section, where each also says how long it is:
 
 - **The colours are yours to change**: click the swatch beside a route. A flight is always a
   light tint of its route's colour, so you can tell whose flight it is.
-- **One of them leads**: the guide's step or your own waypoint, whichever the game itself is
-  heading for (see below for which wins). That is the one the Routes section describes step by
-  step, and the one handed to the game for its own map and minimap. The others are drawn on the
-  3D map only. Switching the leading one off leaves the others.
+- **They are all drawn at once, here and in the game**, each in its colour: placing a waypoint
+  does not take your guide's route away, nor the other way about.
+- **One of them leads**: your own waypoint while you have one, else your guide's step (see
+  below). That is the one the Routes section describes step by step, and the one the game
+  *follows* (its arrow, its list of steps, the line that goes as you walk). The others are
+  drawn beside it, a little thinner. Switching the leading one off leaves the others.
+- **There is one waypoint of your own**, wherever you place it: a Shift-click or a Ctrl-click
+  on the game's map, a click on this one. Each new one takes the place of the one before.
 - The tracked quest's route needs the NPC data of the map you are on (what a quest asks for is
   looked up there), so it reaches what is on your continent.
 - The tick on the **Routes** heading switches all of them off and on at once.
-- They need the addon as it is now: press **Update addon** and `/reload` once. With the addon
-  from before, the page is only told the one that leads, and draws that one and your party's.
+- They need the addon as it is now: press **Check for updates** (or **Update addon**) and
+  `/reload` once. With an addon from before, the page is only told the one that leads, and the
+  game is only shown that one.
 
 **Where you are heading** is read from the game by the addon. Three things can say so:
 
@@ -606,16 +627,26 @@ section, where each also says how long it is:
   `/reload`;
 - a pin you put on the game's own map: **Ctrl-click** the world map.
 
-**Whichever changed last leads**: Shift-click or place a pin and the route goes there; when the
-guide moves on to its next step the route follows the guide again; take a pin off and the guide's
-step is back. A quick waypoint that something newer has taken the place of is gone for good.
-With none of them, click the 3D map to drop a marker and the route goes there instead.
+**A waypoint of your own leads for as long as it is there**: you put it there to go to it, and
+the arrow takes you there even if your guide moves on to its next step meanwhile. Your guide's
+step leads when you have no waypoint. Neither does away with the other's route: both are drawn,
+here and in the game.
+
+**There is only ever one waypoint of your own.** A Shift-click takes the place of a pin (which
+is taken off the game's map), a pin of a quick waypoint, and a marker dropped on the 3D map of
+either - and the other way about: a waypoint placed in the game takes the marker off the 3D
+map. One thing the game cannot do is hear from the 3D map of its own accord (an addon can only
+read what it asks for): a marker dropped here, or taken off here, reaches the game the next
+time it asks for a route - when you stray from the one you are on, when your guide moves on, or
+at once with `/atlas route`. Until then the game keeps the waypoint it had. The marker counts
+from when you dropped it, so a waypoint you have placed in the game since still stands.
 
 `/atlas clear` in the game (or a key you bind to *Clear the route*, or a right-click on the
-route's end on the game's map) drops the waypoint you have now: the route goes, here and in the
-game, and stays gone until the guide moves on to another step or you set a new waypoint. A pin or
-quick waypoint you travelled to is taken away when you get within ten yards of it at the end of
-its route (standing right over or under it, with most of the route still to go, does not count).
+route's end on the game's map) takes your waypoint away, and your guide's step, if it is on
+one, leads again. With no waypoint of your own it is the guide's route that is cleared, and
+stays gone until the guide moves on to another step. A pin or quick waypoint you travelled to is
+taken away when you get within ten yards of it at the end of its route (standing right over or
+under it, with most of the route still to go, does not count).
 
 While **Shortest Path Forever** is still installed the addon allows for it, because it uses the
 game's map pin for itself: while it leads you it moves that pin from bend to bend of its own
@@ -780,14 +811,21 @@ nothing to ride in it, is never taken: the walk straight there is the quickest o
 
 ### The same route in the game
 
-The addon draws the route **on the game's own world map and minimap** too: the very route the
-3D map shows, seen from above (the one that leads: the game follows one route at a time, and
-the 3D map's other routes are its own). Gold where you walk, blue where you swim, pale where you
-fly; the part behind you goes as you walk; a diamond marks the end (on the
+The addon draws the routes **on the game's own world map and minimap** too: the very routes the
+3D map shows, seen from above, each in the colour it has there (your guide's green, your
+waypoint's blue, and so on: change one on the 3D map and it changes in the game). In a route's
+own colour where you walk, turned toward light blue where you swim, a light tint of it where
+you fly. The route that leads is the one the game follows: the part behind you goes as you
+walk, and a diamond marks its end (on the
 minimap it sits at the rim, faded, while the end is further than the minimap reaches). Hover the
 diamond on the world map for the words the 3D map shows ("fly Ironforge to Menethil Harbor,
 then..."); right-click it to clear the route. A waypoint whose route has not come yet is marked
 with a fainter diamond, so a click on the map is seen to have taken.
+
+The other routes are lines to look at: a little thinner, drawn from where you were when the
+game last fetched them (it fetches again when you stray from the route you follow, or when what
+leads changes), and with no arrow or list of their own. They come with the route that leads, so
+with nothing leading - no waypoint, and the guide's route cleared - the game shows none.
 
 **The rest of a journey is on the game's world map too.** Open the other continent's map (or
 one of its zones) and the journey's lines there are drawn: what is walked and flown, and the
@@ -1450,6 +1488,18 @@ The map is built from your own installed game. What else it draws on, and where 
 | The doorways between maps (`extractor/doorways.json`) | **ShortestPathForever** by cjber, `Data/Portals.lua` (GPL-3.0-or-later) | Included; the addon's own, newer list is read instead where it is installed |
 | The timetables of boats, zeppelins and the tram (`viewer/transit.json`, `addon/AzerothAtlas/TransitData.lua`) | **DockWatch** by Wyveryx (MIT), recorded in the game; **NauticusClassicResurrected** (MIT) by way of **ForeverTransport** by Stilo | Included |
 | Guides in the game | Guide packs written for **Guidelime** | Read from your game's AddOns folder. Not included |
+
+## If the map does not come up
+
+**"The graphics card would not start"** (or, in older versions, "WebGPU is required ... D3D12
+create command queue failed with E_OUTOFMEMORY"). The map draws with the graphics card, and
+Windows can refuse it one for a moment: just after the map has been built (the page that was
+there is still letting go of the card), or while the game has the card busy. The map asks
+again several times over about ten seconds, and of the other card too on a computer with two (a
+laptop's own, when the one the game runs on will not). If it is still refused it says so, with a
+**Try again** button, and tries again by itself after 15, 30 and 60 seconds. If it keeps
+happening: close what else is using the card, lower the game's graphics settings a notch, or
+update the graphics driver.
 
 ## Known limits
 

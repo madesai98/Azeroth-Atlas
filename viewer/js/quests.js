@@ -483,6 +483,7 @@ export function bindQuests(app) {
     },
     draw(pass, camera, offsetOf, key) { if (plot) for (const l of plot.legs) l.renderer.draw(pass, l.planner, camera, offsetOf, key); },
     drawRest(pass) { if (plot) for (const l of plot.legs) l.renderer.drawRest(pass); },
+    cover(pass) { if (plot) for (const l of plot.legs) l.renderer.cover(pass); },
     show, estimate: (id) => (index ? estimate(id) : null), chain: (id) => (index ? chain(id) : null),
     get plot() { return plot; },
   };

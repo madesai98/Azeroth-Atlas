@@ -87,13 +87,39 @@ fn lambert(n: vec3f) -> vec3f {
 }
 `;
 
-export async function initGPU(canvas) {
-  if (!navigator.gpu) throw new Error('WebGPU is not available in this browser. Use a current version of Chrome or Edge.');
-  const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-  if (!adapter) throw new Error('No WebGPU adapter found (is hardware acceleration enabled?).');
-  const requiredFeatures = [];
-  if (adapter.features.has('texture-compression-bc')) requiredFeatures.push('texture-compression-bc');
-  const device = await adapter.requestDevice({ requiredFeatures });
+// How long to wait before each further try at getting the graphics card (ms). A card can refuse
+// for a moment and be perfectly willing the next: just after the page has loaded itself again
+// (the page before is still letting go of it - as after a map build), or while the game has it
+// busy. What it says then is that it is "out of memory".
+const TRIES = [0, 500, 1000, 2000, 3000, 4000];
+
+/**
+ * The graphics card, for drawing with: asked again where it refuses, and of the other card
+ * where the computer has two (a laptop's own, when the one the game runs on will not).
+ * @param waiting  called before each further try: (which try, of how many)
+ * Throws what the last try said; `.none` on it means there is no WebGPU here at all.
+ */
+async function getDevice(waiting) {
+  if (!navigator.gpu) throw Object.assign(new Error('WebGPU is not available in this browser. Use a current version of Chrome or Edge.'), { none: true });
+  let last = null, found = false;
+  for (let i = 0; i < TRIES.length; i++) {
+    if (TRIES[i]) { waiting(i, TRIES.length - 1); await new Promise((r) => setTimeout(r, TRIES[i])); }
+    for (const powerPreference of i < 2 ? ['high-performance'] : ['high-performance', 'low-power']) {
+      try {
+        // (asked for afresh each time: one that has refused is of no further use)
+        const adapter = await navigator.gpu.requestAdapter({ powerPreference });
+        if (!adapter) { last = last ?? new Error('No WebGPU adapter found (is hardware acceleration enabled?).'); continue; }
+        found = true;
+        const requiredFeatures = adapter.features.has('texture-compression-bc') ? ['texture-compression-bc'] : [];
+        return { device: await adapter.requestDevice({ requiredFeatures }), requiredFeatures };
+      } catch (err) { last = err; }
+    }
+  }
+  throw Object.assign(last ?? new Error('The graphics card could not be started.'), { none: !found });
+}
+
+export async function initGPU(canvas, waiting = () => {}) {
+  const { device, requiredFeatures } = await getDevice(waiting);
   const context = canvas.getContext('webgpu');
   const format = navigator.gpu.getPreferredCanvasFormat();
   // Render through an sRGB view so lighting math happens in linear space.

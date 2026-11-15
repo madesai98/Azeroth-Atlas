@@ -61,6 +61,39 @@ function fatal(title, msg) {
   $('fatal').style.display = 'flex';
 }
 
+// ---- the graphics card would not start, or was lost -------------------------------------------
+// Said in plain words, with a button to try again - and tried again by itself a few times, a
+// little later each time: it is mostly a passing thing (the card busy with the game, or with the
+// page that was here a moment ago), and the map is often left open with nobody looking at it.
+const GPU_TRIES_KEY = 'wfmap.gpuTries'; // (how often this tab has tried again by itself: kept across its reloads, forgotten once the map is up)
+const GPU_WAITS = [15, 30, 60];         // seconds before each of those tries
+const gpuTries = () => { try { return +sessionStorage.getItem(GPU_TRIES_KEY) || 0; } catch { return 0; } };
+function gpuTrouble(title, msg, detail) {
+  fatal(title, msg);
+  $('fatalMore').textContent = detail ?? '';
+  const again = $('fatalAgain');
+  again.style.display = '';
+  again.onclick = () => { try { sessionStorage.removeItem(GPU_TRIES_KEY); } catch { /* tried again all the same */ } location.reload(); };
+  const n = gpuTries(), wait = GPU_WAITS[n];
+  if (wait === undefined) return; // (it has been tried enough by itself: the button is there)
+  let left = wait;
+  const tick = () => {
+    $('fatalMsg').textContent = `${msg} Trying again by itself in ${left} s.`;
+    if (left-- > 0) { setTimeout(tick, 1000); return; }
+    try { sessionStorage.setItem(GPU_TRIES_KEY, String(n + 1)); } catch { /* it tries once more than it should, at worst */ }
+    location.reload();
+  };
+  tick();
+}
+/** What the card's refusal means, in words: [title, what to do]. */
+function gpuWords(err) {
+  if (err?.none) return ['WebGPU is required', err.message];
+  const busy = /OUTOFMEMORY|out of memory|8007000E|device.?removed|DXGI_ERROR|887A000[5-7]/i.test(err?.message ?? '');
+  return ['The graphics card would not start', busy
+    ? 'Windows says the graphics card is out of memory. That mostly passes by itself: it happens when the game or another program has the card busy, and just after the map has been built. If it keeps happening, close what else is using the card (or lower the game\u2019s graphics settings) and try again.'
+    : 'The graphics card refused to start drawing. Trying again often helps; so does updating the graphics driver.'];
+}
+
 async function getJSON(url) {
   const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
@@ -439,6 +472,10 @@ function render() {
   app.npcs.figureDist = app.opts.figure ? app.opts.figureDist : 0;
   app.npcFigures.draw(pass, app.npcs, camera, app.npcs.figureDist);
   if (shapes.length) app.transitView.draw(pass, shapes, camera);
+  // (the routes' lines, for the water to be behind where they are in front of it: a flight over a river)
+  app.routeRenderer.cover(pass);
+  app.trips.cover(pass);
+  app.questUi.cover(pass);
   app.terrain.drawWater(pass, draws, sea);
   // (the rest of a journey - on the other continent, across the sea - over the water it crosses)
   app.routeRenderer.drawRest(pass);
@@ -511,7 +548,30 @@ function frame(now) {
       // (hint: the height of the surface that was clicked; quick: no question about the level; stamp: a new one with every click)
       hint: app.pin.hit, quick: app.pin.quick, stamp: app.pin.stamp,
     } : null;
-    let target = P?.target ?? app.routeTo ?? marker;
+    // One waypoint of your own, wherever it was placed - a Ctrl-click or a Shift-click on the
+    // game's map, a click on this one: the newest takes the place of the one before.
+    const gw = (P?.live ? P.heads : null)?.waypoint ?? null;
+    const gwKey = gw ? `${gw.map},${gw.x.toFixed(1)},${gw.y.toFixed(1)}` : '';
+    if (gwKey !== (app.gameWay?.key ?? '')) {
+      app.gameWay = { key: gwKey, at: Date.now(), spot: gw };
+      // (one placed in the game since the marker was dropped here: the marker is done with -
+      // unless it is that very marker, which the game has taken up as its waypoint)
+      if (gw && app.pin && !samePlace(gw, app.pin)) setPin(null, null, false, false, undefined, true);
+    }
+    if (app.wayDropped && !samePlace(gw, app.wayDropped)) app.wayDropped = null; // (the game has let go of it too)
+    const taken = samePlace(gw, app.pin);                                         // the game's waypoint is the marker dropped here
+    const newer = !!app.pin && !!gw && !taken && app.pin.at > app.gameWay.at;     // the marker was dropped after the game's waypoint was placed: that one is done with
+    const gone = samePlace(gw, app.wayDropped);                                   // taken off here: the game's is done with too
+    // (what the game is told when it next asks for a route - ingame.js: take this marker up as
+    // your waypoint; or let go of the waypoint you have)
+    app.markerForGame = app.pin && (!gw || taken || newer) ? { stamp: app.pin.at, map: app.pin.map, x: app.pin.x, y: app.pin.y, placed: Math.floor(app.pin.at / 1000) }
+      : gone ? { stamp: app.wayDropped.at, off: true, placed: Math.floor(app.wayDropped.at / 1000) } : null;
+    // What the game is heading for - but not a waypoint of its own that is done with; and the
+    // marker it has taken up is still the marker, on the level that was chosen for it here.
+    let fromGame = P?.target ?? null;
+    if (fromGame && fromGame.source !== 'guide' && (newer || gone) && samePlace(gw, fromGame)) fromGame = null;
+    else if (fromGame && taken && samePlace(fromGame, app.pin) && app.pin.z !== undefined) fromGame = { ...fromGame, z: app.pin.z, name: app.pin.exact ? app.pin.name : undefined };
+    let target = fromGame ?? app.routeTo ?? marker;
     // Which kind of route that is: to your guide's step, or to a waypoint of your own. It leads -
     // it is the one the game follows - and this planner has it; the others are trips.js's.
     const leadKind = target?.source === 'guide' ? 'guide' : 'waypoint';
@@ -535,7 +595,7 @@ function frame(now) {
     const want = {}, heads = P?.live ? P.heads : null, here = app.scene.map.id;
     if (heads && me) {
       if (heads.guide) want.guide = { ...heads.guide, source: 'guide' };
-      if (heads.waypoint) want.waypoint = { ...heads.waypoint, source: 'pin' };
+      if (gw && !taken && !newer && !gone) want.waypoint = { ...gw, source: 'pin' };
       if (heads.quest) {
         const g = app.npcs.questGoal(heads.quest, me);
         if (g) want.quest = { map: here, x: g.x, y: g.y, z: g.z ?? undefined, name: `${app.npcs.quests?.quests?.[heads.quest]?.n ?? 'Quest'}: ${g.done ? 'hand in to ' : ''}${g.name}`, source: 'quest' };
@@ -655,11 +715,25 @@ function updateReadout() {
  *               with no question asked (as a Shift-click on the game's map does)
  */
 // p: [x, y, z] on the map `on` (one of the open maps; the one in hand unless said), or null to take the marker away
-function setPin(p, name = null, exact = false, quick = false, on = app.here) {
-  if (!p) { app.pin = null; app.labels.pins = []; app.dirty = true; return; }
+/** Is this the same place, to within a step? ({ map, x, y } each) */
+const samePlace = (a, b) => !!a && !!b && a.map === b.map && Math.hypot(a.x - b.x, a.y - b.y) < 1.5;
+
+/** @param byGame  (taking it off) a waypoint newly placed in the game has taken its place: nothing of the game's is to be let go of */
+function setPin(p, name = null, exact = false, quick = false, on = app.here, byGame = false) {
+  if (!p) {
+    // Taken off by you, where it had become the game's waypoint too - or had taken the place of
+    // an older one of the game's: the game is to let go of its waypoint as well (it is told
+    // when it next asks for a route), and until it has, that waypoint is not shown here.
+    const g = app.gameWay?.spot;
+    if (app.pin && !byGame && g && (samePlace(g, app.pin) || app.pin.at > app.gameWay.at)) app.wayDropped = { map: g.map, x: g.x, y: g.y, at: Date.now() };
+    app.pin = null; app.labels.pins = []; app.dirty = true;
+    return;
+  }
   const d = describe(p, on);
   app.pinStamp = (app.pinStamp ?? 0) + 1;
-  app.pin = { kind: 'pin', map: on.id, exact, quick, hit: p[2], stamp: app.pinStamp, name: name || d.coords || `${p[0].toFixed(0)}, ${p[1].toFixed(0)}`, x: p[0], y: p[1], z: p[2], lift: 2, prio: 1000, minDist: 0, maxDist: Infinity };
+  app.wayDropped = null;
+  // (at: when it was dropped - which of it and a waypoint placed in the game is the newer goes by this)
+  app.pin = { kind: 'pin', map: on.id, exact, quick, hit: p[2], stamp: app.pinStamp, at: Date.now(), name: name || d.coords || `${p[0].toFixed(0)}, ${p[1].toFixed(0)}`, x: p[0], y: p[1], z: p[2], lift: 2, prio: 1000, minDist: 0, maxDist: Infinity };
   app.dirty = true;
 }
 
@@ -809,6 +883,118 @@ function showSetup(st) {
   };
   $('setupSave').addEventListener('click', save);
   for (const id of ['setupGame', 'setupData']) $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+}
+
+// ---- "Check for updates": everything, in turn ----------------------------------------------
+// One button that brings up to date whatever is not, and leaves alone what is:
+//   1. Azeroth Atlas itself (server/appupdate.js: a newer version is fetched and put in);
+//   2. the map's data (built again where the game, the QuestieDB addon or the map tool has moved on);
+//   3. the addon in the game (installed or updated - it is the one that came with this version);
+//   4. guide packs made for Guidelime (converted, so that the addon runs them).
+// An update of the map tool, and a new build of the map, load the page again: where the run has
+// got to is kept for the tab (sessionStorage), and it carries on from there when the page is back.
+const RUN_KEY = 'wfmap.checkRun';
+const RUN_MAX = 45 * 60 * 1000; // (a run left over from longer ago than this is not taken up again)
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function showRun(run) {
+  const box = $('checkLines');
+  box.replaceChildren(...run.lines.filter(Boolean).map((l) => { const d = document.createElement('div'); d.className = l.cls ?? ''; d.textContent = l.text; return d; }));
+}
+async function checkAll(resume = null) {
+  const btn = $('checkAll');
+  if (btn.disabled && !resume) return;
+  const run = resume ?? { step: 1, at: Date.now(), lines: [] };
+  const keep = () => { try { sessionStorage.setItem(RUN_KEY, JSON.stringify(run)); } catch { /* it starts over after a reload, that is all */ } };
+  const say = (i, text, cls = 'busy') => { run.lines[i] = { text, cls }; showRun(run); keep(); };
+  const post = async (url) => { const res = await fetch(url, { method: 'POST' }); return res.json(); };
+  // (the server starts itself again when its own code has been updated: asked until it answers)
+  const status = async () => { for (let i = 0; ; i++) { try { return await getJSON('/api/status'); } catch (err) { if (i > 40) throw err; await sleep(700); } } };
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+  showRun(run);
+  try {
+    // 1. Azeroth Atlas itself
+    if (run.step <= 1) {
+      say(0, 'Azeroth Atlas: looking for a newer version…');
+      try { await post('/api/app/check?apply=1'); } catch { /* on its way back: asked below */ }
+      let a = null;
+      for (let i = 0; i < 400; i++) { await sleep(600); a = (await status()).app; if (!a || a.state === 'idle') break; say(0, a.state === 'updating' ? 'Azeroth Atlas: putting in the newer version…' : 'Azeroth Atlas: looking for a newer version…'); }
+      const name = a ? `Azeroth Atlas ${a.version}${a.commit ? ` (${a.commit})` : ''}` : 'Azeroth Atlas';
+      const updated = a?.updated && a.updated.at >= run.at - 2000;
+      if (!a) say(0, 'Azeroth Atlas: this copy cannot look for a newer version', 'warn');
+      else if (a.error) say(0, `${name}: could not look for a newer version (${a.error})`, 'warn');
+      else if (updated) say(0, `${name}: updated just now`, 'good');
+      else if (a.available) say(0, `${name}. ${a.note ?? 'A newer version is out.'}`, 'warn');
+      else say(0, `${name}: up to date${a.note ? `. ${a.note}` : ''}`, a.note ? '' : 'good');
+      run.step = 2; keep();
+      // (its own files changed: the page loads itself again in a moment, and this carries on from step 2)
+      if (updated) await sleep(4000);
+    }
+    // 2. the map's data
+    if (run.step <= 2) {
+      let st = await status();
+      if (st.setup) { say(1, 'Map: tell Azeroth Atlas where the game is first (above), then check again', 'warn'); run.step = 99; }
+      else {
+        const needed = !st.extracted || st.updateAvailable;
+        if (needed && !st.job.running && !run.building) {
+          run.building = st.extracted ? 'update' : 'build';
+          say(1, st.extracted ? 'Map: updating…' : 'Map: building it from your game (the first time takes a good while)…');
+          await post('/api/update');
+        }
+        if (run.building) {
+          for (;;) {
+            await sleep(700);
+            st = await status();
+            if (!st.job.running) break;
+            say(1, `Map: ${run.building === 'build' ? 'building' : 'updating'}… ${st.job.phase}${st.job.total ? ` ${Math.round((st.job.done / st.job.total) * 100)}%` : ''}`);
+          }
+          if (st.job.error) say(1, `Map: the ${run.building} failed (${st.job.error})`, 'warn');
+          else say(1, run.building === 'build' ? 'Map: built' : 'Map: updated', 'good');
+          run.step = 3; keep();
+          // (new map data: the page loads itself again to show it - by itself, a moment after the build ends - and this carries on from step 3)
+          if (!st.job.error && st.job.summary?.changed) { await sleep(2500); location.reload(); return; }
+        } else { say(1, 'Map: up to date', 'good'); run.step = 3; keep(); }
+      }
+    }
+    // 3. the addon in the game, and 4. the guide packs
+    if (run.step <= 3) {
+      const packs = (n) => `${n} guide pack${n === 1 ? '' : 's'}`;
+      let a = await getJSON('/api/addon');
+      if (a.error || !a.available) say(2, `Addon: ${a.error ?? a.reason ?? 'the game\u2019s AddOns folder was not found'}`, 'warn');
+      else if (!a.current) {
+        const was = a.installed;
+        const r = await post('/api/addon/install');
+        if (r.error) say(2, `Addon: ${r.error}`, 'warn');
+        else say(2, r.carried ? 'Addon: installed under its new name, Azeroth Atlas, with your settings and guide progress carried over. Start the game.'
+          : !was ? 'Addon: installed. Restart the game so that it loads.'
+          : r.restart ? 'Addon: updated. Restart the game once (leave it altogether: this update brings new files).'
+          : 'Addon: updated. Type /reload in the game.', 'good');
+        a = r.error ? a : r;
+      } else say(2, `Addon: up to date${a.version ? ` (version ${a.version})` : ''}`, 'good');
+      const needs = a.installed ? a.guides?.needs?.length ?? 0 : 0;
+      if (needs) {
+        const r = await post('/api/addon/guides');
+        if (r.error) say(3, `Guides: ${r.error}`, 'warn');
+        else say(3, `Guides: converted ${packs(r.done?.length ?? 0)} (${(r.done ?? []).join(', ')}). Restart the game once.`, 'good');
+      } else if (a.guides?.converted?.length) say(3, `Guides: ${packs(a.guides.converted.length)} ready, nothing to convert`, 'good');
+      else if (a.available) say(3, 'Guides: no guide packs made for Guidelime are installed', '');
+    }
+    say(4, `Checked at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`, '');
+  } catch (err) {
+    say(4, `Stopped: ${err.message}`, 'warn');
+  }
+  try { sessionStorage.removeItem(RUN_KEY); } catch { /* nothing kept */ }
+  btn.disabled = false;
+  btn.textContent = 'Check for updates';
+  refreshAddon(false);
+  pollStatus();
+}
+/** A run that was under way when the page loaded itself again: taken up where it was. */
+function resumeCheck() {
+  let run = null;
+  try { run = JSON.parse(sessionStorage.getItem(RUN_KEY)); } catch { /* none */ }
+  if (run && Date.now() - run.at < RUN_MAX) checkAll(run);
+  else { try { sessionStorage.removeItem(RUN_KEY); } catch { /* none */ } }
 }
 
 // ---- update button -----------------------------------------------------------------------
@@ -1352,10 +1538,17 @@ async function main() {
   let st;
   try { st = await getJSON('/api/status'); } catch (err) { fatal('Map server is not running', 'Start it with "Start Map.bat" (or "npm start") and reload this page.'); return; }
   showStatus(st);
-  if (st.setup) { showSetup(st); return; } // (the game has not been found on this computer: asked for, and nothing else until then)
+  $('checkAll').addEventListener('click', () => checkAll());
+  if (st.setup) { showSetup(st); resumeCheck(); return; } // (the game has not been found on this computer: asked for, and nothing else until then)
   pollStatus();
-  try { app.gpu = await initGPU($('gl')); } catch (err) { fatal('WebGPU is required', err.message); return; }
-  app.gpu.onLost = (info) => fatal('Graphics device was lost', `${info.message || 'The GPU was reset.'} Reload the page to continue.`);
+  try {
+    app.gpu = await initGPU($('gl'), (i, of) => { $('loading').style.display = 'block'; $('loading').textContent = `The graphics card is busy: asking again (${i} of ${of})…`; });
+  } catch (err) { console.error(err); const [title, words] = gpuWords(err); if (err?.none) fatal(title, words); else gpuTrouble(title, words, err.message); return; }
+  $('loading').textContent = 'Loading terrain…';
+  // (lost while drawing - the driver was reset, the card taken away: the page starts afresh, which is what puts it right)
+  app.gpu.onLost = (info) => { if (info.reason !== 'destroyed') gpuTrouble('The graphics card was lost', 'Windows took the graphics card away from the map (a driver that was reset, or the card too busy).', info.message || ''); };
+  // (let go of at once when the page goes - loading itself again, or closed: the page that comes next can then have it)
+  window.addEventListener('pagehide', () => { try { app.gpu.device.destroy(); } catch { /* gone already */ } });
   app.terrain = new TerrainRenderer(app.gpu);
   app.models = new ModelRenderer(app.gpu);
   app.models.onChange = () => { app.dirty = true; };
@@ -1416,7 +1609,8 @@ async function main() {
   };
   app.camera.onModeChange = (fly) => { $('flyhint').style.display = fly ? 'block' : 'none'; $('crosshair').style.display = fly ? 'block' : 'none'; };
   if (!st.extracted) {
-    $('build').textContent = 'No map data yet — press "Build map" to read it from your installed game.';
+    $('build').textContent = 'No map data yet — press "Build map" (or "Check for updates", below) to read it from your installed game.';
+    resumeCheck();
     return;
   }
   try {
@@ -1464,8 +1658,10 @@ async function main() {
   const view = ['x', 'y', 'z'].every((k) => k in h) ? h : known(last) ? last : null;
   const startMap = 'm' in h ? h.m : view?.m ?? (app.manifest.maps.find((m) => m.id === 0 && m.kind === 'terrain') ? 0 : -1);
   try { await openMap(startMap, view); } catch (err) { fatal('Could not open map', err.message); return; }
+  try { sessionStorage.removeItem(GPU_TRIES_KEY); } catch { /* nothing to forget */ }
   // Start listening for the game only once a map is up.
   refreshAddon(false);
+  resumeCheck();
   // (a guide pack installed or updated since is offered for converting without reloading the page)
   setInterval(() => { if (!document.hidden) refreshAddon(false); }, 30000);
   app.player.connect();

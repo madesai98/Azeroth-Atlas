@@ -61,6 +61,48 @@ local BREAK = 8               -- kind flag: this point starts a new stretch
 -- kinds of stretch: on foot, swimming, one no longer sent (it was "through a danger zone"), in the air, carried by a boat or zeppelin
 local COLOUR = { [0] = { 1, 0.82, 0.1 }, { 0.35, 0.75, 1 }, { 1, 0.4, 0.25 }, { 0.8, 0.92, 1 }, { 0.76, 0.61, 1 } }
 local ALSO_MAX = 60           -- lines of a journey that are only shown (on other continents, across the sea), at most
+local MORE_MAX = 80           -- lines of the other routes (shown beside the one that is followed), at most
+-- A route has a colour of its own on the 3D map (your guide's green, your waypoint's blue...),
+-- and is drawn in it here: as it is where you walk, turned toward light blue where you swim,
+-- a light tint of it where you fly, toward violet where a boat carries you. (As RouteRenderer
+-- does on the 3D map: viewer/js/route.js.)
+local function Shades(colour)
+  local r, g, b = floor(colour / 65536) % 256 / 255, floor(colour / 256) % 256 / 255, colour % 256 / 255
+  local function mix(tr, tg, tb, t) return { r + (tr - r) * t, g + (tg - g) * t, b + (tb - b) * t } end
+  local walk = { r, g, b }
+  return { [0] = walk, mix(0.36, 0.78, 1, 0.55), walk, mix(1, 1, 1, 0.62), mix(0.76, 0.61, 1, 0.5) }
+end
+local shadesOf = {} -- (worked out once for each colour)
+local function Shade(colour, kind)
+  if not colour then return nil end
+  local s = shadesOf[colour]
+  if not s then
+    s = Shades(colour)
+    shadesOf[colour] = s
+  end
+  return s[kind] or s[0]
+end
+-- The other routes of a delivery: { map, kind, colour, X, Y, n } each.
+local function More(m)
+  local out = {}
+  if type(m.more) ~= "table" then return out end
+  for _, a in ipairs(m.more) do
+    if type(a) == "table" and #out < MORE_MAX then
+      local map, kind, colour = tonumber(a[1]), tonumber(a[2]) or 0, tonumber(a[3])
+      if kind < 0 or kind > 4 then kind = 0 end
+      local X, Y, c = {}, {}, 0
+      for i = 4, #a - 1, 2 do
+        local x, y = tonumber(a[i]), tonumber(a[i + 1])
+        if x and y then
+          c = c + 1
+          X[c], Y[c] = x, y
+        end
+      end
+      if map and colour and c >= 2 then out[#out + 1] = { map = map, kind = kind, colour = colour, X = X, Y = Y, n = c } end
+    end
+  end
+  return out
+end
 
 local function say(msg) print("|cff7fd4ffAzeroth Atlas|r: " .. msg) end
 
@@ -169,6 +211,9 @@ local function Adopt(m)
     -- continents, and its crossings by boat and zeppelin: { map, kind, X, Y, n, joins (it goes on
     -- from the line before it, over the sea between two continents) }
     also = {},
+    -- rc: the colour this route has on the 3D map (nil from a map that does not say: the colours of old);
+    -- more: the other routes there are, shown beside it and not followed
+    rc = tonumber(m.rc), more = More(m),
   }
   if type(m.also) == "table" then
     for _, a in ipairs(m.also) do
@@ -236,7 +281,7 @@ local function Adopt(m)
       r.lv = { id = tonumber(m.lv.id) or 0, at = tonumber(m.lv.at) or 1, ask = m.lv.ask and true or false, list = list }
     end
   end
-  if n < 2 and #r.steps == 0 then return false end
+  if n < 2 and #r.steps == 0 and #r.more == 0 then return false end
   -- (bare: a journey with nothing to draw on this map - it begins with a hearthstone, or a boat you stand by)
   r.n, r.bare = n, n < 2
   r.tall = tall and n >= 2
@@ -535,6 +580,34 @@ local function Arrive(t)
   end
 end
 
+-- The marker dropped on the 3D map is your waypoint here too: there is one waypoint of your own,
+-- wherever it was placed. A delivery names the marker (a number that is new with each one,
+-- where it is, when it was dropped), and one not seen before is taken up as a quick waypoint -
+-- unless the waypoint you have here was placed after it. Word that it has been taken off the
+-- 3D map lets go of the waypoint here, unless that was placed since.
+local mark = { stamp = nil }
+local function Marker(m)
+  local k = m.mk
+  if type(k) ~= "table" then return end
+  local stamp = tonumber(k[1])
+  if not stamp then return end
+  local db = type(AzerothAtlasCharDB) == "table" and AzerothAtlasCharDB or nil
+  if mark.stamp == nil and db then mark.stamp = tonumber(db.mark) end
+  if stamp == mark.stamp then return end
+  mark.stamp = stamp
+  if db then db.mark = stamp end
+  -- (when it happened, by this game's clock: the delivery says how long before it was written)
+  local at = GetTime() - math.max(0, (tonumber(m.at) or 0) - (tonumber(k[5]) or 0))
+  local own = shared.OwnAt and shared.OwnAt()
+  if own and own >= at then return end
+  local map, north, west = tonumber(k[2]), tonumber(k[3]), tonumber(k[4])
+  if map and north and west then
+    if shared.Quick then shared.Quick(map, north, west, at) end
+  elseif own and shared.OwnOff then
+    shared.OwnOff()
+  end
+end
+
 -- A mailbox is due: open it and see what the 3D map says.
 local function Fetch(now)
   local t, w = shared.target, want
@@ -562,6 +635,7 @@ local function Fetch(now)
     return
   end
   quietUntil, quietFor = -1, QUIET
+  pcall(Marker, m)
   if Matches(m, t) then pin.asked = now end
   -- (the 3D map follows how high you are: when it says you are at the waypoint, on its level, you are)
   if (t.kind == W_PIN or t.kind == W_QUICK) and Matches(m, t) and m.there == true and pin.far
@@ -598,6 +672,9 @@ local function Fetch(now)
       -- (what the 3D map knows meanwhile: you are on this route - then a doubt about which part is settled if only one is near - and at its end or not)
       route.trust = m.sure == true or nil
       if m.there == true then route.there = true elseif m.there == false then route.there = false end
+      -- (the other routes are as the 3D map has them now)
+      route.more, route.rc = More(m), tonumber(m.rc)
+      rev = rev + 1
     end
     if kept or Adopt(m) then
       want, gave, note = nil, nil, nil
@@ -751,17 +828,22 @@ function shared.MailReport()
 end
 
 -- ---- what you can tell it -------------------------------------------------------------------
+-- Clearing: a waypoint of your own is taken away, and nothing else - your guide's step, if it
+-- is on one, leads again. With no waypoint of your own it is the guide's route that is cleared,
+-- until the guide moves on.
 function shared.Clear()
   local t = shared.target
+  local own = t.kind == W_PIN or t.kind == W_QUICK
   if t.kind == W_PIN then
     if C_Map and C_Map.ClearUserWaypoint then pcall(C_Map.ClearUserWaypoint) end
     if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then pcall(C_SuperTrack.SetSuperTrackedUserWaypoint, false) end
   end
   if shared.QuickOff then shared.QuickOff() end
-  if shared.ClearHeading then shared.ClearHeading() end
+  if not own and shared.ClearHeading then shared.ClearHeading() end
   Drop()
   want, gave, note = nil, nil, nil
-  say("route cleared. A new guide step, or a Shift-click or Ctrl-click on the map, starts another.")
+  if own then say("waypoint cleared.")
+  else say("route cleared. A new guide step, or a Shift-click or Ctrl-click on the map, starts another.") end
 end
 
 function shared.Ask()
@@ -830,7 +912,7 @@ KeyButton("AzerothAtlasFetchButton", function() shared.Ask() end)
 local function Strokes(frame)
   return { frame = frame, under = {}, over = {}, used = 0 }
 end
-local function Stroke(s, anchor, x1, y1, x2, y2, kind, thick)
+local function Stroke(s, anchor, x1, y1, x2, y2, kind, thick, colour)
   local i = s.used + 1
   s.used = i
   local under, over = s.under[i], s.over[i]
@@ -840,7 +922,7 @@ local function Stroke(s, anchor, x1, y1, x2, y2, kind, thick)
     over = s.frame:CreateLine(nil, "ARTWORK")
     s.under[i], s.over[i] = under, over
   end
-  local c = COLOUR[kind] or COLOUR[0]
+  local c = Shade(colour, kind) or COLOUR[kind] or COLOUR[0]
   over:SetColorTexture(c[1], c[2], c[3], 1)
   under:SetThickness(thick * 1.9)
   over:SetThickness(thick)
@@ -935,6 +1017,8 @@ local function DrawMap()
   local gm, mn, mw = continent, gn, gw
   local also = whole and whole.also[1] and whole.also or nil
   if also and whole.em and whole.ex and whole.ey then gm, gn, gw = whole.em, whole.ex, whole.ey end
+  local more = whole and whole.more[1] and whole.more or nil
+  local rc = whole and whole.rc or nil
   local uiMap = WorldMapFrame:GetMapID()
   local W, H = f:GetWidth(), f:GetHeight()
   -- one screen unit, in the canvas's own units (the canvas is scaled as the map is zoomed)
@@ -958,7 +1042,7 @@ local function DrawMap()
   onMap.sig = sig
   s.used = 0
   onMap.goal:Hide()
-  if not ax and not gax and not (also and open) then Finish(s) return end
+  if not ax and not gax and not ((also or more) and open) then Finish(s) return end
   -- (over a stitched map's art, which is drawn higher up than the game's own map)
   local level = top and top >= onMap.level and top + 1 or onMap.level
   if f:GetFrameLevel() ~= level then
@@ -966,6 +1050,32 @@ local function DrawMap()
     onMap.goal:SetFrameLevel(level + 1)
   end
   local thick, step = 2.4 * unit, 2.5 * unit
+  -- The other routes there are, each in its own colour and a little thinner: drawn first, so
+  -- that the one you follow lies over them where they run together.
+  local where = {}
+  if more and open then
+    for _, a in ipairs(more) do
+      local p = where[a.map]
+      if p == nil then
+        local pa, pb, pc, pd, pe, pf, pg = Projection(uiMap, a.map, a.X[1], a.Y[1])
+        p = pa and { pa, pb, pc, pd, pe, pf, pg } or false
+        where[a.map] = p
+      end
+      if p then
+        local AX, AY = a.X, a.Y
+        local ux, uy = (p[1] * AX[1] + p[2] * AY[1] + p[3]) * W, -(p[4] * AX[1] + p[5] * AY[1] + p[6]) * H
+        for i = 2, a.n do
+          local vx, vy = (p[1] * AX[i] + p[2] * AY[i] + p[3]) * W, -(p[4] * AX[i] + p[5] * AY[i] + p[6]) * H
+          if i == a.n or (vx - ux) ^ 2 + (vy - uy) ^ 2 >= step * step then
+            if p[7] or not ((ux < 0 and vx < 0) or (ux > W and vx > W) or (uy > 0 and vy > 0) or (uy < -H and vy < -H)) then
+              Stroke(s, "TOPLEFT", ux, uy, vx, vy, a.kind, thick * 0.75, a.colour)
+            end
+            ux, uy = vx, vy
+          end
+        end
+      end
+    end
+  end
   local X, Y, K, n = r and r.X, r and r.Y, r and r.K, ax and r and r.n or 0
   local have, px, py = false, 0, 0
   for i = r and r.at or 1, n - 1 do
@@ -986,7 +1096,7 @@ local function DrawMap()
       if ends or (qx - px) ^ 2 + (qy - py) ^ 2 >= step * step then
         -- (skip pieces wholly off one side of the map)
         if beyond or not ((px < 0 and qx < 0) or (px > W and qx > W) or (py > 0 and qy > 0) or (py < -H and qy < -H)) then
-          Stroke(s, "TOPLEFT", px, py, qx, qy, k, thick)
+          Stroke(s, "TOPLEFT", px, py, qx, qy, k, thick, rc)
         end
         px, py = qx, qy
         if ends then have = false end
@@ -997,7 +1107,6 @@ local function DrawMap()
   -- zeppelin. Each is drawn where the map shown has the continent it is on (the game's own map
   -- shows one continent; a stitched one, all of them).
   if also and open then
-    local where = {}
     local lx, ly = nil, nil -- where the line before ended on the canvas (nil: it is not on the map shown)
     for _, a in ipairs(also) do
       local p = where[a.map]
@@ -1013,12 +1122,12 @@ local function DrawMap()
         local ux, uy = (p[1] * AX[1] + p[2] * AY[1] + p[3]) * W, -(p[4] * AX[1] + p[5] * AY[1] + p[6]) * H
         -- (a crossing goes on over the open sea from where its line off the other coast ended:
         -- on a map that shows both continents, the two are joined)
-        if a.joins and lx then Stroke(s, "TOPLEFT", lx, ly, ux, uy, a.kind, thick) end
+        if a.joins and lx then Stroke(s, "TOPLEFT", lx, ly, ux, uy, a.kind, thick, rc) end
         for i = 2, a.n do
           local vx, vy = (p[1] * AX[i] + p[2] * AY[i] + p[3]) * W, -(p[4] * AX[i] + p[5] * AY[i] + p[6]) * H
           if i == a.n or (vx - ux) ^ 2 + (vy - uy) ^ 2 >= step * step then
             if p[7] or not ((ux < 0 and vx < 0) or (ux > W and vx > W) or (uy > 0 and vy > 0) or (uy < -H and vy < -H)) then
-              Stroke(s, "TOPLEFT", ux, uy, vx, vy, a.kind, thick)
+              Stroke(s, "TOPLEFT", ux, uy, vx, vy, a.kind, thick, rc)
             end
             ux, uy = vx, vy
           end
@@ -1131,7 +1240,15 @@ local function DrawMini()
   local f, s = onMini.frame, onMini.strokes
   local r, p = route, shared.player
   local goal = onMini.goal
-  if not (r and r.n >= 2 and p.world and p.map == r.map) then
+  -- (lead: the route you follow has a line on the map you are on; more: so has one of the others)
+  local lead = r and r.n >= 2 and p.world and p.map == r.map
+  local more = false
+  if r and p.world then
+    for _, a in ipairs(r.more) do
+      if a.map == p.map then more = true break end
+    end
+  end
+  if not (lead or more) then
     if onMini.sig ~= "" then
       onMini.sig = ""
       s.used = 0
@@ -1148,7 +1265,7 @@ local function DrawMini()
   end
   local W, H = f:GetWidth(), f:GetHeight()
   local square = GetMinimapShape and GetMinimapShape() == "SQUARE"
-  local sig = rev .. ":" .. p.north .. ":" .. p.west .. ":" .. reach .. ":" .. facing .. ":" .. W .. ":" .. H .. ":" .. (r.moved or 0)
+  local sig = rev .. ":" .. p.north .. ":" .. p.west .. ":" .. reach .. ":" .. facing .. ":" .. W .. ":" .. H .. ":" .. (r.moved or 0) .. ":" .. p.map
   if sig == onMini.sig then return end
   onMini.sig = sig
   s.used = 0
@@ -1159,6 +1276,29 @@ local function DrawMini()
   local function place(north, west)
     local e, nn = (pw - west) / reach, (north - pn) / reach
     return e * cosine + nn * sine, nn * cosine - e * sine
+  end
+  -- the other routes there are, a little thinner (drawn first: the one you follow lies over them)
+  if more then
+    local out = (1.5 * reach) ^ 2 -- (a piece with both ends this far off cannot cross the minimap: a quick look before the sums)
+    for _, a in ipairs(r.more) do
+      if a.map == p.map then
+        local AX, AY = a.X, a.Y
+        for i = 1, a.n - 1 do
+          local d1, d2 = (AX[i] - pn) ^ 2 + (AY[i] - pw) ^ 2, (AX[i + 1] - pn) ^ 2 + (AY[i + 1] - pw) ^ 2
+          if d1 < out or d2 < out or (AX[i] - AX[i + 1]) ^ 2 + (AY[i] - AY[i + 1]) ^ 2 > out then
+            local u1, v1 = place(AX[i], AY[i])
+            local u2, v2 = place(AX[i + 1], AY[i + 1])
+            local a1, b1, a2, b2 = Inside(u1, v1, u2, v2, square)
+            if a1 then Stroke(s, "CENTER", a1 * hw, b1 * hh, a2 * hw, b2 * hh, a.kind, 1.6, a.colour) end
+          end
+        end
+      end
+    end
+  end
+  if not lead then
+    Finish(s)
+    goal:Hide()
+    return
   end
   local X, Y, K, C, n = r.X, r.Y, r.K, r.C, r.n
   local far = (C[r.at] or 0) + reach * 2.5 + 100 -- (no need to look further along the route than this)
@@ -1171,7 +1311,7 @@ local function DrawMini()
       local u1, v1 = place(north, west)
       local u2, v2 = place(X[i + 1], Y[i + 1])
       local a1, b1, a2, b2 = Inside(u1, v1, u2, v2, square)
-      if a1 then Stroke(s, "CENTER", a1 * hw, b1 * hh, a2 * hw, b2 * hh, k, 2.2) end
+      if a1 then Stroke(s, "CENTER", a1 * hw, b1 * hh, a2 * hw, b2 * hh, k, 2.2, r.rc) end
     end
   end
   Finish(s)
