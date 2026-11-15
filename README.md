@@ -858,11 +858,19 @@ To follow it without the map open (`addon/AzerothAtlas/Guide.lua`):
   aims a dozen yards further along the line, so it leads you round corners and back onto the
   route when you are off it), how far it is to the end of the step you are on, and what that
   step is. It dims when the route is behind you. On a flight, on a boat, or with the hearthstone
-  to use, there is no way to point: it shows the time that step takes instead;
+  to use, there is no way to point: it shows the time that step takes instead. **It can be
+  moved and it can be hidden**: in the options (Esc > Options > AddOns > Azeroth Atlas) untick
+  "Show the arrow" and it is gone altogether; tick "Unlock it" and it can be dragged with the
+  mouse to wherever you want it, at any time (`/atlas arrow unlock`, `/atlas arrow lock`).
+  Locked - as it is unless you unlock it - clicks go through it to the game; unlocked, the left
+  button is its own, to drag it by;
 - **the list of routes**, under the header **Routes**. Every route there is has a group of its
   own, the one that leads first: its name ("Waypoint: Moonbrook", "Guide: Sentinel Hill", the
-  quest's own name, "Party: Thrallina"), before it a small square in the colour its line has on
-  the map, after it the time and distance left in all - and under the name the journey as things
+  quest's own name, "Party: Thrallina"), before it **a small arrow in the colour its line has
+  on the map, pointing the way that route goes from where you stand** (it turns as you turn,
+  as the big arrow does for the route you follow; where there is no way to point - a flight, a
+  boat, a route that is not on your map - it is a small square in that colour instead), after
+  it the time and distance left in all - and under the name the journey as things
   to do, the one you are on first and bright, each with its time ("Walk to Sentinel Hill's
   flight master 0:14", "Fly to Stormwind 2:05", "Walk to your map pin 0:40"). Steps you have
   done drop off the top. **A click on a route's name folds its steps away** (the name stays,
@@ -910,7 +918,8 @@ you drag the arrow, and the list where it stands on its own (type it again when 
 
 **Options.** All of this is also under **Esc > Options > AddOns > Azeroth Atlas** (or
 `/atlas options`): the strip (shown or not, and where: see "Live player link"), your
-hearthstone, the arrow, the list, whether it hangs under Questie's, and moving the two.
+hearthstone, the arrow (shown or not; unlocked, to be dragged, or locked), the list, whether
+it hangs under Questie's, and moving the two.
 
 There is one router, the 3D map's, so the two cannot disagree. The route is not worked out
 again inside the game. With the **OpenMap** addon showing its stitched world map, the route is

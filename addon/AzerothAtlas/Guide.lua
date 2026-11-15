@@ -15,6 +15,7 @@
 --                  the level nearest your own height.
 --
 -- /atlas arrow, /atlas list   each on or off
+-- /atlas arrow unlock, lock     the arrow can be dragged with the mouse at any time, or stays put (and clicks go through it)
 -- /atlas pin                    the step list under Questie's quest list, or on its own
 -- /atlas move                   drag the two where you want them (again: done)
 -- /atlas reset                  back where they were
@@ -72,21 +73,41 @@ local function Place(f, key, default)
     f:SetPoint(default[1], UIParent, default[1], default[2], default[3])
   end
 end
+-- (f.free: it is unlocked - it can be dragged at any time, with no /atlas move: the arrow, where
+-- you have unlocked it in the options. The pointer on it then shows what can be dragged.)
 local function Movable(f, key, default)
   f:SetMovable(true)
   f:SetClampedToScreen(true)
   f:RegisterForDrag("LeftButton")
-  f:SetScript("OnDragStart", function(self) if moving then self:StartMoving() end end)
+  f:SetScript("OnDragStart", function(self) if moving or self.free then self:StartMoving() end end)
+  -- (only the left button is its own - to drag it by: turning the camera with the right one goes on through it)
+  if f.SetPassThroughButtons then pcall(f.SetPassThroughButtons, f, "RightButton", "MiddleButton") end
   f:SetScript("OnDragStop", function(self)
     self:StopMovingOrSizing()
     local left, top = self:GetLeft(), self:GetTop()
     if left and top then Settings()[key] = { left, top } end
   end)
-  f:EnableMouse(moving) -- (clicks go through it to the game, except while it is being moved)
+  f:EnableMouse(moving) -- (clicks go through it to the game, except while it is being moved, or is unlocked)
   local shade = f:CreateTexture(nil, "BACKGROUND")
   shade:SetAllPoints(f)
   shade:SetColorTexture(0.1, 0.3, 0.6, 0.45)
   if not moving then shade:Hide() end
+  f:SetScript("OnEnter", function(self)
+    if moving or not self.free then return end
+    shade:SetAlpha(0.45)
+    shade:Show()
+    if GameTooltip then
+      GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+      GameTooltip:AddLine("Drag to move it")
+      GameTooltip:AddLine("Lock it again under Esc > Options > AddOns > Azeroth Atlas (or /atlas arrow lock): clicks then go through it.", 1, 1, 1, true)
+      GameTooltip:Show()
+    end
+  end)
+  f:SetScript("OnLeave", function(self)
+    if GameTooltip then GameTooltip:Hide() end
+    shade:SetAlpha(1)
+    if not moving then shade:Hide() end
+  end)
   f.shade, f.placeKey, f.placeDefault = shade, key, default
   movers[#movers + 1] = f
   Place(f, key, default)
@@ -470,13 +491,46 @@ local function ListRow(f, button)
   return row
 end
 
+-- Which way a route goes from where you stand: an angle round from straight ahead (counter-
+-- clockwise, as the game counts facing). nil where there is no way to point: the route is not on
+-- your map, or the step you are on is not one to walk (a flight, a boat, your hearthstone), or
+-- you are being flown, or the game does not say which way you face.
+local function Heading(r)
+  local p = shared.player
+  if r.state ~= "route" or r.bare or r.n < 2 or not p.world or p.map ~= r.map then return nil end
+  local step = r.steps[r.cur]
+  if step and (step.to == nil or step.fly) then return nil end
+  if floor((p.flags or 0) / F_TAXI) % 2 == 1 then return nil end
+  local facing = GetPlayerFacing and GetPlayerFacing()
+  if type(facing) ~= "number" or (issecretvalue and issecretvalue(facing)) then return nil end
+  local tn, tw = AimPoint(r)
+  local dn, dw = tn - p.north, tw - p.west
+  if dn * dn + dw * dw <= 0.25 then return nil end
+  return (atan2(dw, dn) - facing + pi) % (2 * pi) - pi
+end
+
 -- One route in the list: its name (a click on it folds its steps away, or brings them back),
--- before the name a small square in the colour its line has on the map, its steps, and
--- "+3 more" where there are more of them than are listed.
+-- its steps, and "+3 more" where there are more of them than are listed. Before the name, in
+-- the colour its line has on the map: a small arrow that points the way that route goes from
+-- where you stand (as the big arrow does for the one you follow) - or, where there is no way
+-- to point, a small square.
 local function ListGroup(f, rows)
   local g = { title = ListRow(f, true), rows = {}, more = ListRow(f) }
   local title = g.title
   title.mark = title:CreateTexture(nil, "ARTWORK")
+  -- (the arrow: the game's own navigation arrow, its colour taken out so that it can be given the
+  -- route's; a game without that picture, or that cannot do so, keeps the square)
+  local point = title:CreateTexture(nil, "ARTWORK")
+  local drawn = false
+  if point.SetAtlas and point.SetRotation and point.SetVertexColor and point.SetDesaturated and C_Texture and C_Texture.GetAtlasInfo then
+    local ok, info = pcall(C_Texture.GetAtlasInfo, "Navigation-Tracked-Arrow")
+    if ok and info then drawn = pcall(point.SetAtlas, point, "Navigation-Tracked-Arrow") end
+  end
+  point:Hide()
+  if drawn then
+    point:SetDesaturated(true)
+    title.arrow = point
+  end
   title.label:ClearAllPoints()
   title:RegisterForClicks("LeftButtonUp")
   title:SetScript("OnClick", function(self)
@@ -496,12 +550,36 @@ end
 local KIND_HEAD = { "Guide step", "Journey", "Waypoint", "Waypoint" }
 local KIND_KEY = { "guide", "waypoint", "waypoint", "waypoint" }
 
+-- The arrows before the routes' names, each turned the way its route goes just now (or the
+-- square shown in its place: see ListGroup). Looked at many times a second: you turn quickly.
+local function ListPoint(f)
+  local function one(g)
+    local title = g.title
+    if not title.key or not title:IsShown() then return end
+    local angle = title.arrow and title.route and Heading(title.route) or nil
+    if angle then
+      title.arrow:SetRotation(angle)
+      if title.pointing ~= true then
+        title.pointing = true
+        title.arrow:Show()
+        title.mark:Hide()
+      end
+    elseif title.pointing ~= false then
+      title.pointing = false
+      if title.arrow then title.arrow:Hide() end
+      title.mark:Show()
+    end
+  end
+  one(f.lead)
+  for _, g in ipairs(f.groups) do one(g) end
+end
+
 -- One route as the list shows it: { key, head, clock, colour, shut, rows = { { words, clock,
--- cur (the step you are on) } }, more, level }. `lead`: it is the one that leads; `limit`: steps
--- listed at most.
+-- cur (the step you are on) } }, more, level, route (the route itself, for the arrow before its
+-- name) }. `lead`: it is the one that leads; `limit`: steps listed at most.
 local function GroupView(r, lead, limit)
   local db = Settings()
-  local g = { key = r.key or (lead and (KIND_KEY[r.tk] or "waypoint")) or "route", colour = r.rc, rows = {} }
+  local g = { key = r.key or (lead and (KIND_KEY[r.tk] or "waypoint")) or "route", colour = r.rc, rows = {}, route = r }
   g.shut = type(db.shut) == "table" and db.shut[g.key] == true
   g.head = r.head or r.title or (r.name and ("Journey to " .. r.name)) or "Journey"
   if r.state ~= "route" then
@@ -631,8 +709,9 @@ local function ListFill(f, view, look, limit, least, docked)
     end
     if view.moving then
       local title = f.title
-      title.key, title.words, title.clock = nil, "Drag the list of routes where you want it, then /atlas move again.", ""
+      title.key, title.words, title.clock, title.route = nil, "Drag the list of routes where you want it, then /atlas move again.", "", nil
       title.mark:Hide()
+      if title.arrow then title.arrow:Hide() end
       title.label:SetPoint("TOPLEFT", title, "TOPLEFT", 0, 0)
       add(title, WHITE .. title.words .. "|r", look.questFont, look.questSize, LINE_X + look.quest, 4)
     end
@@ -649,17 +728,27 @@ local function ListFill(f, view, look, limit, least, docked)
           f.every[#f.every + 1] = g
         end
       end
-      -- its name, as Questie writes a zone's; before it, the colour its line has on the map
+      -- its name, as Questie writes a zone's; before it, in the colour its line has on the map,
+      -- the arrow that points the way it goes (ListPoint turns it, and shows the square in its
+      -- place where there is no way to point)
       local title = g.title
-      title.key, title.words, title.clock = v.key, v.head, v.clock
+      title.key, title.words, title.clock, title.route = v.key, v.head, v.clock, v.route
       local zs = look.zoneSize
       local ms = floor(zs * 0.5 + 0.5)
       local c = v.colour
-      if c then title.mark:SetColorTexture(floor(c / 65536) % 256 / 255, floor(c / 256) % 256 / 255, c % 256 / 255, 1)
-      else title.mark:SetColorTexture(1, 0.82, 0.1, 1) end
+      local cr, cg, cb = 1, 0.82, 0.1
+      if c then cr, cg, cb = floor(c / 65536) % 256 / 255, floor(c / 256) % 256 / 255, c % 256 / 255 end
+      title.mark:SetColorTexture(cr, cg, cb, 1)
       title.mark:SetSize(ms, ms)
       title.mark:SetPoint("CENTER", title, "TOPLEFT", zs / 2, -zs / 2)
       title.mark:Show()
+      if title.arrow then
+        title.arrow:SetVertexColor(cr, cg, cb)
+        title.arrow:SetSize(zs + 4, zs + 4)
+        title.arrow:SetPoint("CENTER", title, "TOPLEFT", zs / 2, -zs / 2)
+        title.arrow:Hide()
+      end
+      title.pointing = false
       title.label:SetPoint("TOPLEFT", title, "TOPLEFT", zs + 3, 0)
       add(title, GREY .. v.head .. (v.shut and " +" or "") .. "|r" .. (v.clock ~= "" and ("  " .. DIM .. v.clock .. "|r") or ""), look.zoneFont, look.zoneSize, LINE_X, 3, zs + 3)
       if not v.shut then
@@ -683,6 +772,7 @@ local function ListFill(f, view, look, limit, least, docked)
     end
     -- (the room Questie leaves under each quest)
     y = y + look.padding + 1
+    ListPoint(f)
   end
 
   -- Under Questie's list: its ground, if it has one. On its own: a dark one, to be read over anything.
@@ -777,6 +867,8 @@ local function ListUpdate(f)
   if sig ~= list.sig then
     list.sig, list.limit, list.least = sig, limit, least
     ListFill(f, view, list.look, limit, least, docked)
+  else
+    ListPoint(f)
   end
   ListPlace(f, q)
   -- it can be dragged while the two are being moved, unless it hangs under Questie's list
@@ -888,6 +980,14 @@ local function EnsureList()
   end)
   level:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
   f.level = level
+  -- (the arrows before the routes' names turn with you: looked at some thirty times a second while the list is on show)
+  local since = 0
+  f:SetScript("OnUpdate", function(self, dt)
+    since = since + (dt or 0)
+    if since < 0.033 then return end
+    since = 0
+    pcall(ListPoint, self)
+  end)
   f:Hide()
   list.frame = f
   return f
@@ -1053,9 +1153,12 @@ local function SetMoving(on)
     -- (the step list: ListUpdate says whether it can be dragged)
     if f ~= list.frame then
       f:EnableMouse(on)
+      f.shade:SetAlpha(1)
       if on then f.shade:Show() else f.shade:Hide() end
     end
   end
+  -- (the arrow, unlocked, goes on taking the mouse: GuideScan sees to it)
+  if arrow.frame then arrow.frame.free = nil end
   arrow.distance, arrow.words, list.sig = "", "", ""
 end
 
@@ -1074,6 +1177,17 @@ function shared.GuideScan(now)
     end
   elseif arrow.frame and arrow.frame:IsShown() then
     arrow.frame:Hide()
+  end
+  -- (unlocked in the options: it takes the mouse, and can be dragged where you want it at any
+  -- time; locked, clicks go through it to the game)
+  local af = arrow.frame
+  if af then
+    local free = db.arrowFree == true
+    if af.free ~= free then
+      af.free = free
+      af:EnableMouse(free or moving)
+      if not free and not moving then af.shade:Hide() end
+    end
   end
 
   -- the list of routes: while there is one, or a waypoint whose route is not there yet (and while
@@ -1111,8 +1225,14 @@ function shared.GuideScan(now)
 end
 
 -- ---- what you can tell it ------------------------------------------------------------------------
-function shared.GuideCommand(word)
+function shared.GuideCommand(word, rest)
   local db = Settings()
+  if word == "arrow" and (rest == "unlock" or rest == "lock") then
+    -- /atlas arrow unlock: drag it with the mouse, whenever you like; /atlas arrow lock: it stays, and clicks go through it
+    db.arrowFree = rest == "unlock" or nil
+    say(db.arrowFree and "the arrow is unlocked: drag it where you want it (/atlas arrow lock when it is there)." or "the arrow is locked where it is: clicks go through it.")
+    return true
+  end
   if word == "level" then
     local r = shared.Route()
     if r and r.lv then
@@ -1333,16 +1453,19 @@ do
       Words("Routes in the game", "GameFontNormal", 16, -280)
       Check("Use my hearthstone in routes, where it is the quicker way (this character)", 14, -298,
         function() return not shared.HearthOff() end, function(on) shared.SetHearth(on) end)
-      Check("Show the arrow", 14, -324, function() return DB().arrow ~= false end, function(on) DB().arrow = on end)
-      Check("Show the list of routes", 14, -350, function() return DB().list ~= false end, function(on) DB().list = on end)
-      Check("Hang the list of routes under Questie's quest list", 14, -376, function() return DB().pin ~= false end, function(on) DB().pin = on end)
+      -- the arrow: shown or not at all; and unlocked (it can be dragged with the mouse at any time) or locked where it is
+      Check("Show the arrow (the compass that points along the route you follow)", 14, -324, function() return DB().arrow ~= false end, function(on) DB().arrow = on end)
+      Check("Unlock it: drag it with the mouse to where you want it (locked, clicks go through it)", 38, -350,
+        function() return DB().arrowFree == true end, function(on) DB().arrowFree = on or nil end)
+      Check("Show the list of routes", 14, -376, function() return DB().list ~= false end, function(on) DB().list = on end)
+      Check("Hang the list of routes under Questie's quest list", 14, -402, function() return DB().pin ~= false end, function(on) DB().pin = on end)
     end)
     piece(function()
       local move
-      move = Press("Move the arrow and the list", 20, -410, 220, function()
+      move = Press("Move the arrow and the list", 20, -436, 220, function()
         if shared.GuideCommand then shared.GuideCommand("move") end
       end)
-      Press("Put them back", 250, -410, 140, function()
+      Press("Put them back", 250, -436, 140, function()
         if shared.GuideCommand then shared.GuideCommand("reset") end
       end)
       shows[#shows + 1] = function()
@@ -1350,7 +1473,7 @@ do
         move:SetText(peek and peek.moving and "Done moving them" or "Move the arrow and the list")
       end
       Words("While they are being moved, drag each where you want it (close this window to see them). A list that hangs under Questie's quest list moves with that.",
-        "GameFontHighlightSmall", 20, -440, WIDE)
+        "GameFontHighlightSmall", 20, -466, WIDE)
     end)
 
     if problems[1] then say("a part of the options could not be shown (" .. problems[1] .. "). Everything there can also be typed: /atlas help.") end
