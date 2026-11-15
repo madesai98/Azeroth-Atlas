@@ -1,6 +1,7 @@
 // Live player link. Starts a tiny screen-reader helper (server/strip-reader.cs) that watches the
-// coded strip the AzerothAtlas addon draws in the game window, decodes it, and streams the
-// result to the viewer. The helper only runs while a map page is listening.
+// coded strip the AzerothAtlas addon draws in the game window (finding it in whichever corner
+// it has been put), decodes it, and streams the result to the viewer. The helper only runs
+// while a map page is listening.
 import { spawn, execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -148,6 +149,9 @@ export class PlayerTracker {
       // How the helper is looking: 'window' = the game window's own picture (works with other
       // windows in front), 'screen' = that spot of the screen (needs the game's corner uncovered).
       else if (kind === 'method') this.#set({ capture: rest[0] });
+      // Where the strip was found, counted from the corner of the area the game draws in (0, 0:
+      // the top-left corner, where it is unless you have moved it in the addon's options).
+      else if (kind === 'strip') { const [x, y] = rest.map(Number); this.#set({ strip: Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null }); }
       else if (kind === 'stalled') this.#set({ status: 'nosignal', reason: 'stalled', party: [] });
       return;
     }

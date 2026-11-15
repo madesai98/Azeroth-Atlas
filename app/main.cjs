@@ -35,6 +35,13 @@ const configArg = args.find((a) => a.startsWith('--config='));
 
 app.setName(NAME);
 app.setAppUserModelId('AzerothAtlas');
+// The map goes on working with its window out of sight - behind the game, on the one screen
+// there is, or minimized: the routes are worked out and sent to the game all the same. The
+// page sees to that itself (viewer/js/main.js: step); here it is only made sure that a page
+// nobody is looking at is not put on short rations for it. (It draws next to nothing then: a
+// picture a second.)
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
 // Where what is yours is kept (see the top of this file).
 const HOME = process.env.AZEROTH_ATLAS_HOME ? path.resolve(process.env.AZEROTH_ATLAS_HOME)
   : app.isPackaged ? path.join(process.env.LOCALAPPDATA || app.getPath('appData'), NAME) : null;
@@ -151,8 +158,10 @@ function open() {
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   if (b.maximized) win.maximize();
-  // (AZEROTH_ATLAS_HIDDEN: for the tests, which run it while the game is being played on the same screen)
-  win.once('ready-to-show', () => { if (!process.env.AZEROTH_ATLAS_HIDDEN) win.show(); });
+  // (AZEROTH_ATLAS_HIDDEN: for the tests, which run it while the game is being played on the same
+  // screen - never shown at all, or, set to "minimized", minimized from the start: the state in
+  // which the map has to go on working, and one of the tests looks at exactly that)
+  win.once('ready-to-show', () => { if (!process.env.AZEROTH_ATLAS_HIDDEN) win.show(); else if (process.env.AZEROTH_ATLAS_HIDDEN === 'minimized') win.minimize(); });
   // (where it is, noted whenever it changes and not only as it closes: a window can go without being asked)
   let noting = 0;
   const soon = () => { clearTimeout(noting); noting = setTimeout(remember, 500); };

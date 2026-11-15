@@ -750,7 +750,10 @@ zones" for why going round them was taken out).
   Tavern"), so the inn is found from that: the zone the place is in, then the innkeeper of that
   zone who is on your side (innkeepers come from QuestieDB). Where a zone has more than one and
   the name does not settle it, the hearthstone is left out until you set it again, when the
-  addon notes the exact spot.
+  addon notes the exact spot. **You can have it left out altogether**: the small hearthstone
+  beside "Routes" in the game (a click strikes it through), `/atlas hearth`, or the addon's
+  options - every route is then worked out without it, and you get the next quickest way. The
+  page says so under the routes while that is on.
 
 All of these are stops in one network, on whichever map they are: the quickest chain from you
 to the waypoint is found by estimate, the walks in it are then worked out for real over the
@@ -856,38 +859,58 @@ To follow it without the map open (`addon/AzerothAtlas/Guide.lua`):
   route when you are off it), how far it is to the end of the step you are on, and what that
   step is. It dims when the route is behind you. On a flight, on a boat, or with the hearthstone
   to use, there is no way to point: it shows the time that step takes instead;
-- **the step list**, under a header that counts the steps (**Current Route: 2/5**: you are on
-  the second of five): the journey's name with the time and distance left in all, then the
-  journey as things to do, the one you are on first and bright, each with its time ("Walk to
-  Sentinel Hill's flight master 0:14", "Fly to Stormwind 2:05", "Walk to your map pin 0:40").
-  Steps you have done drop off the top. A journey that begins with your hearthstone has that as
-  the step you are on until you stand where its line begins: nothing is drawn from you to an
-  inn on the far side of the continent, and the line starts there. (Being nearest to the end of
-  the walk from the inn to a flight master used to count as standing at the flight master: from
-  Dun Morogh, with the hearthstone set to Stormwind, the list began at "3/4, Fly to Darkshire".)
-  Boats say how long the wait is likely to be. Where the waypoint's spot has more than one
-  level, a last line says which the route goes to; click it to choose another. **A click on the
-  header folds the steps away**, and another brings them back (folded, it reads "Current Route:
-  2/5 +").
+- **the list of routes**, under the header **Routes**. Every route there is has a group of its
+  own, the one that leads first: its name ("Waypoint: Moonbrook", "Guide: Sentinel Hill", the
+  quest's own name, "Party: Thrallina"), before it a small square in the colour its line has on
+  the map, after it the time and distance left in all - and under the name the journey as things
+  to do, the one you are on first and bright, each with its time ("Walk to Sentinel Hill's
+  flight master 0:14", "Fly to Stormwind 2:05", "Walk to your map pin 0:40"). Steps you have
+  done drop off the top. **A click on a route's name folds its steps away** (the name stays,
+  marked "+"), as a click on a zone folds its quests away in Questie; **a click on "Routes"
+  folds everything away**. Both are remembered. A journey that begins with your hearthstone has
+  that as the step you are on until you stand where its line begins: nothing is drawn from you
+  to an inn on the far side of the continent, and the line starts there. Boats say how long
+  the wait is likely to be. Where the waypoint's spot has more than one level, a last line says
+  which the route goes to; click it to choose another. A waypoint whose route is not there
+  (yet) is listed all the same, with why: "Working out the route...", that there is no way, or
+  that Azeroth Atlas is not answering;
+- **your hearthstone**, beside the header: a small picture of it. **Click it and it is struck
+  through in red: no route uses your hearthstone any more**, however ready it is - you get the
+  next quickest way instead (for those who keep it for something else). Another click and it is
+  used again wherever it is quicker. `/atlas hearth` does the same. It is kept for each
+  character; the 3D map hears of it through the strip, works every route out again, and the
+  game fetches those.
 
-**The step list is a part of Questie's quest list.** It hangs right under Questie's tracker,
-left edge on left edge, and is written as Questie writes: the header in the letters, size and
-outline of "Questie Tracker: 4/40", the journey as Questie writes a quest's name, the steps as
-it writes what a quest asks for, each starting where Questie starts its own and spaced as it
+**Every route is in the game, not only the one that leads.** The 3D map hands the game each
+route whole - its line, its steps, its name - and the game follows your place on each as you
+walk. They do not hang on a waypoint: with no guide step and no waypoint in the game at all (a
+quest you track and nothing else, say), the routes are still fetched, drawn and listed, and
+the first of them is the one the arrow points along. (Before, the routes to the other places
+only came along with the route to a waypoint - and with none, nothing reached the game, however
+many routes the 3D map was showing.)
+
+**The list is a part of Questie's quest list.** It hangs right under Questie's tracker, left
+edge on left edge, and is written as Questie writes: the header in the letters, size and
+outline of "Questie Tracker: 4/40", a route's name as Questie writes a zone's, the steps as it
+writes what a quest asks for, each starting where Questie starts its own and spaced as it
 spaces them. All of that is read from Questie's settings about once a second, so a change in
-Questie's options (another font, a dark ground under the list) shows in the step list too. It
+Questie's options (another font, a dark ground under the list) shows in the list too. It
 follows Questie's list as that grows, shrinks, is dragged or is folded away; where there is no
 room under it, it goes over it, and failing that beside it. Near the screen's right edge its
-lines are wrapped rather than run off the screen. While Questie hides its list, the step list
-stays where it hung. Nothing of the addon's is ever anchored to Questie's list (that can break
-Questie's own dragging): it is only asked where it is. Without Questie, or after
-`/atlas pin`, the step list stands on its own, on a dark ground.
+lines are wrapped rather than run off the screen. While Questie hides its list, the list of
+routes stays where it hung. Nothing of the addon's is ever anchored to Questie's list (that can
+break Questie's own dragging): it is only asked where it is. Without Questie, or after
+`/atlas pin`, the list stands on its own, on a dark ground.
 
-The arrow and the steps are click-through (the header and the "Level:" line take a click).
-`/atlas arrow` and `/atlas list` switch each off or on, `/atlas pin` takes the step list
-out from under Questie's list or puts it back, `/atlas move` lets you drag the arrow, and the
-step list where it stands on its own (type it again when done), `/atlas reset` puts them
-back.
+The arrow and the steps are click-through (the header, the routes' names, the hearthstone and
+the "Level:" line take a click). `/atlas arrow` and `/atlas list` switch each off or on,
+`/atlas pin` takes the list out from under Questie's list or puts it back, `/atlas move` lets
+you drag the arrow, and the list where it stands on its own (type it again when done),
+`/atlas reset` puts them back.
+
+**Options.** All of this is also under **Esc > Options > AddOns > Azeroth Atlas** (or
+`/atlas options`): the strip (shown or not, and where: see "Live player link"), your
+hearthstone, the arrow, the list, whether it hangs under Questie's, and moving the two.
 
 There is one router, the 3D map's, so the two cannot disagree. The route is not worked out
 again inside the game. With the **OpenMap** addon showing its stitched world map, the route is
@@ -908,10 +931,20 @@ A mailbox can be opened once per login or `/reload`, so they are opened sparingl
 
 - when your waypoint changes: a couple of seconds later (the route is usually worked out by
   then), and again up to five times, further and further apart (the last some 80 seconds after
-  the waypoint was set), if it was not;
+  the waypoint was set), if it was not. After that - and when the 3D map said there was no way -
+  the waypoint is asked about again by itself: after half a minute, then a minute, two, and so
+  on up to five, one mailbox a look. (It used to be asked about again only once you had moved
+  150 yards. A long journey the 3D map was still working out when the game asked, or a waypoint
+  set while a boat was carrying you, then stayed without a route in the game until you typed
+  `/atlas route`, although the 3D map had long since found it.);
+- when what else you could be heading for changes - the quest you track, your quest log while
+  you track one, your body, who is in your party, your guide's step while a waypoint of your own
+  leads: the routes to those, a couple of seconds later;
+- when you switch your hearthstone on or off: the routes worked out since;
 - when you choose another level for your waypoint: the route to that level;
 - when you have been more than 25 yards off the route for a few seconds (the 3D map has planned
-  from where you are by then);
+  from where you are by then). This goes for the route you follow: the one that leads, or with
+  no waypoint in the game the first of the others;
 - when the addon cannot tell which of two levels you are on, or you stand at your waypoint's spot
   while the route says you have not reached it (see "One level over another" below);
 - when you say so: `/atlas route`, or a key bound to *Fetch the route from the 3D map*. That is
@@ -925,8 +958,24 @@ says so when they run low; `/reload` gives them all back.
 The addon tells the server (through the strip) which mailbox it will open next and which
 delivery it last read, so the page can say what the game is showing: "In the game: showing this
 route". Each delivery carries the time it was written; if the game opens one that is more than
-half a minute old the 3D map is evidently not running, and the mailboxes are then left alone
-(one look every five minutes, then ten, and so on) instead of being used up for nothing.
+half a minute old nobody is writing them - the 3D map is not running, or cannot see the game -
+and the mailboxes are then left alone for a while instead of being used up for nothing: a
+quarter of a minute, then half, a minute, and so on up to five. (It used to be five minutes
+straight away, doubling to forty. One look that came too early - the game's first after a
+login, before the 3D map had seen it again - then cost the route for minutes. That is also why
+the server keeps the first two mailboxes filled at all times, and goes on renewing the
+mailboxes for a minute after it last saw the strip: a `/reload` or a loading screen no longer
+leaves the game's next look with something cold.) The list of routes says "Azeroth Atlas is
+not answering" meanwhile, and `/atlas status` says what it knows.
+
+**The map works with its window out of sight.** The routes are worked out by the map's page,
+and a page that is not on show - its window behind the game on the one screen there is, or
+minimized - is given no frames by the browser. Everything used to hang on those frames, so
+with one screen the game got a route only if it asked while you happened to be looking at the
+map. Now a timekeeper beside the page (`viewer/js/tick.js`, a worker: its clock is not held
+back as a hidden page's is) takes the same steps ten times a second whenever the frames stop -
+where you are, the routes, what the game is sent - and draws a picture a second at most, so it
+costs the graphics card next to nothing while you play. Nothing has to be in view.
 
 Installing the mailboxes is part of **Update addon**. The game only notices new addons when it
 starts, so restart it once after that update. The server writes only into folders named
@@ -1161,11 +1210,26 @@ The map can show where you are in real time, along with your party members.
 Addons cannot talk to other programs, so this works in two halves:
 
 1. The **AzerothAtlas** addon (`addon/AzerothAtlas`, installed into the game's AddOns folder
-   with the **Install addon** button) draws a thin strip of coloured squares along the top-left
-   edge of the game window (6 px tall; 348 px wide when you are alone with no waypoint, 676 px at
-   most).
+   with the **Install addon** button) draws a thin strip of coloured squares in a corner of
+   the game window: the top-left one, unless you move it (6 px tall; 348 px wide when you are
+   alone with no waypoint, 676 px at most).
    `/atlas` in game turns it on or off. After the map updates the addon (the button turns
    orange), type `/reload` in game; until then the older addon keeps working.
+
+   **The strip is drawn over everything in the game's own interface**: in the topmost layer
+   there is, at the top of it, and put back there every couple of seconds should another addon
+   have had a say. What it cannot be drawn over is what another *program* draws over the game:
+   a frame-rate counter, a voice chat's overlay, a recording tool's - those are painted onto
+   the game's picture after the game is done with it, and the top-left corner is where most of
+   them sit. So **the strip can be moved**: in the game, **Esc > Options > AddOns > Azeroth
+   Atlas** - one of the four corners, and how many pixels in from it - or
+   `/atlas strip topright 0 40` (a corner: `topleft`, `topright`, `bottomleft`, `bottomright`;
+   then the pixels across, and down or up; `/atlas strip reset` puts it back). Nothing has to be
+   told to the map: where the strip is not in the top-left corner, the helper looks through
+   the whole picture of the game window for its first seven squares, reads it where they are
+   from then on, and looks again when it is no longer there (a look takes a few hundredths of a
+   second, and is only taken while the strip is lost). The page says so when something is in
+   the strip's way: "Cannot read the strip: something is drawn over it in the game".
 
    The addon's commands all begin with `/atlas`. If another addon has that word already (there
    is an old and well-known one called Atlas), it is left to it, the addon says so once when you
@@ -1186,7 +1250,7 @@ streaming and screen-sharing programs use. So it does not matter what is in fron
 or where its window is: you can alt-tab, cover it with other windows or move it between
 monitors. It only stops while the game is minimized (the game draws nothing then) or on a
 loading screen. On a Windows without that API it falls back to reading that spot of the screen,
-which needs the game's top-left corner uncovered.
+which needs the strip's corner of the game uncovered.
 
 Either way it is only picture capture. It does not read the game's memory, does not modify the
 game, and sends it no input; nothing leaves this computer. The only thing it writes on the
@@ -1506,6 +1570,24 @@ laptop's own, when the one the game runs on will not). If it is still refused it
 **Try again** button, and tries again by itself after 15, 30 and 60 seconds. If it keeps
 happening: close what else is using the card, lower the game's graphics settings a notch, or
 update the graphics driver.
+
+## If the routes do not show in the game
+
+The 3D map shows them, the game does not. In the order worth looking:
+
+1. **Is the addon the current one?** Press **Check for updates** (bottom left of the map), then
+   type `/reload` in the game. (Version 15 and later lists the routes under "Routes".)
+2. **Does the map show where you are?** Top of its sidebar: "You: Elwynn Forest 42.1, 65.3"
+   and a green dot. If it says the strip cannot be read, something is drawn over the strip in
+   the game - an overlay of another program, most often in the top-left corner. Move the strip
+   to a free corner: **Esc > Options > AddOns > Azeroth Atlas** in the game.
+3. **Type `/atlas status`** in the game. It says how many deliveries are left (when they are
+   used up: `/reload`), whether a route is showing, and whether Azeroth Atlas is answering at
+   all. The list of routes says the same in a line where a waypoint has no route.
+4. **Azeroth Atlas has to be running**, but its window need not be in view: behind the game or
+   minimized is fine (before version 0.3.0 it was not: with one screen, routes then reached the
+   game only now and then).
+5. `/atlas route` asks the map for its routes there and then.
 
 ## Known limits
 

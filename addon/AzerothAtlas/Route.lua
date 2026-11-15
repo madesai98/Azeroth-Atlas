@@ -38,7 +38,11 @@ local MAIL_NAME, MAIL_MAX = "AzerothAtlas_Mail%03d", 999
 local FIRST_WAIT = 1.8        -- seconds from a new waypoint to opening the first mailbox for it
 local RETRY = { 2.5, 5, 10, 20, 40 } -- then these, while the 3D map is still working the route out
 local LATE = 30               -- seconds: a delivery older than this means nobody is writing them
-local QUIET, QUIET_MAX = 300, 2400 -- seconds to leave the mailboxes alone when nobody is writing (doubling)
+-- Seconds to leave the mailboxes alone when nobody seems to be writing them (doubling). Short
+-- to begin with: the first look after a login can simply have come before the 3D map had seen
+-- the game again, and a route that stays away for minutes over that is a route that "sometimes
+-- does not show". With the 3D map really not running, this costs a dozen mailboxes an hour.
+local QUIET, QUIET_MAX = 15, 300
 local STRAY, STRAY_FOR = 25, 3     -- yards off the route, for this many seconds, before a newer one is fetched
 local STRAY_GAP, STRAY_HOLD = 8, 20 -- seconds between such fetches; and after one that brought nothing new
 local MOVED = 150             -- yards you must move before a waypoint with no route is asked about again
@@ -62,6 +66,13 @@ local BREAK = 8               -- kind flag: this point starts a new stretch
 local COLOUR = { [0] = { 1, 0.82, 0.1 }, { 0.35, 0.75, 1 }, { 1, 0.4, 0.25 }, { 0.8, 0.92, 1 }, { 0.76, 0.61, 1 } }
 local ALSO_MAX = 60           -- lines of a journey that are only shown (on other continents, across the sea), at most
 local MORE_MAX = 80           -- lines of the other routes (shown beside the one that is followed), at most
+local OTHERS_MAX = 8          -- other routes of a delivery (each with its steps), at most
+local HEADS_WAIT = 2.5        -- seconds from a change in what else you could be heading for (the quest you track, your body, your party) to asking for the routes there
+local WANDER_HOLD, WANDER_HOLD_MAX = 20, 300 -- with no route that leads: seconds from one look for a newer route (you have left the one you follow) to the next, doubling while you stay off it...
+local WANDER_BACK = 15        -- ...and back to the first of those once you have been on the route for this long
+local ALLY_NEAR = 80          -- yards from the end of the route to someone in your party within which they still are where it leads
+local HEARTH_FOR = 60         -- seconds from switching your hearthstone on or off in which only a route worked out since will do
+local AGAIN, AGAIN_MAX = 30, 300 -- seconds from giving a waypoint's route up to asking for it once more (doubling)
 -- A route has a colour of its own on the 3D map (your guide's green, your waypoint's blue...),
 -- and is drawn in it here: as it is where you walk, turned toward light blue where you swim,
 -- a light tint of it where you fly, toward violet where a boat carries you. (As RouteRenderer
@@ -192,7 +203,9 @@ local function Drop()
   end
 end
 
-local function Adopt(m)
+-- A route, made of what a delivery says of it: the delivery itself for the one that leads, one
+-- of its `rs` for another (`other`). nil: there is nothing to it.
+local function Build(m, other)
   local r = {
     plan = tonumber(m.plan) or 0, tk = tonumber(m.tk) or 0, tm = tonumber(m.tm) or 0, tx = tonumber(m.tx) or 0, ty = tonumber(m.ty) or 0,
     map = tonumber(m.map) or 0, text = type(m.text) == "string" and m.text or nil, name = type(m.name) == "string" and m.name or nil,
@@ -213,7 +226,12 @@ local function Adopt(m)
     also = {},
     -- rc: the colour this route has on the 3D map (nil from a map that does not say: the colours of old);
     -- more: the other routes there are, shown beside it and not followed
-    rc = tonumber(m.rc), more = More(m),
+    -- (the others' lines alone - More - are what an older 3D map sends; a newer one sends them whole as well: rs)
+    rc = tonumber(m.rc) or tonumber(m.c), more = (other or type(m.rs) == "table") and {} or More(m),
+    -- key: which route it is ("guide", "waypoint", "quest", "death", "ally1"...); head: what the
+    -- list of routes calls it ("Waypoint: Sentinel Hill"); state: "route" (the others can also
+    -- be "pending" or "none": see TakeOthers)
+    key = (type(m.sk) == "string" and m.sk) or (type(m.k) == "string" and m.k) or nil, head = type(m.hd) == "string" and m.hd or nil, state = "route",
   }
   if type(m.also) == "table" then
     for _, a in ipairs(m.also) do
@@ -281,7 +299,7 @@ local function Adopt(m)
       r.lv = { id = tonumber(m.lv.id) or 0, at = tonumber(m.lv.at) or 1, ask = m.lv.ask and true or false, list = list }
     end
   end
-  if n < 2 and #r.steps == 0 and #r.more == 0 then return false end
+  if n < 2 and #r.steps == 0 and #r.more == 0 then return nil end
   -- (bare: a journey with nothing to draw on this map - it begins with a hearthstone, or a boat you stand by)
   r.n, r.bare = n, n < 2
   r.tall = tall and n >= 2
@@ -291,9 +309,126 @@ local function Adopt(m)
   end
   local p = shared.player
   r.bornMap, r.bornN, r.bornW = p.map, p.world and p.north or nil, p.world and p.west or nil
+  return r
+end
+
+local function Adopt(m)
+  local r = Build(m)
+  if not r then return false end
   route = r
   rev = rev + 1
   return true
+end
+
+-- ---- the other routes --------------------------------------------------------------------------
+-- The 3D map plans a route to every place you could be heading for - your guide's step, the
+-- quest you track, your body, your party - and one of them leads. A delivery brings the others
+-- as well (rs), each as the leading one comes: its line, its steps, what it is called. They are
+-- drawn beside it and listed under it, and your place on each is followed as you walk. They do
+-- not hang on the one that leads: with no waypoint in the game at all they are still there, and
+-- the first of them is then the one you follow.
+local others = {}       -- { key, state ("route", "pending": still being worked out, "none": no way), head, rc, text, and for a route all that Build gives }
+local othersSaid = nil  -- true: the 3D map says them route by route; false: an older one, that sends their lines alone (More); nil: not heard yet
+local othersDue, othersTries = nil, 0 -- when to ask for them (again), and how often that has been done since they last changed
+local headsSig = nil    -- what else you could be heading for, as it last was (see HeadsSig)
+local wanderHold, loneOn = WANDER_HOLD, nil -- how long the next look after leaving the route you follow is put off; since when you have been on it
+local hearthAt, hearthDue = -1000, nil -- when you last switched your hearthstone on or off, and when to ask for the routes without (or with) it
+
+local function OtherOf(key)
+  for _, o in ipairs(others) do
+    if o.key == key then return o end
+  end
+  return nil
+end
+
+-- With no route that leads (no waypoint in the game at all), the one you follow - the arrow
+-- points along it, and leaving it is what a newer one is fetched for: the first of the others.
+-- Not the way to someone in your party, though: those are shown, and nobody is led along them.
+local function Lone()
+  if route or shared.target.kind ~= 0 then return nil end
+  for _, o in ipairs(others) do
+    if o.state == "route" and not string.find(o.key, "^ally") then return o end
+  end
+  return nil
+end
+
+-- Take the other routes from a delivery. true if any of them is still being worked out.
+local function TakeOthers(m, now)
+  if type(m.rs) ~= "table" then
+    -- (an older 3D map: there is nothing of this kind to ask it for)
+    othersSaid, othersDue = false, nil
+    if others[1] then
+      others = {}
+      rev = rev + 1
+    end
+    return false
+  end
+  othersSaid = true
+  local list, pending = {}, false
+  for _, o in ipairs(m.rs) do
+    if type(o) == "table" and type(o.k) == "string" and #list < OTHERS_MAX then
+      local made = nil
+      if o.st == "route" then
+        made = Build(o, true)
+        -- (the same route as before: your place on it stands)
+        local was = made and OtherOf(o.k)
+        if was and was.state == "route" and was.plan == made.plan and was.n == made.n then
+          was.head, was.rc = made.head, made.rc
+          made = was
+        end
+      end
+      if not made then
+        made = { key = o.k, state = o.st == "pending" and "pending" or "none", head = type(o.hd) == "string" and o.hd or nil, rc = tonumber(o.c),
+          text = type(o.text) == "string" and o.text or nil, steps = {}, also = {}, more = {}, n = 0, bare = true, cur = 0, secs = 0, off = 0, along = 0 }
+      end
+      if made.state == "pending" then pending = true end
+      list[#list + 1] = made
+    end
+  end
+  others = list
+  rev = rev + 1
+  if pending and othersTries < #RETRY then
+    othersTries = othersTries + 1
+    othersDue = now + RETRY[othersTries]
+  else
+    othersDue = nil
+    if not pending then othersTries = 0 end
+  end
+  return pending
+end
+
+-- What else you could be heading for, as the game itself knows it: a few words that change when
+-- it does. (The quest you track - and your quest log, since a quest that is ready has another
+-- place to go to; your body; your guide's step; who is in your party.)
+local function HeadsSig()
+  if not shared.Heads then return "" end
+  local h, party, log = shared.Heads()
+  local out = {}
+  if h.quest and h.quest > 0 then out[#out + 1] = "q" .. h.quest .. "." .. tostring(log or 0) end
+  if h.corpse.on then out[#out + 1] = "c" end
+  if h.guide.on then out[#out + 1] = "g" .. h.guide.map .. "," .. floor(h.guide.north + 0.5) .. "," .. floor(h.guide.west + 0.5) end
+  for i = 1, #party do
+    if party[i].flags ~= 0 then out[#out + 1] = "p" .. i end
+  end
+  return table.concat(out, " ")
+end
+
+-- What the game knows to be over is taken off at once: the route to a quest you no longer
+-- track, to your body once you live, to someone who has left your party.
+local function Prune()
+  if not shared.Heads or not others[1] then return end
+  local h, party = shared.Heads()
+  local kept, changed = {}, false
+  for _, o in ipairs(others) do
+    local gone = (o.key == "quest" and not (h.quest and h.quest > 0)) or (o.key == "death" and not h.corpse.on) or (o.key == "guide" and not h.guide.on)
+    local slot = tonumber(string.match(o.key, "^ally(%d)$") or "")
+    if slot and party[slot] and party[slot].flags == 0 then gone = true end
+    if gone then changed = true else kept[#kept + 1] = o end
+  end
+  if changed then
+    others = kept
+    rev = rev + 1
+  end
 end
 
 -- ---- where you have been ----------------------------------------------------------------------
@@ -501,10 +636,19 @@ local function Matches(m, t)
   return m.tm == t.map and m.tx == t.x and m.ty == t.y
 end
 
--- This waypoint has no route to draw (said once; asked about again when you have moved a good way).
+-- This waypoint has no route to draw just now (said once). It is asked about again when you
+-- have moved a good way - and by itself after a while, a little later each time: the 3D map may
+-- only have needed longer (a long journey takes it a while to work out; from a boat it plans
+-- nothing until you land), and it cannot say so unasked. One mailbox a look.
+local again = { tm = nil, tx = nil, ty = nil, hold = AGAIN }
 local function GiveUp(t, why)
   local p = shared.player
-  want, gave = nil, { tm = t.map, tx = t.x, ty = t.y, north = p.world and p.north or nil, west = p.world and p.west or nil }
+  if again.tm == t.map and again.tx == t.x and again.ty == t.y then
+    again.hold = math.min(again.hold * 2, AGAIN_MAX)
+  else
+    again.tm, again.tx, again.ty, again.hold = t.map, t.x, t.y, AGAIN
+  end
+  want, gave = nil, { tm = t.map, tx = t.x, ty = t.y, north = p.world and p.north or nil, west = p.world and p.west or nil, again = GetTime() + again.hold }
   note = why
 end
 local saidAt = -1000
@@ -612,8 +756,16 @@ end
 local function Fetch(now)
   local t, w = shared.target, want
   local m, why = Open(now)
+  -- (side: asked for the sake of the other routes, not of the waypoint you have)
+  local side = w.why == "heads" or w.why == "wander" or w.why == "hearth"
   if not m then
-    if why == "used" and mail.size > 0 then
+    if side then
+      want, othersDue = nil, nil
+      if why == "used" and mail.size > 0 then
+        note = "every route delivery of this login has been used: type /reload to have them all again"
+        Remind(now, note, 120)
+      end
+    elseif why == "used" and mail.size > 0 then
       GiveUp(t, "every route delivery of this login has been used: type /reload to have them all again")
       Remind(now, note, 120)
     elseif why == "used" then
@@ -629,18 +781,46 @@ local function Fetch(now)
   if age > LATE or age < -LATE then
     -- nobody is writing them: the 3D map is not running, or its page is not open
     quietUntil, quietFor = now + quietFor, math.min(quietFor * 2, QUIET_MAX)
-    note = "the 3D map is not sending routes (is it running, with its page open?)"
+    note = "the 3D map is not sending routes: is Azeroth Atlas running, and does it show where you are? (Its window need not be in view.)"
     if w.why == "asked" then say(note) end
     want = nil
     return
   end
   quietUntil, quietFor = -1, QUIET
   pcall(Marker, m)
+  -- the other routes there are, whatever else this delivery is about
+  TakeOthers(m, now)
+  -- (your hearthstone was switched on or off a moment ago: a route worked out before that will not do)
+  local old = m.hs ~= nil and now - hearthAt < HEARTH_FOR and ((tonumber(m.hs) or 0) == 1) ~= (shared.HearthOff ~= nil and shared.HearthOff() == true)
   if Matches(m, t) then pin.asked = now end
   -- (the 3D map follows how high you are: when it says you are at the waypoint, on its level, you are)
   if (t.kind == W_PIN or t.kind == W_QUICK) and Matches(m, t) and m.there == true and pin.far
     and shared.player.world and shared.player.map == t.map and Away(t, tonumber(m.ex), tonumber(m.ey)) < ARRIVE * ARRIVE then
     Arrive(t)
+    want = nil
+    return
+  end
+  if side then
+    if old then
+      w.tries = w.tries + 1
+      local wait = RETRY[w.tries]
+      if wait then w.at = now + wait else want = nil end
+      return
+    end
+    -- (the waypoint you have: its route as it is now, if this is it)
+    if t.kind ~= 0 and Matches(m, t) and m.state == "route" and not (route and route.plan == tonumber(m.plan)) then
+      if Adopt(m) then
+        gave, note = nil, nil
+        again.tm = nil
+      end
+    end
+    if w.why == "wander" then
+      -- Off the route you follow. The next such look is not for a while, and for longer each
+      -- time while you stay off it: someone roaming about - after a quest's creatures, say,
+      -- whose route moves with every one of them - would otherwise be through a login's
+      -- mailboxes within the hour. Back on a route for a little, and it is prompt again (Scan).
+      strayHold, wanderHold = now + wanderHold, math.min(wanderHold * 2, WANDER_HOLD_MAX)
+    end
     want = nil
     return
   end
@@ -650,13 +830,14 @@ local function Fetch(now)
       note = nil
     else
       Drop()
+      -- (nothing of its own to show, but routes to the other places there are: nothing to be said)
       note = type(m.text) == "string" and m.text or "the 3D map has no route to show"
-      say(note)
+      if not others[1] then say(note) end
     end
     want = nil
     return
   end
-  local ready = Matches(m, t) and m.state == "route"
+  local ready = Matches(m, t) and m.state == "route" and not old
   if w.why == "level" then
     -- (you chose another level: only the route to that one will do; a marker on the 3D map has no waypoint in the game to match)
     if t.kind == 0 then ready = m.state == "route" and (tonumber(m.tk) or 0) == 0 end
@@ -673,32 +854,35 @@ local function Fetch(now)
       route.trust = m.sure == true or nil
       if m.there == true then route.there = true elseif m.there == false then route.there = false end
       -- (the other routes are as the 3D map has them now)
-      route.more, route.rc = More(m), tonumber(m.rc)
+      route.more, route.rc = type(m.rs) == "table" and {} or More(m), tonumber(m.rc)
+      if type(m.hd) == "string" then route.head = m.hd end
       rev = rev + 1
     end
     if kept or Adopt(m) then
       want, gave, note = nil, nil, nil
+      again.tm = nil
     else
       -- a way there with nothing to draw on this map (a hearthstone, a flight from where you stand)
       Drop()
       GiveUp(t, type(m.text) == "string" and m.text or "the route has nothing to draw here")
       if type(m.text) == "string" then say(m.text) end
     end
-  elseif Matches(m, t) and m.state == "none" then
+  elseif Matches(m, t) and m.state == "none" and not old then
     Drop()
     GiveUp(t, type(m.text) == "string" and m.text or "the 3D map found no way there")
   elseif w.why == "near" then
     want = nil -- (only a question: no looking again)
   else
     -- not worked out yet, or still about your last waypoint: look again a little later
+    -- (once: this was the one more look after giving up - the next comes after a longer while)
     w.tries = w.tries + 1
-    local wait = RETRY[w.tries]
+    local wait = not w.once and RETRY[w.tries] or nil
     if wait then
       w.at = now + wait
     elseif w.why == "stray" or w.why == "level" then
       want = nil
     else
-      GiveUp(t, "the 3D map has not worked a route out (is its page open and showing?)")
+      GiveUp(t, "the 3D map has not worked a route out yet: it is asked again in a while (/atlas route asks now)")
       if w.why == "asked" then say(note) end
     end
   end
@@ -715,7 +899,7 @@ function shared.Scan(now)
   if t.kind == 0 then
     -- nothing to head for in the game: only a route you asked for by hand stays
     if route and route.tk ~= 0 then Drop() end
-    if want and want.why ~= "asked" then want = nil end
+    if want and (want.why == "target" or want.why == "stray" or want.why == "near" or want.why == "level") then want = nil end
     gave = nil
   else
     local same = route and Matches(route, t)
@@ -723,12 +907,35 @@ function shared.Scan(now)
       Drop() -- a route to somewhere else is worse than none
       if gave and not Matches(gave, t) then gave = nil end
       if gave and gave.north and p.world and (p.north - gave.north) ^ 2 + (p.west - gave.west) ^ 2 > MOVED * MOVED then gave = nil end
+      -- (given up a while ago: one more look - the 3D map may have the route by now)
+      local once = false
+      if gave and gave.again and now >= gave.again and now >= quietUntil then gave, once = nil, true end
       if not gave and not (want and Matches(want, t)) then
-        want = { why = "target", tm = t.map, tx = t.x, ty = t.y, tries = 0, at = now + FIRST_WAIT }
+        want = { why = "target", tm = t.map, tx = t.x, ty = t.y, tries = 0, at = once and now or now + FIRST_WAIT, once = once }
       end
     elseif want and want.why == "target" then
       want = nil
     end
+  end
+
+  -- What else you could be heading for has changed: the routes there are asked for, once the 3D
+  -- map has had a moment to work them out. (Not from an older 3D map, which sends no such routes.)
+  local sig = HeadsSig()
+  if sig ~= headsSig then
+    local first = headsSig == nil
+    headsSig = sig
+    Prune()
+    if othersSaid ~= false and (sig ~= "" or others[1]) and not (first and sig == "") then
+      othersDue, othersTries = now + HEADS_WAIT, 0
+    end
+  end
+  if hearthDue and now >= hearthDue and not want then
+    hearthDue = nil
+    want = { why = "hearth", tm = 0, tx = 0, ty = 0, tries = 0, at = now }
+  end
+  if othersDue and now >= othersDue and not want and now >= quietUntil then
+    othersDue = nil
+    want = { why = "heads", tm = 0, tx = 0, ty = 0, tries = 0, at = now }
   end
 
   -- on the route? (also finds how far along it you are, for the drawing)
@@ -745,10 +952,51 @@ function shared.Scan(now)
       astray = t.kind ~= 0
     end
   end
+  -- The other routes: your place on each. With no route that leads, the first of them is the
+  -- one you follow (lone), and leaving that one is what a newer delivery is fetched for.
+  local lone = Lone()
+  local _, party = nil, nil
+  if shared.Heads then _, party = shared.Heads() end
+  for _, o in ipairs(others) do
+    if o.state == "route" then
+      if p.world and not o.bare and p.map == o.map then Progress(o, p, moved) end
+      StepNow(o)
+      -- The way to someone in your party is only as good as where they were when it was worked
+      -- out, and nothing is fetched for their sake. The game does know where they are now: once
+      -- they have gone from where the route ends (or cannot be seen), it is no longer shown.
+      local slot = tonumber(string.match(o.key, "^ally(%d)$") or "")
+      if slot then
+        local m = party and party[slot]
+        local gone = not (m and m.flags % 4 >= 2 and o.n >= 2
+          and (o.X[o.n] - (m.x / 16 - 32768)) ^ 2 + (o.Y[o.n] - (m.y / 16 - 32768)) ^ 2 <= ALLY_NEAR * ALLY_NEAR)
+        if gone ~= (o.gone == true) then
+          o.gone = gone
+          rev = rev + 1
+        end
+      end
+    end
+  end
+  if lone and p.world then
+    if lone.bare then
+      astray = p.map ~= lone.bornMap or not lone.bornN or (p.north - lone.bornN) ^ 2 + (p.west - lone.bornW) ^ 2 > BARE_MOVED * BARE_MOVED
+    elseif p.map == lone.map then
+      astray = lone.off > STRAY
+    else
+      astray = true
+    end
+    -- (on it for a while: you are following it, and a newer one is fetched as promptly as ever
+    -- when you leave it. Roaming about with no mind to it - see Fetch - the looks thin out.)
+    if astray then
+      loneOn = nil
+    else
+      loneOn = loneOn or now
+      if now - loneOn >= WANDER_BACK then wanderHold = WANDER_HOLD end
+    end
+  end
   if astray then
     offSince = offSince or now
     if not want and now - offSince >= STRAY_FOR and now - mail.at >= STRAY_GAP and now >= strayHold then
-      want = { why = "stray", tm = t.map, tx = t.x, ty = t.y, tries = 0, at = now }
+      want = { why = lone and "wander" or "stray", tm = t.map, tx = t.x, ty = t.y, tries = 0, at = now, key = lone and lone.key or nil }
     end
   else
     offSince = nil
@@ -782,7 +1030,7 @@ function shared.Scan(now)
   end
 
   -- (the map and the minimap also mark a waypoint whose route is still on its way)
-  if route or t.kind ~= 0 then
+  if route or t.kind ~= 0 or others[1] then
     EnsureMap()
     EnsureMini()
   end
@@ -817,12 +1065,42 @@ end
 
 -- The route as it is now, and a number that changes whenever it does (for Guide.lua).
 function shared.Route() return route, rev end
+-- All of them: the one that leads (nil when none does), the others, and that number.
+function shared.Routes() return route, others, rev end
+-- The one you follow - the arrow points along it: the one that leads, or where the game has no
+-- waypoint at all, the first of the others.
+function shared.Follow()
+  return route or Lone()
+end
+
+-- For the list of routes: why the waypoint you have has no route yet, in a few words (nil: it
+-- has one, or you have no waypoint).
+function shared.Waiting()
+  local t = shared.target
+  if t.kind == 0 or (route and Matches(route, t)) then return nil end
+  if mail.counted and mail.size == 0 then return "The route mailboxes are not installed: press Check for updates in Azeroth Atlas, then restart the game." end
+  if mail.counted and mail.next > mail.size then return "Type /reload to go on seeing routes (this login's deliveries are used up)." end
+  if GetTime() < quietUntil then return "Azeroth Atlas is not answering: is it running, and does it show where you are?" end
+  if gave and Matches(gave, t) then
+    if not note then return "No route." end
+    return string.upper(string.sub(note, 1, 1)) .. string.sub(note, 2)
+  end
+  return "Working out the route..."
+end
+
+-- Your hearthstone has been switched on or off (the button by "Routes": Guide.lua). The 3D map
+-- hears of it through the strip and works every route out again; those are then fetched.
+function shared.HearthChanged()
+  local now = GetTime()
+  hearthAt = now
+  if route or others[1] or shared.target.kind ~= 0 then hearthDue = now + HEADS_WAIT end
+end
 
 -- For the server (9 bytes, on the text channel): which /reload this is, the mailbox that will
 -- be opened next, how many there are, the delivery last read, and what is going on.
 function shared.MailReport()
   if not mail.counted then return nil end
-  local flags = (route and 1 or 0) + (want and 2 or 0) + (gave and 4 or 0) + (GetTime() < quietUntil and 8 or 0)
+  local flags = ((route or others[1]) and 1 or 0) + (want and 2 or 0) + (gave and 4 or 0) + (GetTime() < quietUntil and 8 or 0)
   local function two(v) return strchar(floor(v / 256) % 256, v % 256) end
   return strchar(mail.session) .. two(mail.next) .. two(mail.size) .. two(mail.have) .. strchar(flags) .. strchar(1)
 end
@@ -875,6 +1153,20 @@ local function Status()
   if route and route.doubt then
     say("one level lies over another where you are, and the game does not say which you are on: the 3D map is asked.")
   end
+  -- the other routes there are
+  local shown, working = 0, 0
+  for _, o in ipairs(others) do
+    if o.state == "route" then shown = shown + 1 elseif o.state == "pending" then working = working + 1 end
+  end
+  if shown > 0 or working > 0 then
+    say(format("%d other route%s shown%s.", shown, shown == 1 and "" or "s", working > 0 and format(", %d still being worked out", working) or ""))
+  elseif othersSaid == false then
+    say("the 3D map is an older one: update it (Check for updates on its page) to see every route here with its steps.")
+  end
+  if GetTime() < quietUntil then
+    say("Azeroth Atlas is not answering. It has to be running for routes to come in (its window can be behind the game, or minimized).")
+  end
+  if shared.HearthOff and shared.HearthOff() then say("your hearthstone is left out of routes (/atlas hearth, or the button by \"Routes\", brings it back).") end
 end
 
 function shared.Command(word, rest)
@@ -885,9 +1177,10 @@ function shared.Command(word, rest)
   elseif shared.GuideWord and shared.GuideWord(word, rest or "") then return
   elseif shared.TransitWord and shared.TransitWord(word, rest or "") then return
   else
-    say("/atlas (strip on or off)   /atlas clear   /atlas route   /atlas status   /atlas level")
+    say("/atlas (strip on or off)   /atlas clear   /atlas route   /atlas status   /atlas level   /atlas options")
     say("/atlas arrow, /atlas list (each on or off)   /atlas move (drag them where you want them)   /atlas reset")
-    say("/atlas pin (the step list under Questie's quest list, or on its own)   A click on \"Current Route\" folds its steps away.")
+    say("/atlas pin (the list of routes under Questie's quest list, or on its own)   A click on \"Routes\", or on a route's name, folds its steps away.")
+    say("/atlas hearth (your hearthstone: used in routes, or left out)   /atlas strip (where the coded strip is: /atlas strip topright 0 40)")
     say("/atlas boats (when the boats, zeppelins and tram leave, as far as known)   /atlas boats listen (other players' sightings: taken or not)")
     say("/atlas guide (the guide's window, shown or hidden)   /atlas guides (pick a guide)   /atlas guide skip   /atlas guide reset")
     say("Shift-click the world map: a quick waypoint.   Ctrl-click: a pin, and you are asked which level where there are several.")
@@ -1019,6 +1312,11 @@ local function DrawMap()
   if also and whole.em and whole.ex and whole.ey then gm, gn, gw = whole.em, whole.ex, whole.ey end
   local more = whole and whole.more[1] and whole.more or nil
   local rc = whole and whole.rc or nil
+  -- (rest: the other routes, where they came whole - TakeOthers; walked: how far you have got on them)
+  local rest, walked = others[1] and others or nil, 0
+  if rest then
+    for _, o in ipairs(rest) do walked = walked + (o.moved or 0) end
+  end
   local uiMap = WorldMapFrame:GetMapID()
   local W, H = f:GetWidth(), f:GetHeight()
   -- one screen unit, in the canvas's own units (the canvas is scaled as the map is zoomed)
@@ -1033,16 +1331,26 @@ local function DrawMap()
     if gm and open then gax, gbx, gcx, gay, gby, gcy, gbeyond, gtop = Projection(uiMap, gm, gn, gw) end
   end
   top = top or gtop
+  -- (with no route that leads: how high a stitched map's art is drawn, asked for the first of the others)
+  if not top and not continent and rest and open then
+    for _, o in ipairs(rest) do
+      if o.state == "route" and o.n >= 2 then
+        local _, _, _, _, _, _, _, high = Projection(uiMap, o.map, o.X[1], o.Y[1])
+        top = high
+        break
+      end
+    end
+  end
   local function six(a, b, c, d, e, g)
     return a and (floor(a * 1e9) .. "," .. floor(b * 1e9) .. "," .. floor(c * 1e5) .. "," .. floor(d * 1e9) .. "," .. floor(e * 1e9) .. "," .. floor(g * 1e5)) or "-"
   end
   local sig = rev .. ":" .. tostring(uiMap) .. ":" .. floor(W) .. ":" .. floor(H) .. ":" .. floor(unit * 1000) .. ":" .. (r and (r.moved or 0) or ("-" .. t.kind .. "," .. t.x .. "," .. t.y))
-    .. ":" .. six(ax, bx, cx, ay, by, cy) .. ":" .. tostring(top) .. ":" .. (gm ~= continent and six(gax, gbx, gcx, gay, gby, gcy) or "=")
+    .. ":" .. six(ax, bx, cx, ay, by, cy) .. ":" .. tostring(top) .. ":" .. (gm ~= continent and six(gax, gbx, gcx, gay, gby, gcy) or "=") .. ":" .. walked
   if sig == onMap.sig then return end
   onMap.sig = sig
   s.used = 0
   onMap.goal:Hide()
-  if not ax and not gax and not ((also or more) and open) then Finish(s) return end
+  if not ax and not gax and not ((also or more or rest) and open) then Finish(s) return end
   -- (over a stitched map's art, which is drawn higher up than the game's own map)
   local level = top and top >= onMap.level and top + 1 or onMap.level
   if f:GetFrameLevel() ~= level then
@@ -1071,6 +1379,67 @@ local function DrawMap()
               Stroke(s, "TOPLEFT", ux, uy, vx, vy, a.kind, thick * 0.75, a.colour)
             end
             ux, uy = vx, vy
+          end
+        end
+      end
+    end
+  end
+  -- ...and the other routes that came whole (from a newer 3D map): each from where you are on
+  -- it - its line on this continent, and what of its journey lies beyond.
+  if rest and open then
+    local function place(map, north, west)
+      local p = where[map]
+      if p == nil then
+        local pa, pb, pc, pd, pe, pf, pg = Projection(uiMap, map, north, west)
+        p = pa and { pa, pb, pc, pd, pe, pf, pg } or false
+        where[map] = p
+      end
+      return p
+    end
+    local thin = thick * 0.75
+    for _, o in ipairs(rest) do
+      local p = o.state == "route" and not o.gone and o.n >= 2 and place(o.map, o.X[1], o.Y[1]) or nil
+      if p then
+        local OX, OY, OK, on = o.X, o.Y, o.K, o.n
+        local have, ux, uy = false, 0, 0
+        for i = o.at or 1, on - 1 do
+          local k = OK[i + 1]
+          if k >= BREAK then
+            have = false
+          else
+            if not have then
+              local north, west = OX[i], OY[i]
+              if i == o.at and o.sn then north, west = o.sn, o.sw end
+              ux, uy, have = (p[1] * north + p[2] * west + p[3]) * W, -(p[4] * north + p[5] * west + p[6]) * H, true
+            end
+            local vx, vy = (p[1] * OX[i + 1] + p[2] * OY[i + 1] + p[3]) * W, -(p[4] * OX[i + 1] + p[5] * OY[i + 1] + p[6]) * H
+            local nextK = OK[i + 2]
+            local ends = i + 1 >= on or nextK >= BREAK or nextK ~= k
+            if ends or (vx - ux) ^ 2 + (vy - uy) ^ 2 >= step * step then
+              if p[7] or not ((ux < 0 and vx < 0) or (ux > W and vx > W) or (uy > 0 and vy > 0) or (uy < -H and vy < -H)) then
+                Stroke(s, "TOPLEFT", ux, uy, vx, vy, k, thin, o.rc)
+              end
+              ux, uy = vx, vy
+              if ends then have = false end
+            end
+          end
+        end
+      end
+      if o.state == "route" and not o.gone then
+        for _, a in ipairs(o.also) do
+          local q = place(a.map, a.X[1], a.Y[1])
+          if q then
+            local AX, AY = a.X, a.Y
+            local ux, uy = (q[1] * AX[1] + q[2] * AY[1] + q[3]) * W, -(q[4] * AX[1] + q[5] * AY[1] + q[6]) * H
+            for i = 2, a.n do
+              local vx, vy = (q[1] * AX[i] + q[2] * AY[i] + q[3]) * W, -(q[4] * AX[i] + q[5] * AY[i] + q[6]) * H
+              if i == a.n or (vx - ux) ^ 2 + (vy - uy) ^ 2 >= step * step then
+                if q[7] or not ((ux < 0 and vx < 0) or (ux > W and vx > W) or (uy > 0 and vy > 0) or (uy < -H and vy < -H)) then
+                  Stroke(s, "TOPLEFT", ux, uy, vx, vy, a.kind, thin, o.rc)
+                end
+                ux, uy = vx, vy
+              end
+            end
           end
         end
       end
@@ -1248,7 +1617,20 @@ local function DrawMini()
       if a.map == p.map then more = true break end
     end
   end
-  if not (lead or more) then
+  -- (rest: so has one of the others that came whole; walked: how far you have got on them;
+  -- main: the route whose end is marked - the one that leads, or with none the one you follow)
+  local rest, walked, main = false, 0, lead and r or nil
+  if p.world then
+    local lone = Lone()
+    for _, o in ipairs(others) do
+      if o.state == "route" and not o.gone and o.n >= 2 and o.map == p.map then
+        rest = true
+        walked = walked + (o.moved or 0)
+        if o == lone then main = o end
+      end
+    end
+  end
+  if not (lead or more or rest) then
     if onMini.sig ~= "" then
       onMini.sig = ""
       s.used = 0
@@ -1265,7 +1647,7 @@ local function DrawMini()
   end
   local W, H = f:GetWidth(), f:GetHeight()
   local square = GetMinimapShape and GetMinimapShape() == "SQUARE"
-  local sig = rev .. ":" .. p.north .. ":" .. p.west .. ":" .. reach .. ":" .. facing .. ":" .. W .. ":" .. H .. ":" .. (r.moved or 0) .. ":" .. p.map
+  local sig = rev .. ":" .. p.north .. ":" .. p.west .. ":" .. reach .. ":" .. facing .. ":" .. W .. ":" .. H .. ":" .. (r and r.moved or 0) .. ":" .. p.map .. ":" .. walked
   if sig == onMini.sig then return end
   onMini.sig = sig
   s.used = 0
@@ -1295,27 +1677,37 @@ local function DrawMini()
       end
     end
   end
-  if not lead then
-    Finish(s)
+  -- a route's line from where you are on it, as far as the minimap reaches
+  local function trace(o, thick)
+    local X, Y, K, C, n = o.X, o.Y, o.K, o.C, o.n
+    local far = (C[o.at] or 0) + reach * 2.5 + 100 -- (no need to look further along the route than this)
+    for i = o.at, n - 1 do
+      if C[i] > far then break end
+      local k = K[i + 1]
+      if k < BREAK then
+        local north, west = X[i], Y[i]
+        if i == o.at and o.sn then north, west = o.sn, o.sw end
+        local u1, v1 = place(north, west)
+        local u2, v2 = place(X[i + 1], Y[i + 1])
+        local a1, b1, a2, b2 = Inside(u1, v1, u2, v2, square)
+        if a1 then Stroke(s, "CENTER", a1 * hw, b1 * hh, a2 * hw, b2 * hh, k, thick, o.rc) end
+      end
+    end
+  end
+  -- (the others that came whole, a little thinner; then the one that leads, over them)
+  if rest then
+    for _, o in ipairs(others) do
+      if o.state == "route" and not o.gone and o.n >= 2 and o.map == p.map then trace(o, o == main and 2.2 or 1.6) end
+    end
+  end
+  if lead then trace(r, 2.2) end
+  Finish(s)
+  if not main then
     goal:Hide()
     return
   end
-  local X, Y, K, C, n = r.X, r.Y, r.K, r.C, r.n
-  local far = (C[r.at] or 0) + reach * 2.5 + 100 -- (no need to look further along the route than this)
-  for i = r.at, n - 1 do
-    if C[i] > far then break end
-    local k = K[i + 1]
-    if k < BREAK then
-      local north, west = X[i], Y[i]
-      if i == r.at and r.sn then north, west = r.sn, r.sw end
-      local u1, v1 = place(north, west)
-      local u2, v2 = place(X[i + 1], Y[i + 1])
-      local a1, b1, a2, b2 = Inside(u1, v1, u2, v2, square)
-      if a1 then Stroke(s, "CENTER", a1 * hw, b1 * hh, a2 * hw, b2 * hh, k, 2.2, r.rc) end
-    end
-  end
-  Finish(s)
   -- the end of the route, or the way to it at the edge
+  local X, Y, n = main.X, main.Y, main.n
   local u, v = place(X[n], Y[n])
   local d = square and math.max(math.abs(u), math.abs(v)) or sqrt(u * u + v * v)
   local alpha = 1
@@ -1348,5 +1740,5 @@ end
 
 -- (for the tests, and for a look from the game with /dump AzerothAtlas.Peek())
 function shared.Peek()
-  return { route = route, want = want, gave = gave, note = note, mail = mail, quietUntil = quietUntil, onMap = onMap, onMini = onMini }
+  return { route = route, others = others, want = want, gave = gave, note = note, mail = mail, quietUntil = quietUntil, onMap = onMap, onMini = onMini, othersDue = othersDue, hearthDue = hearthDue }
 end

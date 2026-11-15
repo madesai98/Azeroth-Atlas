@@ -168,6 +168,45 @@ export function othersOf(app) {
   }
 }
 
+/** What the game's list of routes calls a route: "Waypoint: Sentinel Hill", "Guide: Goldshire", the quest's own name, "Party: Thrallina". */
+export function headOf(kind, t, app) {
+  const name = t?.name ?? (t ? app.placeAt?.(t) : null) ?? null;
+  if (kind === 'quest') return name ?? 'Tracked quest';
+  if (kind === 'death') return 'Corpse run';
+  if (kind === 'ally') return `Party: ${name ?? 'member'}`;
+  if (kind === 'guide') return name ? `Guide: ${name}` : 'Guide step';
+  return name ? `Waypoint: ${name}` : 'Waypoint';
+}
+
+// (a number for each route worked out, the same for as long as it is that very route: the game keeps its place on a route it already has)
+const plans = new WeakMap();
+let planCount = 0;
+const planOf = (route) => { if (!plans.has(route)) plans.set(route, (planCount = (planCount % 60000) + 1)); return plans.get(route); };
+
+/**
+ * The other routes there are just now, each whole - its line, its steps, what it is called -
+ * for the game to list and follow beside the one that leads, and with no waypoint in the game
+ * at all: [{ slot, head, color, state ('route', 'pending': still being worked out, 'none'),
+ * plan, map, text, seconds, stretches, steps, also }], thinned to fit.
+ */
+export function routesOf(app) {
+  const list = (app.trips?.active() ?? []).filter((x) => !x.lead && x.planner.enabled);
+  for (let tol = OTHER_TOLERANCE; ; tol *= 1.6) {
+    let points = 0;
+    const out = list.map((x) => {
+      const p = x.planner, r = p.route, a = p.asked;
+      const base = { slot: x.slot, head: headOf(x.kind, x.target, app), color: x.color };
+      // (a first answer, shown while quicker ways are still being looked for, is not yet the route: see #payload)
+      if (!r || r.provisional) return { ...base, state: !a || (a.done && a.settled && !r) ? 'none' : 'pending', text: !a || !r ? p.status || '' : '' };
+      const track = trackOf(r, tol), also = alsoOf(r);
+      points += track.stretches.reduce((n, s) => n + s.points.length / 2, 0) + also.reduce((n, s) => n + s.points.length / 2, 0);
+      const goal = x.target?.name ?? (x.kind === 'guide' ? "your guide's step" : x.kind === 'quest' ? 'the quest' : x.kind === 'death' ? 'your body' : x.kind === 'ally' ? 'them' : 'your waypoint');
+      return { ...base, state: 'route', plan: planOf(r), map: p.mapId ?? 0, seconds: Math.round(p.remaining()?.seconds ?? r.seconds ?? 0), stretches: track.stretches.map((s) => ({ kind: s.kind, points: s.points })), steps: stepsOf(r, track.ends, goal), also };
+    });
+    if (points <= OTHER_BUDGET || tol > 40) return out;
+  }
+}
+
 export class InGameRoute {
   constructor(app) {
     this.app = app;
@@ -194,13 +233,32 @@ export class InGameRoute {
     return { there, sure: !!r.onRoute, end: [to[0], to[1]], endMap: t.map };
   }
 
+  /**
+   * How your hearthstone was counted in the routes there are: true, left out (as you asked in
+   * the game); false, used. While a route asked for before you changed that is still the one
+   * showing, it is what was so before: the game waits for the routes worked out since.
+   */
+  #hearth() {
+    const app = this.app, now = !!app.player?.travel?.hearth?.avoid;
+    const settled = (app.trips?.active() ?? []).every((x) => { const a = x.planner.asked; return !a || x.planner.fixed || (a.avoid === now && a.done && a.settled); });
+    return settled ? now : !now;
+  }
+
   /** What this map shows now, as the server wants it. */
   #payload() {
     const app = this.app, r = app.route, t = app.routeTarget ?? null;
     const target = t ? { map: t.map, x: t.x, y: t.y, source: t.source ?? 'marker', name: t.name ?? null } : null;
     // (marker: the marker dropped on this map, for the game to take up as its waypoint - or word
     // that it has been taken off: main.js. It goes with whatever else is said.)
-    const base = { target, plan: this.plan, map: r.mapId ?? 0, text: '', state: 'none', detached: false, stretches: [], marker: app.markerForGame ?? null, ...this.#where(t) };
+    const base = {
+      target, plan: this.plan, map: r.mapId ?? 0, text: '', state: 'none', detached: false, stretches: [], marker: app.markerForGame ?? null, ...this.#where(t),
+      // which route the one that leads is, and what the game's list of routes calls it
+      slot: t ? app.trips?.leadKind ?? 'waypoint' : '', head: t ? headOf(app.trips?.leadKind ?? 'waypoint', t, app) : '',
+      // the other routes there are, each whole: they go with whatever else is said, and stand with no waypoint in the game at all
+      routes: routesOf(app),
+      // how your hearthstone was counted in all of them (see #hearth)
+      hearth: this.#hearth(),
+    };
     if (!r.enabled) return { ...base, text: 'Routes are switched off on the 3D map.' };
     if (!t) return { ...base, text: 'No waypoint.' };
     // (which level of the spot the waypoint is on comes first: a route to another level is not the route)
@@ -246,14 +304,18 @@ export class InGameRoute {
     // (the other routes: which there are, in what colour, and how each stands - looked at now and then, as they change with every step you take)
     const now = performance.now();
     const others = (app.trips?.active() ?? []).filter((x) => !x.lead).map((x) => `${x.slot}${x.color}${x.planner.route ? x.planner.rev : '-'}`).join(',');
-    const which = others.replace(/\d+(,|$)/g, '$1');
+    // (which there are, and whether each has a route, is worked out or has none: said at once when that changes; how each stands as you walk, now and then)
+    const which = `${others.replace(/\d+(,|$)/g, '$1')}|${(app.trips?.active() ?? []).filter((x) => !x.lead).map((x) => { const q = x.planner, qa = q.asked; return q.route && !q.route.provisional ? `r${planOf(q.route)}` : !qa || (qa.done && qa.settled) ? 'n' : 'p'; }).join('')}`;
     if (which !== this.othersWhich || now - this.othersAt > OTHER_EVERY) { this.others = others; this.othersWhich = which; this.othersAt = now; }
     const m = app.markerForGame;
-    const sig = `${this.plan}|${r.enabled}|${t ? `${t.map},${t.x},${t.y},${t.z ?? ''},${t.source},${t.name ?? ''}` : '-'}|${a ? `${a.id},${+!!a.done},${+!!a.settled}` : '-'}|${r.status}|${app.levels?.rev ?? 0}|${+!!w.there}${+!!w.sure}|${this.others}|${app.trips?.color(app.trips.leadKind) ?? ''}|${m ? `${m.stamp}${m.off ? 'x' : ''}` : ''}`;
+    const sig = `${this.plan}|${r.enabled}|${t ? `${t.map},${t.x},${t.y},${t.z ?? ''},${t.source},${t.name ?? ''}` : '-'}|${a ? `${a.id},${+!!a.done},${+!!a.settled}` : '-'}|${r.status}|${app.levels?.rev ?? 0}|${+!!w.there}${+!!w.sure}|${this.others}|${this.othersWhich}|${app.trips?.color(app.trips.leadKind) ?? ''}|${m ? `${m.stamp}${m.off ? 'x' : ''}` : ''}|${+this.#hearth()}`;
     if (sig === this.sig) return;
     this.sig = sig;
     clearTimeout(this.timer);
-    this.timer = setTimeout(() => this.#send(), 60);
+    // (behind another window a page's timers are held back, a minute at a time in the end: what
+    // has changed is sent at once then, so that the game is never kept waiting for its route)
+    if (document.hidden) this.#send();
+    else this.timer = setTimeout(() => this.#send(), 60);
   }
 
   async #send() {

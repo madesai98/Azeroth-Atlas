@@ -4,10 +4,11 @@
 -- minimap. This file is what you follow it by:
 --   the arrow      in the middle of the screen: which way the route goes from where you stand,
 --                  how far it is to the end of the step you are on, and what that step is;
---   the step list  the journey as things to do, the one you are on first ("Walk to Sentinel
---                  Hill's flight master", "Fly to Stormwind", "Walk to your map pin"). It hangs
---                  under Questie's quest list, in Questie's own letters, as a part of it:
---                  "Current Route: 2/5", and a click on that folds the steps away;
+--   the routes     listed, each as things to do, the one you are on first ("Walk to Sentinel
+--                  Hill's flight master", "Fly to Stormwind", "Walk to your map pin"). The list
+--                  hangs under Questie's quest list, in Questie's own letters, as a part of it:
+--                  "Routes", a name for each route (a click on it folds its steps away), and
+--                  beside the header your hearthstone, to leave it out of routes or not;
 --   the question   where the spot you are heading for has more than one level (a street and
 --                  the floor above it), which of them you mean;
 --   Shift-click    on the world map: a quick waypoint there, no question asked - it goes to
@@ -32,7 +33,8 @@ local LOOK = 12               -- yards further along the route that the arrow po
 local RADIUS = 30             -- how far from the middle the arrow's head circles
 local BEHIND, AHEAD = 120, 100 -- degrees off your facing: the head dims past the first, and brightens again within the second
 local EASE = 14               -- how quickly the head swings round (per second)
-local ROWS = 8                -- steps listed at most
+local ROWS = 8                -- steps listed at most, of the route that leads
+local OTHER_ROWS = 5          -- ...and of each of the others
 local LIST_W = 270            -- how wide the step list may get where it stands on its own
 -- (as Questie lays out its quest list: its header's mark and its lines from the left edge, and
 -- the room it keeps on the right)
@@ -217,7 +219,7 @@ local function HeadAlpha(f, alpha)
 end
 
 local function ArrowUpdate(f, dt)
-  local r = shared.Route()
+  local r = shared.Follow()
   local p = shared.player
   if not r then
     HideHead(f)
@@ -332,9 +334,11 @@ end
 
 -- ---- the step list -----------------------------------------------------------------------------
 -- Drawn as a part of Questie's quest list, and pinned right under it: a header in the letters of
--- Questie's own ("Current Route: 2/5": the step you are on, of how many), under it the journey's
--- name as Questie writes a quest's, and its steps as Questie writes what a quest asks for. A click
--- on the header folds the steps away, as a click on Questie's header folds its quests away.
+-- Questie's own ("Routes"), and under it every route there is - the one that leads first - each
+-- with its name as Questie writes a zone's, and under that its steps as Questie writes what a
+-- quest asks for. A click on a route's name folds its steps away, as a click on a zone folds
+-- its quests away in Questie; a click on the header folds everything away. Beside the header is
+-- your hearthstone: a click on it leaves it out of every route (it is struck through then).
 -- Without Questie (or with /atlas pin off) the list stands where you put it.
 --
 -- Questie's list is only ever asked where it is. Nothing here is anchored to it: a frame of
@@ -391,6 +395,7 @@ local function Look()
   local look = {
     plain = plain,
     headFont = font("trackerFontHeader"), headSize = number("trackerFontSizeHeader", 12, 6),
+    zoneFont = font("trackerFontZone"), zoneSize = number("trackerFontSizeZone", 12, 6),
     questFont = font("trackerFontQuest"), questSize = number("trackerFontSizeQuest", 10, 6),
     goalFont = font("trackerFontObjective"), goalSize = number("trackerFontSizeObjective", 10, 6),
     outline = type(p.trackerFontOutline) == "string" and p.trackerFontOutline or "",
@@ -421,7 +426,7 @@ local function Look()
   if p.trackerBackdropEnabled and not p.trackerBackdropFader and type(c) == "table" then
     look.back = { tonumber(c.r) or 0, tonumber(c.g) or 0, tonumber(c.b) or 0, tonumber(c.a) or 1 }
   end
-  look.sig = table.concat({ look.headFont, look.headSize, look.questFont, look.questSize, look.goalFont, look.goalSize, look.outline,
+  look.sig = table.concat({ look.headFont, look.headSize, look.zoneFont, look.zoneSize, look.questFont, look.questSize, look.goalFont, look.goalSize, look.outline,
     look.padding, look.ratio, look.quest, look.goal, look.back and table.concat(look.back, ",") or "-" }, "|")
   return look
 end
@@ -452,21 +457,134 @@ local function Line(f, row, words, font, size, look, x, y, limit, inset)
   return x + inset + wide, high
 end
 
--- What the list says: the header, and under it (unless folded away) the journey and its steps.
--- `r` nil: the list as it shows while it is being moved. `limit`: how wide it may get, `least`:
--- how wide it is at least. `secs`: left of the step you are on, `total`: of the journey, `far`:
--- yards left of it (nil where none of it is drawn here).
-local GOLD, YELLOW, WHITE, GREY, DIM, BLUE = "|cffffd100", "|cffffff00", "|cffeeeeee", "|cffc0c0c0", "|cffa0a0a0", "|cff80d4ff"
-local function ListFill(f, r, look, limit, least, docked, secs, total, far)
-  local shut = Settings().listShut == true
-  local steps = r and r.steps or {}
-  local count, cur = #steps, r and r.cur or 0
-  if cur < 1 then cur = 1 end
+-- A line of the list: a frame with its words (a button, where it takes a click).
+local function ListRow(f, button)
+  local row = CreateFrame(button and "Button" or "Frame", nil, f)
+  row:SetSize(10, 10)
+  local label = row:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+  label:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+  label:SetJustifyH("LEFT")
+  if label.SetJustifyV then label:SetJustifyV("TOP") end
+  row.label = label
+  row:Hide()
+  return row
+end
 
-  -- the header: the count, and before it a mark (the waypoint's own) where Questie's header has
-  -- Questie's, in a square as high as the letters
+-- One route in the list: its name (a click on it folds its steps away, or brings them back),
+-- before the name a small square in the colour its line has on the map, its steps, and
+-- "+3 more" where there are more of them than are listed.
+local function ListGroup(f, rows)
+  local g = { title = ListRow(f, true), rows = {}, more = ListRow(f) }
+  local title = g.title
+  title.mark = title:CreateTexture(nil, "ARTWORK")
+  title.label:ClearAllPoints()
+  title:RegisterForClicks("LeftButtonUp")
+  title:SetScript("OnClick", function(self)
+    if not self.key then return end
+    local db = Settings()
+    if type(db.shut) ~= "table" then db.shut = {} end
+    db.shut[self.key] = (not db.shut[self.key]) or nil
+    list.sig = ""
+    if PlaySound and SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON then pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON) end
+  end)
+  for i = 1, rows do g.rows[i] = ListRow(f) end
+  return g
+end
+
+-- What a waypoint with no route yet is listed as, by its kind (as AzerothAtlas.lua numbers them:
+-- your guide's step, a journey of your own, a pin, a quick waypoint).
+local KIND_HEAD = { "Guide step", "Journey", "Waypoint", "Waypoint" }
+local KIND_KEY = { "guide", "waypoint", "waypoint", "waypoint" }
+
+-- One route as the list shows it: { key, head, clock, colour, shut, rows = { { words, clock,
+-- cur (the step you are on) } }, more, level }. `lead`: it is the one that leads; `limit`: steps
+-- listed at most.
+local function GroupView(r, lead, limit)
+  local db = Settings()
+  local g = { key = r.key or (lead and (KIND_KEY[r.tk] or "waypoint")) or "route", colour = r.rc, rows = {} }
+  g.shut = type(db.shut) == "table" and db.shut[g.key] == true
+  g.head = r.head or r.title or (r.name and ("Journey to " .. r.name)) or "Journey"
+  if r.state ~= "route" then
+    -- (one of the others, with no route: still being worked out, or there is no way)
+    g.clock = ""
+    g.rows[1] = { words = r.state == "pending" and "Working out the route..." or (r.text or "No way found."), clock = "", cur = false }
+    return g
+  end
+  local steps = r.steps
+  local count, cur = #steps, r.cur or 0
+  if cur < 1 then cur = 1 end
+  -- time and distance left: of the step you are on, and of the ones after it
+  local secs = StepLive(steps[cur]) or select(2, StepLeft(r))
+  local total = secs or 0
+  for i = cur + 1, count do total = total + steps[i].secs end
+  local far = nil
+  if not r.bare then
+    far = r.C[r.n] - (r.along or 0)
+    if far < 0 then far = 0 end
+  end
+  g.clock = Clock(total) .. (far and (" · " .. Yards(far)) or "")
+  local shown = 0
+  for i = cur, count do
+    if shown >= limit then break end
+    shown = shown + 1
+    local step = steps[i]
+    -- (the step you are on, where it waits for a boat that has been timed: what is so this second)
+    local note = (i == cur and select(2, StepLive(step))) or step.note
+    g.rows[shown] = { words = step.text, clock = Clock(i == cur and secs or step.secs) .. (note and (" · " .. note) or ""), cur = i == cur }
+  end
+  local left = count - cur + 1 - shown
+  if left > 0 then g.more = "+" .. left .. " more" end
+  -- which level the waypoint is on, where there is a choice (click: choose again)
+  if lead and r.lv then g.level = "Level: " .. (r.lv.list[r.lv.at] or "?") end
+  return g
+end
+
+-- Everything the list has to say just now: { groups (the route that leads first - lead says
+-- whether there is one - then the others), sig (words that change when any of it does) }.
+local function ListView()
+  local route, others = shared.Routes()
+  local db = Settings()
+  local view = { groups = {}, lead = false }
+  if route then
+    view.groups[1] = GroupView(route, true, ROWS)
+    view.lead = true
+  else
+    -- a waypoint whose route is not there (yet): said, with why
+    local why = shared.Waiting and shared.Waiting()
+    if why then
+      local kind = shared.target.kind
+      local key = KIND_KEY[kind] or "waypoint"
+      view.groups[1] = { key = key, head = KIND_HEAD[kind] or "Waypoint", clock = "", shut = type(db.shut) == "table" and db.shut[key] == true,
+        rows = { { words = why, clock = "", cur = false } } }
+      view.lead = true
+    end
+  end
+  for _, o in ipairs(others) do
+    -- (gone: the way to someone in your party who is no longer where it leads - Route.lua)
+    if not o.gone then view.groups[#view.groups + 1] = GroupView(o, false, OTHER_ROWS) end
+  end
+  local parts = { tostring(db.listShut == true), tostring(shared.HearthOff ~= nil and shared.HearthOff() == true), tostring(view.lead) }
+  for _, g in ipairs(view.groups) do
+    parts[#parts + 1] = g.key .. "\1" .. g.head .. "\1" .. g.clock .. "\1" .. tostring(g.shut) .. "\1" .. tostring(g.colour) .. "\1" .. (g.more or "") .. "\1" .. (g.level or "")
+    for _, row in ipairs(g.rows) do parts[#parts + 1] = row.words .. "\1" .. row.clock .. (row.cur and "*" or "") end
+  end
+  view.sig = table.concat(parts, "\2")
+  return view
+end
+
+-- What the list says: the header ("Routes", and beside it your hearthstone: used in routes, or
+-- struck through and left out of them), and under it - unless folded away - every route there
+-- is: its name as Questie writes a zone's, its steps as Questie writes what a quest asks for.
+-- `view`: from ListView (moving: nothing to list, and the list is shown to be dragged).
+-- `limit`: how wide it may get, `least`: how wide it is at least.
+local GOLD, WHITE, GREY, DIM, BLUE = "|cffffd100", "|cffeeeeee", "|cffc0c0c0", "|cffa0a0a0", "|cff80d4ff"
+local function ListFill(f, view, look, limit, least, docked)
+  local shut = Settings().listShut == true
+
+  -- the header, and before it a mark (the waypoint's own) where Questie's header has Questie's,
+  -- in a square as high as the letters
   local head = f.head
-  local words = "Current Route" .. (count > 0 and (": " .. cur .. "/" .. count) or "") .. (shut and " +" or "")
+  local words = "Routes" .. (shut and " +" or "")
   head.words, head.shut = words, shut
   local cell = look.headSize
   local side = floor(cell * 0.55 + 0.5)
@@ -478,49 +596,90 @@ local function ListFill(f, r, look, limit, least, docked, secs, total, far)
   -- (on its own dark ground the header keeps a little off its upper edge)
   local y = docked and 0 or 5
   local width = Line(f, head, GOLD .. words .. "|r", look.headFont, look.headSize, look, HEAD_X, y, limit, cell + 2)
+  -- your hearthstone, right of the header's words
+  local hearth = f.hearth
+  local off = shared.HearthOff ~= nil and shared.HearthOff() == true
+  hearth.off = off
+  hearth:ClearAllPoints()
+  hearth:SetPoint("TOPLEFT", f, "TOPLEFT", width + 7, 1 - y)
+  hearth:SetSize(cell + 2, cell + 2)
+  hearth.icon:SetAlpha(off and 0.6 or 1)
+  if hearth.icon.SetDesaturated then hearth.icon:SetDesaturated(off) end
+  if off then
+    hearth.under:Show()
+    hearth.bar:Show()
+  else
+    hearth.under:Hide()
+    hearth.bar:Hide()
+  end
+  hearth:Show()
+  width = width + 7 + cell + 2
   y = y + cell + 5
-  f.title:Hide()
-  f.more:Hide()
+
+  for _, g in ipairs(f.every) do
+    g.title:Hide()
+    g.more:Hide()
+    for i = 1, #g.rows do g.rows[i]:Hide() end
+  end
   f.level:Hide()
-  for i = 1, ROWS do f.rows[i]:Hide() end
 
   if not shut then
-    local function add(row, text, font, size, x, gap)
-      local right, tall = Line(f, row, text, font, size, look, x, y, limit)
+    local function add(row, text, font, size, x, gap, inset)
+      local right, tall = Line(f, row, text, font, size, look, x, y, limit, inset)
       if right > width then width = right end
       y = y + tall + gap
     end
-    if r then
-      -- the journey, as Questie writes a quest's name
+    if view.moving then
       local title = f.title
-      title.words = r.title or (r.name and ("Journey to " .. r.name)) or "Journey"
-      title.clock = Clock(total) .. (far and (" · " .. Yards(far)) or "")
-      add(title, YELLOW .. title.words .. "|r  " .. GREY .. title.clock .. "|r", look.questFont, look.questSize, LINE_X + look.quest, 4)
-      -- its steps, as Questie writes what a quest asks for: the one you are on bright
-      local shown = 0
-      for i = cur, count do
-        if shown >= ROWS then break end
-        shown = shown + 1
-        local row, step = f.rows[shown], steps[i]
-        row.words, row.cur = step.text, i == cur
-        -- (the step you are on, where it waits for a boat that has been timed: what is so this second)
-        local note = (i == cur and select(2, StepLive(step))) or step.note
-        row.clock = Clock(i == cur and secs or step.secs) .. (note and (" · " .. note) or "")
-        add(row, (row.cur and WHITE or GREY) .. row.words .. "|r  " .. DIM .. row.clock .. "|r", look.goalFont, look.goalSize, LINE_X + look.goal, 1)
+      title.key, title.words, title.clock = nil, "Drag the list of routes where you want it, then /atlas move again.", ""
+      title.mark:Hide()
+      title.label:SetPoint("TOPLEFT", title, "TOPLEFT", 0, 0)
+      add(title, WHITE .. title.words .. "|r", look.questFont, look.questSize, LINE_X + look.quest, 4)
+    end
+    local spare = 0
+    for i, v in ipairs(view.groups) do
+      -- (the route that leads has the first group's lines; the others, one each of the rest)
+      local g = i == 1 and view.lead and f.lead or nil
+      if not g then
+        spare = spare + 1
+        g = f.groups[spare]
+        if not g then
+          g = ListGroup(f, OTHER_ROWS)
+          f.groups[spare] = g
+          f.every[#f.every + 1] = g
+        end
       end
-      local left = count - cur + 1 - shown
-      if left > 0 then
-        f.more.words = "+" .. left .. " more"
-        add(f.more, DIM .. f.more.words .. "|r", look.goalFont, look.goalSize, LINE_X + look.goal, 1)
+      -- its name, as Questie writes a zone's; before it, the colour its line has on the map
+      local title = g.title
+      title.key, title.words, title.clock = v.key, v.head, v.clock
+      local zs = look.zoneSize
+      local ms = floor(zs * 0.5 + 0.5)
+      local c = v.colour
+      if c then title.mark:SetColorTexture(floor(c / 65536) % 256 / 255, floor(c / 256) % 256 / 255, c % 256 / 255, 1)
+      else title.mark:SetColorTexture(1, 0.82, 0.1, 1) end
+      title.mark:SetSize(ms, ms)
+      title.mark:SetPoint("CENTER", title, "TOPLEFT", zs / 2, -zs / 2)
+      title.mark:Show()
+      title.label:SetPoint("TOPLEFT", title, "TOPLEFT", zs + 3, 0)
+      add(title, GREY .. v.head .. (v.shut and " +" or "") .. "|r" .. (v.clock ~= "" and ("  " .. DIM .. v.clock .. "|r") or ""), look.zoneFont, look.zoneSize, LINE_X, 3, zs + 3)
+      if not v.shut then
+        -- its steps, as Questie writes what a quest asks for: the one you are on bright
+        for k, line in ipairs(v.rows) do
+          local row = g.rows[k]
+          if not row then break end
+          row.words, row.clock, row.cur = line.words, line.clock, line.cur
+          add(row, (line.cur and WHITE or GREY) .. line.words .. "|r" .. (line.clock ~= "" and ("  " .. DIM .. line.clock .. "|r") or ""), look.goalFont, look.goalSize, LINE_X + look.goal, 1)
+        end
+        if v.more then
+          g.more.words = v.more
+          add(g.more, DIM .. v.more .. "|r", look.goalFont, look.goalSize, LINE_X + look.goal, 1)
+        end
+        if v.level then
+          f.level.words = v.level
+          add(f.level, BLUE .. v.level .. "|r", look.goalFont, look.goalSize, LINE_X + look.goal, 1)
+        end
+        y = y + 2
       end
-      -- which level the waypoint is on, where there is a choice (click: choose again)
-      if r.lv then
-        f.level.words = "Level: " .. (r.lv.list[r.lv.at] or "?")
-        add(f.level, BLUE .. f.level.words .. "|r", look.goalFont, look.goalSize, LINE_X + look.goal, 1)
-      end
-    else
-      f.title.words, f.title.clock = "Drag the step list where you want it, then /atlas move again.", ""
-      add(f.title, WHITE .. f.title.words .. "|r", look.questFont, look.questSize, LINE_X + look.quest, 4)
     end
     -- (the room Questie leaves under each quest)
     y = y + look.padding + 1
@@ -599,7 +758,7 @@ local function ListLimit(q, look)
   return wide, look.back and (right - left) or 0
 end
 
-local function ListUpdate(f, r)
+local function ListUpdate(f)
   local q = QuestieList()
   -- (Questie's settings are looked at once a second)
   list.tick = list.tick + 1
@@ -611,24 +770,13 @@ local function ListUpdate(f, r)
   end
   local limit, least = ListLimit(q, list.look)
   local docked = q ~= nil and (list.docked == true or QuestieEdges(q) ~= nil)
-  -- time and distance left: of the step you are on, and of the ones after it
-  local secs, total, far
-  local sig = "move"
-  if r then
-    local cur = r.cur < 1 and 1 or r.cur
-    secs = StepLive(r.steps[cur]) or select(2, StepLeft(r))
-    total = secs or 0
-    for i = cur + 1, #r.steps do total = total + r.steps[i].secs end
-    if not r.bare then
-      far = r.C[r.n] - r.along
-      if far < 0 then far = 0 end
-    end
-    sig = (select(2, shared.Route())) .. ":" .. cur .. ":" .. floor(total) .. ":" .. (far and floor(far) or "-") .. ":" .. (r.lv and r.lv.at or 0)
-  end
-  sig = sig .. ":" .. tostring(Settings().listShut == true) .. ":" .. tostring(docked) .. ":" .. floor(limit) .. ":" .. floor(least)
+  local view = ListView()
+  -- (nothing to list: it is on show only to be dragged where you want it)
+  if not view.groups[1] then view.moving = true end
+  local sig = view.sig .. "\2" .. tostring(view.moving == true) .. ":" .. tostring(docked) .. ":" .. floor(limit) .. ":" .. floor(least)
   if sig ~= list.sig then
     list.sig, list.limit, list.least = sig, limit, least
-    ListFill(f, r, list.look, limit, least, docked, secs, total, far)
+    ListFill(f, view, list.look, limit, least, docked)
   end
   ListPlace(f, q)
   -- it can be dragged while the two are being moved, unless it hangs under Questie's list
@@ -640,19 +788,7 @@ local function ListUpdate(f, r)
   end
 end
 
--- A line of the list: a frame with its words (a button, where it takes a click).
-local function ListRow(f, button)
-  local row = CreateFrame(button and "Button" or "Frame", nil, f)
-  row:SetSize(10, 10)
-  local label = row:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-  label:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
-  label:SetJustifyH("LEFT")
-  if label.SetJustifyV then label:SetJustifyV("TOP") end
-  row.label = label
-  row:Hide()
-  return row
-end
-
+local HEARTHSTONE = 6948
 local function EnsureList()
   if list.frame then return list.frame end
   local f = CreateFrame("Frame", "AzerothAtlasSteps", UIParent)
@@ -664,7 +800,7 @@ local function EnsureList()
   back:SetAllPoints(f)
   back:Hide()
   f.back = back
-  -- the header: a click folds the steps away, or brings them back
+  -- the header: a click folds everything under it away, or brings it back
   local head = ListRow(f, true)
   -- (its mark: a small gold diamond with a dark rim, sized and placed with the letters)
   local edge = head:CreateTexture(nil, "BACKGROUND")
@@ -685,11 +821,58 @@ local function EnsureList()
     if PlaySound and SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON then pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON) end
   end)
   f.head = head
-  f.title = ListRow(f)
-  f.rows = {}
-  for i = 1, ROWS do f.rows[i] = ListRow(f) end
-  f.more = ListRow(f)
-  -- (with the header, the one part of the list that takes a click)
+  -- Your hearthstone, beside the header: a click leaves it out of every route (a red line
+  -- through it then), for those who would rather keep it; another click and it is used again.
+  local hearth = CreateFrame("Button", "AzerothAtlasHearth", f)
+  hearth:SetSize(14, 14)
+  local icon = hearth:CreateTexture(nil, "ARTWORK")
+  icon:SetAllPoints(hearth)
+  local picture = nil
+  if C_Item and C_Item.GetItemIconByID then picture = C_Item.GetItemIconByID(HEARTHSTONE) end
+  if not picture and GetItemIcon then picture = GetItemIcon(HEARTHSTONE) end
+  icon:SetTexture(picture or "Interface\\Icons\\INV_Misc_Rune_01")
+  if icon.SetTexCoord then icon:SetTexCoord(0.07, 0.93, 0.07, 0.93) end
+  hearth.icon = icon
+  -- (the line through it: red, on a dark one so that it reads over the picture)
+  local under = hearth:CreateLine(nil, "OVERLAY", nil, 1)
+  under:SetColorTexture(0, 0, 0, 0.9)
+  under:SetThickness(4.5)
+  under:SetStartPoint("TOPLEFT", hearth, -1, 1)
+  under:SetEndPoint("BOTTOMRIGHT", hearth, 1, -1)
+  under:Hide()
+  local bar = hearth:CreateLine(nil, "OVERLAY", nil, 2)
+  bar:SetColorTexture(1, 0.1, 0.08, 1)
+  bar:SetThickness(2.2)
+  bar:SetStartPoint("TOPLEFT", hearth, -1, 1)
+  bar:SetEndPoint("BOTTOMRIGHT", hearth, 1, -1)
+  bar:Hide()
+  hearth.under, hearth.bar = under, bar
+  hearth:RegisterForClicks("LeftButtonUp")
+  hearth:SetScript("OnClick", function()
+    if shared.SetHearth and shared.HearthOff then shared.SetHearth(shared.HearthOff()) end
+    list.sig = ""
+    if PlaySound and SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON then pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON) end
+  end)
+  hearth:SetScript("OnEnter", function(self)
+    if not GameTooltip then return end
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    if shared.HearthOff and shared.HearthOff() then
+      GameTooltip:AddLine("Your hearthstone is left out of routes")
+      GameTooltip:AddLine("Click to have it used again, wherever it is the quicker way.", 1, 1, 1, true)
+    else
+      GameTooltip:AddLine("Your hearthstone is used in routes")
+      GameTooltip:AddLine("...wherever it is the quicker way. Click to leave it out of them.", 1, 1, 1, true)
+    end
+    GameTooltip:Show()
+  end)
+  hearth:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+  hearth:Hide()
+  f.hearth = hearth
+  -- the routes: the one that leads has the first group of lines; the others get theirs as they come
+  f.lead = ListGroup(f, ROWS)
+  f.title, f.rows, f.more = f.lead.title, f.lead.rows, f.lead.more
+  f.groups, f.every = {}, { f.lead }
+  -- (with the header and the routes' names, the one part of the list that takes a click)
   local level = ListRow(f, true)
   level:RegisterForClicks("LeftButtonUp")
   level:SetScript("OnClick", function()
@@ -882,8 +1065,8 @@ function shared.GuideScan(now)
   local t = shared.target
   local db = Settings()
 
-  -- the arrow
-  if (r and db.arrow ~= false) or moving then
+  -- the arrow (along the route you follow)
+  if (shared.Follow() and db.arrow ~= false) or moving then
     local f = EnsureArrow()
     if not f:IsShown() then
       arrow.angle, arrow.distance, arrow.words = nil, "", ""
@@ -893,10 +1076,18 @@ function shared.GuideScan(now)
     arrow.frame:Hide()
   end
 
-  -- the step list (while the two are being moved: also with no route, unless it hangs under Questie's list)
-  if (r and db.list ~= false) or (moving and not (list.docked and QuestieList())) then
+  -- the list of routes: while there is one, or a waypoint whose route is not there yet (and while
+  -- the two are being moved, also with nothing to list - unless it hangs under Questie's list)
+  local _, others = shared.Routes()
+  local any = r ~= nil or (shared.Waiting ~= nil and shared.Waiting() ~= nil)
+  if not any then
+    for _, o in ipairs(others) do
+      if not o.gone then any = true break end
+    end
+  end
+  if (any and db.list ~= false) or (moving and not (list.docked and QuestieList())) then
     local f = EnsureList()
-    ListUpdate(f, r)
+    ListUpdate(f)
     if not f:IsShown() then f:Show() end
   elseif list.frame and list.frame:IsShown() then
     list.frame:Hide()
@@ -936,23 +1127,23 @@ function shared.GuideCommand(word)
     say(db.arrow and "the arrow is on." or "the arrow is off.")
   elseif word == "list" or word == "steps" then
     db.list = db.list == false
-    say(db.list and "the step list is on." or "the step list is off.")
+    say(db.list and "the list of routes is on." or "the list of routes is off.")
   elseif word == "pin" then
     db.pin = db.pin == false
     list.sig = ""
     if moving then SetMoving(false) end
-    say(db.pin and "the step list hangs under Questie's quest list (where Questie shows one)." or "the step list stands on its own: /atlas move lets you drag it.")
+    say(db.pin and "the list of routes hangs under Questie's quest list (where Questie shows one)." or "the list of routes stands on its own: /atlas move lets you drag it.")
   elseif word == "move" then
     SetMoving(not moving)
     local pinned = list.docked and QuestieList() ~= nil
-    say(moving and ("drag the arrow" .. (pinned and "" or " and the step list") .. " where you want " .. (pinned and "it" or "them") .. ", then type /atlas move again."
-      .. (pinned and " (The step list hangs under Questie's quest list: /atlas pin sets it free.)" or "")) or "the arrow and the step list stay where they are now.")
+    say(moving and ("drag the arrow" .. (pinned and "" or " and the list of routes") .. " where you want " .. (pinned and "it" or "them") .. ", then type /atlas move again."
+      .. (pinned and " (The list of routes hangs under Questie's quest list: /atlas pin sets it free.)" or "")) or "the arrow and the list of routes stay where they are now.")
   elseif word == "reset" then
     db.arrowAt, db.listAt = nil, nil
     for i = 1, #movers do
       if not (movers[i] == list.frame and list.docked) then Place(movers[i], movers[i].placeKey, movers[i].placeDefault) end
     end
-    say("the arrow and the step list are back where they started.")
+    say("the arrow and the list of routes are back where they started.")
   else
     return false
   end
@@ -962,4 +1153,250 @@ end
 -- (for the tests, and for a look from the game with /dump AzerothAtlas.GuidePeek())
 function shared.GuidePeek()
   return { arrow = arrow, list = list, ask = ask, moving = moving, hooked = hooked, AimPoint = AimPoint, StepLeft = StepLeft, Look = Look }
+end
+
+-- ---- the options: Esc > Options > AddOns > Azeroth Atlas ------------------------------------------
+-- Where the coded strip is (it can be moved out from under whatever another program draws over
+-- the game), and the switches of the route in the game. Everything here can also be said in
+-- words after /atlas (/atlas help lists them): this is the same, to be clicked.
+--
+-- The panel is put together the first time it is shown, piece by piece, so that a piece this
+-- game does not know leaves the rest standing - and whatever goes wrong is said once, in chat.
+-- (It is in this file, and not one of its own, because the game only finds a new file when it
+-- starts: this way a /reload is enough to have it.)
+do
+  local NAME = "Azeroth Atlas"
+  local WIDE = 560
+
+  local function DB()
+    if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end
+    return AzerothAtlasDB
+  end
+  local function say(msg) print("|cff7fd4ffAzeroth Atlas|r: " .. msg) end
+
+  local panel = CreateFrame("Frame", "AzerothAtlasOptions")
+  panel.name = NAME
+  panel:Hide()
+  local shows = {}  -- what each piece does when the panel is shown (or something has changed): show what is so now
+  local function Refresh()
+    for i = 1, #shows do pcall(shows[i]) end
+  end
+
+  -- ---- the pieces ----------------------------------------------------------------------------------
+  local function Words(text, font, x, y, width)
+    local s = panel:CreateFontString(nil, "ARTWORK", font)
+    s:SetPoint("TOPLEFT", panel, "TOPLEFT", x, y)
+    s:SetJustifyH("LEFT")
+    if s.SetJustifyV then s:SetJustifyV("TOP") end
+    if width then s:SetWidth(width) end
+    s:SetText(text)
+    return s
+  end
+
+  -- A box to tick: `get` says whether it is ticked, `set` is told when you tick or untick it.
+  local function Check(text, x, y, get, set)
+    local b = CreateFrame("CheckButton", nil, panel)
+    b:SetSize(26, 26)
+    b:SetPoint("TOPLEFT", panel, "TOPLEFT", x, y)
+    b:SetNormalTexture("Interface\\Buttons\\UI-CheckBox-Up")
+    b:SetPushedTexture("Interface\\Buttons\\UI-CheckBox-Down")
+    b:SetHighlightTexture("Interface\\Buttons\\UI-CheckBox-Highlight", "ADD")
+    b:SetCheckedTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    local label = b:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    label:SetPoint("LEFT", b, "RIGHT", 2, 1)
+    label:SetText(text)
+    b:SetScript("OnClick", function(self)
+      pcall(set, self:GetChecked() and true or false)
+      Refresh()
+    end)
+    shows[#shows + 1] = function() b:SetChecked(get() and true or false) end
+    return b
+  end
+
+  -- A button with words on it. Returns it (its words can be changed: SetText).
+  local function Press(text, x, y, width, click)
+    local ok, b = pcall(CreateFrame, "Button", nil, panel, "UIPanelButtonTemplate")
+    if not ok or not b then
+      -- (a game without that look: a plain dark button)
+      b = CreateFrame("Button", nil, panel)
+      local back = b:CreateTexture(nil, "BACKGROUND")
+      back:SetAllPoints(b)
+      back:SetColorTexture(0.15, 0.15, 0.18, 0.95)
+      local glow = b:CreateTexture(nil, "HIGHLIGHT")
+      glow:SetAllPoints(b)
+      glow:SetColorTexture(1, 1, 1, 0.12)
+      local label = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+      label:SetPoint("CENTER", b, "CENTER", 0, 0)
+      b.SetText = function(_, words) label:SetText(words) end
+    end
+    b:SetSize(width, 22)
+    b:SetPoint("TOPLEFT", panel, "TOPLEFT", x, y)
+    b:SetText(text)
+    b:SetScript("OnClick", function()
+      pcall(click)
+      Refresh()
+    end)
+    return b
+  end
+
+  -- A number to type, with a button either side of it to take a little off or add a little.
+  local function Number(x, y, get, set, step, most)
+    local ok, box = pcall(CreateFrame, "EditBox", nil, panel, "InputBoxTemplate")
+    if not ok or not box then
+      box = CreateFrame("EditBox", nil, panel)
+      local back = box:CreateTexture(nil, "BACKGROUND")
+      back:SetAllPoints(box)
+      back:SetColorTexture(0, 0, 0, 0.6)
+      if ChatFontNormal then box:SetFontObject(ChatFontNormal) end
+    end
+    box:SetAutoFocus(false)
+    box:SetSize(56, 20)
+    box:SetPoint("TOPLEFT", panel, "TOPLEFT", x + 30, y - 1)
+    if box.SetJustifyH then box:SetJustifyH("CENTER") end
+    if box.SetMaxLetters then box:SetMaxLetters(4) end
+    if box.SetNumeric then box:SetNumeric(true) end
+    local function take(v)
+      v = floor((tonumber(v) or 0) + 0.5)
+      if v < 0 then v = 0 elseif v > most then v = most end
+      pcall(set, v)
+      Refresh()
+    end
+    box:SetScript("OnEnterPressed", function(self) take(self:GetText()) self:ClearFocus() end)
+    box:SetScript("OnEscapePressed", function(self) self:ClearFocus() Refresh() end)
+    box:SetScript("OnEditFocusLost", function(self) take(self:GetText()) end)
+    Press("-", x, y, 24, function() take(get() - step) end)
+    Press("+", x + 94, y, 24, function() take(get() + step) end)
+    shows[#shows + 1] = function()
+      if not (box.HasFocus and box:HasFocus()) then box:SetText(tostring(get())) end
+    end
+    return box
+  end
+
+  -- ---- the panel -----------------------------------------------------------------------------------
+  local CORNER_ORDER = { "TOPLEFT", "TOPRIGHT", "BOTTOMLEFT", "BOTTOMRIGHT" }
+  local CORNER_WORDS = { TOPLEFT = "Top left", TOPRIGHT = "Top right", BOTTOMLEFT = "Bottom left", BOTTOMRIGHT = "Bottom right" }
+
+  local built = false
+  local function Build()
+    if built then return end
+    built = true
+    local problems = {}
+    local function piece(fn)
+      local ok, err = pcall(fn)
+      if not ok then problems[#problems + 1] = tostring(err) end
+    end
+
+    piece(function()
+      Words(NAME, "GameFontNormalLarge", 16, -16)
+      Words("Shows the 3D map where you are, and the 3D map's routes in the game. /atlas help lists what can be typed instead of clicked here.", "GameFontHighlightSmall", 16, -40, WIDE)
+    end)
+
+    -- the strip
+    piece(function()
+      Words("The coded strip", "GameFontNormal", 16, -72)
+      Words("Your position reaches the 3D map as a thin strip of coloured squares in a corner of the game window. It is drawn over everything in the game's own interface. If another program draws over that corner - a frame-rate counter, a voice chat's overlay - the 3D map cannot read it: move it to a corner that is free. The 3D map finds it by itself.",
+        "GameFontHighlightSmall", 16, -90, WIDE)
+    end)
+    piece(function()
+      Check("Show the strip (the 3D map cannot follow you without it)", 14, -138,
+        function() return shared.StripOn() end, function(on) shared.SetStrip(on) end)
+    end)
+    piece(function()
+      Words("Corner", "GameFontHighlight", 20, -176)
+      for i, corner in ipairs(CORNER_ORDER) do
+        local b = Press(CORNER_WORDS[corner], 90 + (i - 1) * 112, -171, 106, function() shared.PlaceStrip(corner) end)
+        shows[#shows + 1] = function()
+          local at = shared.StripAt()
+          -- (the corner it is in is the one that cannot be pressed)
+          if at == corner then
+            if b.Disable then b:Disable() end
+          elseif b.Enable then
+            b:Enable()
+          end
+        end
+      end
+    end)
+    piece(function()
+      Words("Pixels across", "GameFontHighlight", 20, -208)
+      Number(120, -203, function() local _, x = shared.StripAt() return x end, function(v) shared.PlaceStrip(nil, v, nil) end, 10, 8000)
+      local down = Words("Pixels down", "GameFontHighlight", 260, -208)
+      Number(360, -203, function() local _, _, y = shared.StripAt() return y end, function(v) shared.PlaceStrip(nil, nil, v) end, 10, 8000)
+      shows[#shows + 1] = function()
+        local at = shared.StripAt()
+        down:SetText((at == "BOTTOMLEFT" or at == "BOTTOMRIGHT") and "Pixels up" or "Pixels down")
+      end
+      Press("Back to the top left", 20, -236, 170, function() shared.PlaceStrip("TOPLEFT", 0, 0) end)
+    end)
+
+    -- the routes
+    piece(function()
+      Words("Routes in the game", "GameFontNormal", 16, -280)
+      Check("Use my hearthstone in routes, where it is the quicker way (this character)", 14, -298,
+        function() return not shared.HearthOff() end, function(on) shared.SetHearth(on) end)
+      Check("Show the arrow", 14, -324, function() return DB().arrow ~= false end, function(on) DB().arrow = on end)
+      Check("Show the list of routes", 14, -350, function() return DB().list ~= false end, function(on) DB().list = on end)
+      Check("Hang the list of routes under Questie's quest list", 14, -376, function() return DB().pin ~= false end, function(on) DB().pin = on end)
+    end)
+    piece(function()
+      local move
+      move = Press("Move the arrow and the list", 20, -410, 220, function()
+        if shared.GuideCommand then shared.GuideCommand("move") end
+      end)
+      Press("Put them back", 250, -410, 140, function()
+        if shared.GuideCommand then shared.GuideCommand("reset") end
+      end)
+      shows[#shows + 1] = function()
+        local peek = shared.GuidePeek and shared.GuidePeek()
+        move:SetText(peek and peek.moving and "Done moving them" or "Move the arrow and the list")
+      end
+      Words("While they are being moved, drag each where you want it (close this window to see them). A list that hangs under Questie's quest list moves with that.",
+        "GameFontHighlightSmall", 20, -440, WIDE)
+    end)
+
+    if problems[1] then say("a part of the options could not be shown (" .. problems[1] .. "). Everything there can also be typed: /atlas help.") end
+  end
+
+  panel:SetScript("OnShow", function()
+    local ok, err = pcall(Build)
+    if not ok then say("the options could not be shown (" .. tostring(err) .. "). Everything there can also be typed: /atlas help.") end
+    Refresh()
+  end)
+
+  -- ---- where the game lists it -----------------------------------------------------------------------
+  -- (the game's own "Settings", asked for by name: in this file that word is the addon's saved settings)
+  local category = nil
+  local function Register()
+    local game = rawget(_G, "Settings")
+    if type(game) == "table" and game.RegisterCanvasLayoutCategory and game.RegisterAddOnCategory then
+      local ok, made = pcall(game.RegisterCanvasLayoutCategory, panel, NAME)
+      if ok and made then
+        category = made
+        pcall(game.RegisterAddOnCategory, made)
+        return
+      end
+    end
+    if InterfaceOptions_AddCategory then pcall(InterfaceOptions_AddCategory, panel) end
+  end
+
+  -- Open the game's options at this panel. False where that cannot be done from here.
+  function shared.OpenOptions()
+    local game = rawget(_G, "Settings")
+    if category and type(game) == "table" and game.OpenToCategory then
+      local id = (category.GetID and category:GetID()) or category.ID
+      return (pcall(game.OpenToCategory, id))
+    end
+    if InterfaceOptionsFrame_OpenToCategory then
+      -- (asked twice: the first time, some versions of the game only open the window)
+      pcall(InterfaceOptionsFrame_OpenToCategory, panel)
+      return (pcall(InterfaceOptionsFrame_OpenToCategory, panel))
+    end
+    return false
+  end
+
+  local waiter = CreateFrame("Frame")
+  waiter:RegisterEvent("PLAYER_LOGIN")
+  waiter:SetScript("OnEvent", function() pcall(Register) end)
+
+  -- (for the tests)
+  function shared.OptionsPeek() return { panel = panel, build = Build, refresh = Refresh, shows = shows } end
 end

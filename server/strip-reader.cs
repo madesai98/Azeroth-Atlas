@@ -1,5 +1,9 @@
-// Reads one thin row of pixels from the top-left corner of the game window and prints it, so
-// the map server can decode the strip the AzerothAtlas addon draws there.
+// Reads one thin row of pixels from the game window and prints it, so the map server can decode
+// the strip the AzerothAtlas addon draws there. The strip is in the window's top-left corner
+// unless you have moved it (the addon's options: another corner, so many pixels in). Where it
+// is not found in the top-left corner, the whole picture of the window is looked through for
+// its first seven squares (white, black, white, black, red, green, blue), and it is read where
+// they are from then on - and looked for again when it is no longer there.
 //
 // Two ways of looking, both of them plain picture capture:
 //   window  the game window's own picture, through the Windows capture API that streaming and
@@ -71,6 +75,93 @@ static class StripReader
         return best;
     }
 
+    // ---- finding the strip ---------------------------------------------------------------------
+    // What a pixel (stored B, G, R, A) shows as one of the strip's digits: red 4, green 2, blue 1.
+    static int Digit(byte[] p, int x)
+    {
+        int i = x * 4;
+        return (p[i + 2] > 128 ? 4 : 0) | (p[i + 1] > 128 ? 2 : 0) | (p[i] > 128 ? 1 : 0);
+    }
+    static readonly int[] Sync = { 7, 0, 7, 0, 4, 2, 1 };
+
+    // Where the strip begins in a row of `n` pixels: its first seven squares, each as wide as the
+    // others (2 to 32 pixels). -1 when they are not in this row. `from`: look no further left.
+    static int FindStart(byte[] p, int n, int from)
+    {
+        int x = Math.Max(1, from);
+        while (x < n)
+        {
+            // a black run that follows white: the strip's second square, perhaps
+            if (Digit(p, x) != 0 || Digit(p, x - 1) != 7) { x++; continue; }
+            int start = x;
+            while (x < n && x - start < 34 && Digit(p, x) == 0) x++;
+            int len = x - start;
+            if (len < 2 || len > 33) continue;
+            for (int k = 0; k < 5; k++)
+            {
+                // (the square's width, give or take a blended edge)
+                double w = len + (k == 0 ? 0 : k == 1 ? -0.5 : k == 2 ? 0.5 : k == 3 ? -1 : 1);
+                double s = start - w;
+                if (w < 2 || s < -0.6) continue;
+                bool ok = true;
+                for (int i = 0; i < Sync.Length && ok; i++)
+                {
+                    int at = (int)Math.Floor(s + (i + 0.5) * w);
+                    if (at < 0 || at >= n || Digit(p, at) != Sync[i]) ok = false;
+                }
+                if (ok) return Math.Max(0, (int)Math.Round(s));
+            }
+        }
+        return -1;
+    }
+    // Is the strip at the very start of this row?
+    static bool StartsHere(byte[] p, int n)
+    {
+        int at = FindStart(p, Math.Min(n, 300), 0);
+        return at >= 0 && at <= 2;
+    }
+    // Look through a whole picture (rows of `pitch` bytes, B, G, R, A) for the strip: where its
+    // top-left corner is. Every other row is looked at (the strip is six pixels high), and what
+    // is found has to be in the row under it as well - a strip, and not a chance likeness.
+    static bool Search(IntPtr data, int pitch, int w, int h, out int fx, out int fy)
+    {
+        fx = -1; fy = -1;
+        byte[] row = new byte[w * 4], under = new byte[w * 4];
+        for (int y = 0; y + 1 < h; y += 2)
+        {
+            Marshal.Copy(new IntPtr(data.ToInt64() + (long)y * pitch), row, 0, row.Length);
+            bool have = false;
+            for (int from = 0; ; )
+            {
+                int at = FindStart(row, w, from);
+                if (at < 0) break;
+                if (!have) { Marshal.Copy(new IntPtr(data.ToInt64() + (long)(y + 1) * pitch), under, 0, under.Length); have = true; }
+                int below = FindStart(under, Math.Min(w, at + 300), Math.Max(0, at - 2));
+                if (below >= 0 && Math.Abs(below - at) <= 1) { fx = at; fy = y; return true; }
+                from = at + 8;
+            }
+        }
+        return false;
+    }
+    // The same for the screen: the area the game draws in, at (ox, oy), w by h.
+    static bool SearchScreen(int ox, int oy, int w, int h, out int fx, out int fy)
+    {
+        fx = -1; fy = -1;
+        if (w < 40 || h < 8) return false;
+        try
+        {
+            using (Bitmap all = new Bitmap(w, h, PixelFormat.Format32bppArgb))
+            using (Graphics gg = Graphics.FromImage(all))
+            {
+                gg.CopyFromScreen(ox, oy, 0, 0, new Size(w, h), CopyPixelOperation.SourceCopy);
+                BitmapData d = all.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                try { return Search(d.Scan0, d.Stride, w, h, out fx, out fy); }
+                finally { all.UnlockBits(d); }
+            }
+        }
+        catch { return false; }
+    }
+
     // The part of the window that is drawn on screen (without the invisible resize borders).
     static RECT VisibleBounds(IntPtr hwnd)
     {
@@ -127,6 +218,10 @@ static class StripReader
         MapFn map; UnmapFn unmap; CopyRegionFn copyRegion;
         public int FrameWidth, FrameHeight;
         public DateTime LastFrame = DateTime.UtcNow;
+        // Asked to look through the next picture for the strip (WantScan); Scanned once that has
+        // been done, with where it is in the picture (FoundX, FoundY: -1 when it is not in it).
+        public bool WantScan, Scanned;
+        public int FoundX = -1, FoundY = -1;
 
         public static WindowCapture Start(IntPtr hwnd, int width, int interval)
         {
@@ -232,6 +327,11 @@ static class StripReader
                     TEXTURE2D_DESC d;
                     ((GetDescFn)Method(texture, 10, typeof(GetDescFn)))(texture, out d);
                     FrameWidth = (int)d.Width; FrameHeight = (int)d.Height;
+                    if (WantScan)
+                    {
+                        WantScan = false; Scanned = true; FoundX = -1; FoundY = -1;
+                        try { Locate(texture); } catch { }
+                    }
                     Array.Clear(px, 0, px.Length);
                     if (x < 0 || y < 0 || y >= FrameHeight || x >= FrameWidth) return 1;
                     int w = Math.Min(Math.Min(width, stagingWidth), FrameWidth - x);
@@ -251,6 +351,28 @@ static class StripReader
             finally { frame.Dispose(); }
         }
 
+        // Look through the whole picture for the strip: a copy of it the CPU can read, made for
+        // this one look (it is done only while the strip is not where it was last read).
+        void Locate(IntPtr texture)
+        {
+            TEXTURE2D_DESC d = new TEXTURE2D_DESC();
+            d.Width = (uint)FrameWidth; d.Height = (uint)FrameHeight; d.MipLevels = 1; d.ArraySize = 1; d.Format = 87 /* B8G8R8A8_UNORM */;
+            d.SampleCount = 1; d.Usage = 3 /* staging */; d.CPUAccessFlags = 0x20000 /* read */;
+            IntPtr whole;
+            if (((CreateTexture2DFn)Method(device, 5, typeof(CreateTexture2DFn)))(device, ref d, IntPtr.Zero, out whole) < 0) return;
+            try
+            {
+                BOX box = new BOX();
+                box.Left = 0; box.Top = 0; box.Front = 0; box.Right = (uint)FrameWidth; box.Bottom = (uint)FrameHeight; box.Back = 1;
+                copyRegion(context, whole, 0, 0, 0, 0, texture, 0, ref box);
+                MAPPED m;
+                if (map(context, whole, 0, 1 /* read */, 0, out m) < 0) return;
+                try { Search(m.Data, (int)m.RowPitch, FrameWidth, FrameHeight, out FoundX, out FoundY); }
+                finally { unmap(context, whole, 0); }
+            }
+            finally { Marshal.Release(whole); }
+        }
+
         public void Dispose()
         {
             try { if (session != null) session.Dispose(); } catch { }
@@ -265,6 +387,20 @@ static class StripReader
 
     static int Main(string[] args)
     {
+        // (for the tests) "find <picture file>": look through a picture for the strip, as the
+        // whole of the game window is looked through, and say where it is.
+        if (args.Length == 2 && args[0] == "find")
+        {
+            using (Bitmap picture = new Bitmap(args[1]))
+            {
+                BitmapData d = picture.LockBits(new Rectangle(0, 0, picture.Width, picture.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                int x, y;
+                bool found = Search(d.Scan0, d.Stride, picture.Width, picture.Height, out x, out y);
+                picture.UnlockBits(d);
+                Console.Out.WriteLine(found ? "F " + x + " " + y : "F none");
+            }
+            return 0;
+        }
         if (args.Length < 6)
         {
             Console.Error.WriteLine("usage: strip-reader <processNames> <pathHint|-> <parentPid> <width> <row> <intervalMs> [screenX screenY | screen]");
@@ -301,12 +437,30 @@ static class StripReader
             IntPtr hwnd = IntPtr.Zero;
             int tick = 0;
             bool stalled = false;
+            // Where the strip begins, counted from the corner of the area the game draws in (0, 0:
+            // that corner itself, where it is unless you have moved it). misses: looks in a row
+            // that did not find it there. After a dozen of those in a row the whole picture is
+            // looked through for it (nextScan: when that may next be done; scanGap: how long is
+            // left between two such looks - longer each time nothing is found, as when the game
+            // is showing no strip at all).
+            int offX = 0, offY = 0, misses = 0, clientW = 0, clientH = 0;
+            // (for the tests: begin as if it had last been read somewhere else, so that it has to be found)
+            try
+            {
+                string begin = Environment.GetEnvironmentVariable("ATLAS_STRIP_START");
+                if (!string.IsNullOrEmpty(begin)) { string[] at = begin.Split(','); offX = int.Parse(at[0]); offY = int.Parse(at[1]); }
+            }
+            catch { offX = 0; offY = 0; }
+            DateTime nextScan = DateTime.UtcNow;
+            double scanGap = 1500;
+            string place = "S strip 0 0";
             while (true)
             {
                 // Stop when the map server that started us is gone.
                 if (++tick % 20 == 0) { try { Process.GetProcessById(parent).Dispose(); } catch { return 0; } }
                 int ox, oy;
                 bool fresh = true;
+                bool look = !fixedPos && misses >= 12 && DateTime.UtcNow >= nextScan;
                 if (fixedPos) { ox = fx; oy = fy; }
                 else
                 {
@@ -320,7 +474,8 @@ static class StripReader
                     RECT r;
                     if (!ClientToScreen(hwnd, ref p) || !GetClientRect(hwnd, out r)) { hwnd = IntPtr.Zero; Thread.Sleep(200); continue; }
                     ox = p.X; oy = p.Y;
-                    Status(o, "S window " + ox + " " + oy + " " + (r.Right - r.Left) + " " + (r.Bottom - r.Top));
+                    clientW = r.Right - r.Left; clientH = r.Bottom - r.Top;
+                    Status(o, "S window " + ox + " " + oy + " " + clientW + " " + clientH);
                 }
 #if WGC
                 if (windowCapture)
@@ -332,7 +487,22 @@ static class StripReader
                         // The picture starts at the window's visible corner; the strip is at the corner of
                         // the area the game draws in, below the title bar when the window has one.
                         RECT bounds = VisibleBounds(hwnd);
-                        fresh = capture.Read(px, ox - bounds.Left, oy - bounds.Top + row, width) == 1;
+                        int cornerX = ox - bounds.Left, cornerY = oy - bounds.Top;
+                        if (look) capture.WantScan = true;
+                        fresh = capture.Read(px, cornerX + offX, cornerY + offY + row, width) == 1;
+                        if (capture.Scanned)
+                        {
+                            // The whole picture has been looked through: the strip is read where it was
+                            // found from now on (the row just read was still the old place's).
+                            capture.Scanned = false;
+                            if (capture.FoundX >= 0)
+                            {
+                                offX = capture.FoundX - cornerX; offY = capture.FoundY - cornerY;
+                                misses = 0; scanGap = 1500; fresh = false; last = null;
+                            }
+                            else scanGap = Math.Min(scanGap * 2, 12000);
+                            nextScan = DateTime.UtcNow.AddMilliseconds(scanGap);
+                        }
                         // No new picture for a while although the window is not minimized: the game has
                         // stopped drawing. Say so once, and keep waiting for it to start again.
                         if (fresh) stalled = false;
@@ -356,11 +526,26 @@ static class StripReader
 #endif
                 if (!windowCapture)
                 {
-                    try { g.CopyFromScreen(ox, oy, 0, 0, new Size(width, Height), CopyPixelOperation.SourceCopy); }
+                    if (look)
+                    {
+                        // (the same look through the whole of the game's area, on the screen)
+                        int sx, sy;
+                        if (SearchScreen(ox, oy, clientW, clientH, out sx, out sy)) { offX = sx; offY = sy; misses = 0; scanGap = 1500; last = null; }
+                        else scanGap = Math.Min(scanGap * 2, 12000);
+                        nextScan = DateTime.UtcNow.AddMilliseconds(scanGap);
+                    }
+                    try { g.CopyFromScreen(ox + offX, oy + offY, 0, 0, new Size(width, Height), CopyPixelOperation.SourceCopy); }
                     catch (Exception e) { Status(o, "S capturefailed " + e.GetType().Name); last = null; Thread.Sleep(500); continue; }
                     BitmapData d = bmp.LockBits(new Rectangle(0, row, width, 1), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
                     Marshal.Copy(d.Scan0, px, 0, width * 4);
                     bmp.UnlockBits(d);
+                }
+                if (!fixedPos)
+                {
+                    // Is the strip where it is being read? (For the map's page: where it is, said when that changes.)
+                    if (fresh) { if (StartsHere(px, width)) misses = 0; else if (misses < 100000) misses++; }
+                    string spot = "S strip " + offX + " " + offY;
+                    if (spot != place) { place = spot; o.WriteLine(place); o.Flush(); }
                 }
                 if (fresh)
                 {

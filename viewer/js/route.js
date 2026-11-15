@@ -424,7 +424,8 @@ export class RoutePlanner {
         link(a, b, { mode: 'tram', line: tram.n, stop: i + 1, ride: tram.legs[i].trip, at: (t) => transit.board(tram, i, when(t), 12) });
       } else link(a, b, { seconds: d / 33 + 40, mode: 'tram' });
     }
-    if (!fl && !this.fixed && T?.hearth?.has && T.hearth.cooldown !== null) {
+    // (avoid: you have said in the game that routes are to leave your hearthstone out)
+    if (!fl && !this.fixed && T?.hearth?.has && !T.hearth.avoid && T.hearth.cooldown !== null) {
       const bind = this.#bind(T.hearth);
       if (bind) link(S, add({ kind: 'inn', map: bind.map, pos: bind.pos, name: T.hearth.name }), { seconds: T.hearth.cooldown + HEARTH_CAST, mode: 'hearth', wait: T.hearth.cooldown });
     }
@@ -710,6 +711,8 @@ export class RoutePlanner {
     const to = target.go ?? [target.x, target.y, target.z ?? null];
     // (a waypoint somewhere else, or on another level of the same spot: asked about at once, whatever is in hand)
     const moved = !!a && (a.toMap !== target.map || Math.hypot(a.to[0] - to[0], a.to[1] - to[1]) > 2 || Math.abs((a.to[2] ?? -1e6) - (to[2] ?? -1e6)) > 1);
+    // (your hearthstone has been switched on or off in the game since this was asked: asked again)
+    if (a && !this.fixed && a.avoid !== !!this.app.player?.travel?.hearth?.avoid) a.stale = true;
     let need = !a || a.stale || moved;
     // where you are on the route shown (also while a newer one is being worked out)
     if (this.route && a && !moved) {
@@ -748,7 +751,8 @@ export class RoutePlanner {
     const working = !!a && a.done && !a.settled && now - a.time < SETTLE_FOR;
     if (need && (moved || (!working && !(a && !a.done && now - a.time < 4000) && !(a && !a.stale && now - a.time < REPLAN_GAP)))) {
       const id = ++this.hub.seq;
-      const asked = (this.asked = { id, map: this.mapId, toMap: target.map, from: [me[0], me[1], me[2]], to: [to[0], to[1], to[2] ?? null], time: now, done: false, flight });
+      // (avoid: whether your hearthstone was left out when this was asked - a route worked out before you changed that is not the answer any more)
+      const asked = (this.asked = { id, map: this.mapId, toMap: target.map, from: [me[0], me[1], me[2]], to: [to[0], to[1], to[2] ?? null], time: now, done: false, flight, avoid: !!this.app.player?.travel?.hearth?.avoid });
       if (flight) { this.#aloft(asked); return; }
       // (on another map there is no walking it: straight to the journey by other means; and
       // while something carries you there is no walking from where you are, either)

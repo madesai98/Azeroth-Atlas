@@ -1,5 +1,6 @@
-// Decoder for the coded strip the AzerothAtlas addon draws along the top-left edge of the
-// game window. Format (must match addon/AzerothAtlas/AzerothAtlas.lua): squares showing one
+// Decoder for the coded strip the AzerothAtlas addon draws in a corner of the game window (the
+// top-left one unless you move it; the reader finds it wherever it is: strip-reader.cs).
+// Format (must match addon/AzerothAtlas/AzerothAtlas.lua): squares showing one
 // base-8 digit each as a colour (red = 4, green = 2, blue = 1):
 //   7 0 7 0 4 2 1     sync pattern + colour check
 //   version(1) layout(1) seq(1) flags(5) map(5) x(8) y(8) facing(4) zoneMap(5) level(2) height(6)
@@ -281,7 +282,8 @@ export class NameCache {
 
   /**
    * The travel facts received so far, or null before the first of them:
-   * { run, swim (yards per second; 0 = not reported), hearth: { has, cooldown (seconds), name, map, x, y }, flights: [taxi node ids] | null }
+   * { run, swim (yards per second; 0 = not reported), hearth: { has, avoid (you have said in the
+   *   game that routes are to leave it out), cooldown (seconds), name, map, x, y }, flights: [taxi node ids] | null }
    */
   travel() {
     const s = this.raw.get(`${TEXT_KIND.STATS}:0`);
@@ -289,7 +291,7 @@ export class NameCache {
     const u16 = (b, o) => b[o] * 256 + b[o + 1], u24 = (b, o) => b[o] * 65536 + b[o + 1] * 256 + b[o + 2];
     const count = u16(s, 7);
     const cooldown = u16(s, 4);
-    const out = { run: u16(s, 0) / 100, swim: u16(s, 2) / 100, hearth: { has: !!s[6], cooldown: cooldown === 65535 ? null : Math.ceil(cooldown / 5) * 5, name: this.names.get(`${TEXT_KIND.BIND}:0`) ?? null, map: null, x: null, y: null }, flights: null };
+    const out = { run: u16(s, 0) / 100, swim: u16(s, 2) / 100, hearth: { has: !!(s[6] & 1), avoid: !!(s[6] & 2), cooldown: cooldown === 65535 ? null : Math.ceil(cooldown / 5) * 5, name: this.names.get(`${TEXT_KIND.BIND}:0`) ?? null, map: null, x: null, y: null }, flights: null };
     const pos = this.raw.get(`${TEXT_KIND.BINDPOS}:0`);
     if (pos && pos.length >= 9 && pos[8]) { out.hearth.map = u16(pos, 0); out.hearth.x = u24(pos, 2) / 128 - 32768; out.hearth.y = u24(pos, 5) / 128 - 32768; }
     // the flight points arrive 18 to a message; the list is known once every message is in

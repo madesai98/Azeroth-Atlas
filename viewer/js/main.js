@@ -488,6 +488,7 @@ function render() {
   pass.end();
   gpu.device.queue.submit([encoder.finish()]);
   sentFrame(gpu);
+  app.drawn = (app.drawn ?? 0) + 1;
   app.models.pump();
 
   app.labels.live = live;
@@ -517,6 +518,36 @@ const FLIGHT_REACH = 5;   // on a flight path you are a figure from this many ti
 let lastTime = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
+  step(now, true);
+}
+
+// The map goes on working while nobody can see it. A page that is not on show - its window
+// behind the game on the one screen there is, or minimized - is given no frames to draw, and
+// everything here used to hang on those: where you are, the routes, what the game is sent. So
+// the game got no route unless the map happened to be in view. Now a worker keeps time beside
+// the frames (its clock is not held back as a hidden page's own is), and when no frame has come
+// for a moment the same step is taken from there - all of it but the picture, which is drawn
+// once a second at most: nobody is looking, and it keeps the ground under you loaded.
+const UNSEEN_AFTER = 350; // ms without a frame: the page is not being shown
+const UNSEEN_DRAW = 1000; // ms between pictures drawn while it is not
+let unseenDrawn = 0;
+function startTicking() {
+  try {
+    const ticker = new Worker(new URL('./tick.js', import.meta.url));
+    ticker.onmessage = () => {
+      const now = performance.now();
+      if (now - lastTime >= UNSEEN_AFTER || app.unseen) step(now, false);
+    };
+    app.ticker = ticker;
+  } catch (err) { console.warn('no timekeeper beside the frames: the map only works while it is on show', err); }
+}
+
+/** One step of everything: where you are, the routes, what the game is sent - and, when the page is on show (seen), the picture. */
+function step(now, seen) {
+  // (unseen: frames have stopped coming; over as soon as one comes again)
+  if (seen) app.unseen = false;
+  else if (!app.unseen) { app.unseen = true; unseenDrawn = now; }
+  app.steps = (app.steps ?? 0) + 1; // (how many steps have been taken, and - app.drawn - pictures drawn: for the tests)
   const dt = Math.min(0.1, (now - lastTime) / 1000);
   lastTime = now;
   if (app.camera.update(dt)) app.dirty = true;
@@ -612,6 +643,17 @@ function frame(now) {
     if (now - (app.routesShownAt ?? 0) > 1000) { app.routesShownAt = now; showRoutes(); }
     // the same route, for the game's own map and minimap
     app.ingame?.update();
+  }
+  if (!seen) {
+    // not on show: a picture now and then, and nothing of what only a look at it is for
+    if (app.dirty && now - unseenDrawn >= UNSEEN_DRAW && mayDraw(now)) {
+      unseenDrawn = now;
+      app.dirty = false;
+      pace.last = now;
+      // (a picture that cannot be drawn unseen is not a failure of the map: tried again in a while)
+      try { render(); } catch (err) { console.warn('no picture while the map is not on show', err); unseenDrawn = now + 30000; }
+    }
+    return;
   }
   if (app.dirty && mayDraw(now)) {
     app.dirty = false;
@@ -1109,8 +1151,9 @@ function showPlayer() {
     else if (s.reason === 'stalled') msg = 'The game window has stopped updating';
     else if (s.reason === 'server') msg = 'No word from the map server (it is starting again, or has been closed)';
     // Reading the game window itself works with other windows in front; reading the screen does not.
-    else if (s.capture === 'window') msg = s.reason === 'covered' || s.reason === 'checksum' ? 'Cannot read the strip (is something drawn over the top-left of the game?)' : 'No signal: is the addon enabled (/atlas) and your character in the world?';
-    else if (s.reason === 'covered' || s.reason === 'checksum') msg = 'Strip partly hidden (something covering the top-left of the game?)';
+    // (the strip can be moved to another corner of the game: said where something is in its way)
+    else if (s.capture === 'window') msg = s.reason === 'covered' || s.reason === 'checksum' ? 'Cannot read the strip: something is drawn over it in the game (an overlay?). Move it to a free corner: in the game, Esc > Options > AddOns > Azeroth Atlas' : 'No signal: is the addon enabled (/atlas) and your character in the world?';
+    else if (s.reason === 'covered' || s.reason === 'checksum') msg = 'Strip partly hidden: something is covering it. Uncover that corner of the game, or move the strip (in the game: Esc > Options > AddOns > Azeroth Atlas)';
     else msg = 'No signal: is the addon enabled (/atlas) and the game visible?';
   } else if (s.status === 'error') { cls = 'bad'; msg = `Player link problem: ${s.reason}`; }
   else msg = 'Player link: starting…';
@@ -1269,7 +1312,9 @@ function showLevels() {
 /** How the route's way into the game is doing (the addon draws it on the game's map and minimap). */
 function showInGame() {
   const live = app.player?.state.status === 'live';
-  $('ingameMsg').textContent = live && app.route?.enabled ? app.ingame?.describe(app.player.state.mail) ?? '' : '';
+  // (your hearthstone, where you have said in the game that routes are to leave it out)
+  const hearth = live && app.player.travel?.hearth?.avoid ? 'Your hearthstone is left out of routes (the button beside "Routes" in the game brings it back).' : '';
+  $('ingameMsg').textContent = [live && app.route?.enabled ? app.ingame?.describe(app.player.state.mail) ?? '' : '', hearth].filter(Boolean).join(' ');
 }
 
 // ---- spawn zones ---------------------------------------------------------------------------
@@ -1701,6 +1746,7 @@ async function main() {
   app.player.follow = $('optFollow').checked;
   applyFollow();
   requestAnimationFrame(frame);
+  startTicking(); // (the same steps while the page is not on show: see step)
   // Where to begin: where the page's address says, else where you were looking last time.
   const h = readHash(), last = store.get(VIEW_KEY);
   const known = (v) => !!v && ['m', 'x', 'y', 'z'].every((k) => Number.isFinite(v[k])) && app.manifest.maps.some((m) => m.id === v.m);

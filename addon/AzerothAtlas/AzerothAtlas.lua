@@ -3,8 +3,10 @@
 -- local "WoW Forever 3D Map" viewer.
 --
 -- Addons cannot talk to other programs, so the data is drawn as a thin strip of coloured
--- squares along the top-left edge of the game window, and the map's local server reads that
--- strip off the screen. Nothing is sent over the network and the game is not modified.
+-- squares in a corner of the game window - the top-left one, unless you choose another
+-- (Esc > Options > AddOns > Azeroth Atlas, or /atlas strip): the map's local server finds the
+-- strip wherever it is and reads it off the screen. Nothing is sent over the network and the
+-- game is not modified.
 -- Type /atlas to turn the strip on or off (/atlas help lists what else it can be told).
 --
 -- Strip format (must match server/strip.js). Squares are BLOCK_W x BLOCK_H physical pixels and
@@ -67,12 +69,26 @@ local TWO_PI = 2 * math.pi
 local PARTY_UNITS = { "party1", "party2", "party3", "party4" }
 
 local strip = CreateFrame("Frame", "AzerothAtlasStrip", WorldFrame)
+-- Over everything else the game's interface draws: in the topmost layer there is, at the top
+-- of it (said again every couple of seconds, should anything else have a say in it). What is
+-- drawn over the game from outside it - another program's overlay - cannot be got on top of:
+-- for that the strip can be moved (see Placement).
+local TOP_LEVEL = 10000 -- (the highest a frame can be given; a game that will not have it is given the next best)
+local function OnTop()
+  if strip:GetFrameStrata() ~= "TOOLTIP" then strip:SetFrameStrata("TOOLTIP") end
+  if strip:GetFrameLevel() ~= TOP_LEVEL then
+    if not pcall(strip.SetFrameLevel, strip, TOP_LEVEL) then
+      TOP_LEVEL = 9000
+      strip:SetFrameLevel(TOP_LEVEL)
+    end
+  end
+end
 strip:SetFrameStrata("TOOLTIP")
-strip:SetFrameLevel(9000)
+OnTop()
 
 local squares, shown = {}, {}
 for i = 1, MAX_BLOCKS do
-  local t = strip:CreateTexture(nil, "OVERLAY")
+  local t = strip:CreateTexture(nil, "OVERLAY", nil, 7)
   if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false) end
   if t.SetTexelSnappingBias then t:SetTexelSnappingBias(0) end
   t:Hide()
@@ -93,16 +109,34 @@ local function Paint(i, d)
   shown[i] = d
 end
 
+-- Where the strip is: a corner of the game window, and how many screen pixels in from it
+-- (across, and down or up). The top-left corner unless you have chosen otherwise.
+local CORNERS = { TOPLEFT = "top left", TOPRIGHT = "top right", BOTTOMLEFT = "bottom left", BOTTOMRIGHT = "bottom right" }
+local function Placement()
+  local at = type(AzerothAtlasDB) == "table" and type(AzerothAtlasDB.strip) == "table" and AzerothAtlasDB.strip or nil
+  local corner = at and type(at.corner) == "string" and CORNERS[at.corner] and at.corner or "TOPLEFT"
+  local x, y = floor((at and tonumber(at.x) or 0) + 0.5), floor((at and tonumber(at.y) or 0) + 0.5)
+  if x < 0 then x = 0 end
+  if y < 0 then y = 0 end
+  return corner, x, y
+end
+
 -- Size the strip so that one unit inside it is exactly one physical screen pixel, whatever
 -- the UI scale or window size is (the UI is always 768 units tall).
 local function Layout()
-  local _, physicalHeight = GetPhysicalScreenSize()
+  local physicalWidth, physicalHeight = GetPhysicalScreenSize()
   local parentScale = WorldFrame:GetEffectiveScale()
   if not physicalHeight or physicalHeight <= 0 or not parentScale or parentScale <= 0 then return end
   strip:SetScale((768 / physicalHeight) / parentScale)
+  -- (no further in from its corner than leaves all of it on the screen)
+  local corner, x, y = Placement()
+  local wide, high = MAX_BLOCKS * BLOCK_W, BLOCK_H
+  if physicalWidth and physicalWidth > wide and x > physicalWidth - wide then x = physicalWidth - wide end
+  if physicalHeight > high and y > physicalHeight - high then y = physicalHeight - high end
+  local right, low = corner == "TOPRIGHT" or corner == "BOTTOMRIGHT", corner == "BOTTOMLEFT" or corner == "BOTTOMRIGHT"
   strip:ClearAllPoints()
-  strip:SetPoint("TOPLEFT", WorldFrame, "TOPLEFT", 0, 0)
-  strip:SetSize(MAX_BLOCKS * BLOCK_W, BLOCK_H)
+  strip:SetPoint(corner, WorldFrame, corner, right and -x or x, low and y or -y)
+  strip:SetSize(wide, high)
   for i = 1, MAX_BLOCKS do
     local t = squares[i]
     t:ClearAllPoints()
@@ -772,6 +806,8 @@ local function BuildMessages()
     end
   end
   local flights = KnownFlights()
+  -- (2 with it: you have said that routes are to leave your hearthstone out - see shared.SetHearth)
+  if shared.HearthOff() then has = has + 2 end
   list[#list + 1] = { T_STATS, 0, Byte2(run * 100) .. Byte2(swim * 100) .. Byte2(cooldown) .. strchar(has) .. Byte2(#flights) }
   local bind = GetBindLocation and text(GetBindLocation())
   if bind then
@@ -989,6 +1025,7 @@ strip:SetScript("OnUpdate", function(_, dt)
   if elapsed < 0.05 then return end
   elapsed = 0
   tick = tick + 1
+  if tick % 40 == 0 then pcall(OnTop) end
   -- position every frame; party five times a second
   local ok = pcall(Update, tick % 4 == 1)
   if not ok then lastSum = -1 end
@@ -996,6 +1033,7 @@ end)
 
 local function Apply()
   if AzerothAtlasDB.enabled then
+    pcall(OnTop)
     Layout()
     lastSum = -1
     strip:Show()
@@ -1003,6 +1041,47 @@ local function Apply()
     strip:Hide()
   end
 end
+
+-- ---- what the options are set through (Options.lua's panel, and the words after /atlas) ------------
+-- The strip: on or off.
+function shared.StripOn() return type(AzerothAtlasDB) == "table" and AzerothAtlasDB.enabled ~= false end
+function shared.SetStrip(on)
+  if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end
+  AzerothAtlasDB.enabled = on and true or false
+  Apply()
+end
+-- ...and where it is: the corner ("TOPLEFT", "TOPRIGHT", "BOTTOMLEFT", "BOTTOMRIGHT") and the
+-- pixels in from it. (The 3D map finds it by itself: nothing has to be told there.)
+shared.StripAt = Placement
+shared.CORNERS = CORNERS
+function shared.PlaceStrip(corner, x, y)
+  if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end
+  local was, wx, wy = Placement()
+  corner = type(corner) == "string" and CORNERS[string.upper(corner)] and string.upper(corner) or was
+  x, y = tonumber(x) or wx, tonumber(y) or wy
+  if x < 0 then x = 0 elseif x > 8000 then x = 8000 end
+  if y < 0 then y = 0 elseif y > 8000 then y = 8000 end
+  if corner == "TOPLEFT" and x == 0 and y == 0 then AzerothAtlasDB.strip = nil
+  else AzerothAtlasDB.strip = { corner = corner, x = floor(x + 0.5), y = floor(y + 0.5) } end
+  if AzerothAtlasDB.enabled ~= false then Apply() end
+end
+
+-- Your hearthstone: used in routes wherever it is the quicker way (as ever), or left out of
+-- them - for those who keep it for something else. Kept for each character.
+function shared.HearthOff() return type(AzerothAtlasCharDB) == "table" and AzerothAtlasCharDB.noHearth == true end
+function shared.SetHearth(use)
+  if type(AzerothAtlasCharDB) ~= "table" then AzerothAtlasCharDB = {} end
+  local off = not use
+  if off == shared.HearthOff() then return end
+  AzerothAtlasCharDB.noHearth = off or nil
+  -- (said to the 3D map in the next round of messages, and the routes are fetched anew once it has them: Route.lua)
+  messagesAt = -100
+  if shared.HearthChanged then pcall(shared.HearthChanged) end
+end
+
+-- What else you could be heading for (for Route.lua, which asks for the routes there when it
+-- changes): the places said to the 3D map, your party, and which edition of your quest log this is.
+function shared.Heads() return heads, party, quests.logGen end
 
 -- /atlas is a short word, and another addon may have it (there is an old and well-known one
 -- called Atlas). /azatlas and /azerothatlas are this addon's whatever else is installed; /atlas
@@ -1084,6 +1163,31 @@ SlashCmdList["AZEROTHATLAS"] = function(msg)
     word, rest = string.match(string.lower(msg), "^%s*(%S*)%s*(%S*)")
     word, rest = word or "", rest or ""
   end
+  local function say(text) print("|cff7fd4ffAzeroth Atlas|r: " .. text) end
+  if word == "strip" then
+    -- /atlas strip                  where it is
+    -- /atlas strip topright 0 40    a corner (topleft, topright, bottomleft, bottomright), and the pixels in from it
+    -- /atlas strip reset            back in the top-left corner
+    local corner, x, y = string.match(string.lower(msg), "^%s*strip%s+(%a+)%s*(%d*)%s*(%d*)")
+    if corner == "reset" then
+      shared.PlaceStrip("TOPLEFT", 0, 0)
+    elseif corner and CORNERS[string.upper(corner)] then
+      shared.PlaceStrip(corner, tonumber(x) or 0, tonumber(y) or 0)
+    elseif corner then
+      say("/atlas strip topleft, topright, bottomleft or bottomright - and, after it, how many pixels in from that corner: across, then down (or up). /atlas strip reset puts it back.")
+      return
+    end
+    local at, ax, ay = Placement()
+    say("the coded strip is in the " .. CORNERS[at] .. " corner" .. ((ax > 0 or ay > 0) and (", " .. ax .. " px across and " .. ay .. " px " .. ((at == "TOPLEFT" or at == "TOPRIGHT") and "down" or "up")) or "") .. ". The 3D map finds it by itself.")
+    return
+  elseif word == "hearth" or word == "hearthstone" then
+    shared.SetHearth(shared.HearthOff())
+    say(shared.HearthOff() and "your hearthstone is left out of routes." or "your hearthstone is used in routes again, where it is the quicker way.")
+    return
+  elseif word == "options" or word == "config" or word == "settings" then
+    if not (shared.OpenOptions and shared.OpenOptions()) then say("the options are under Esc > Options > AddOns > Azeroth Atlas.") end
+    return
+  end
   if word ~= "" then
     if shared.Command then pcall(shared.Command, word, rest) end
     return
@@ -1091,5 +1195,5 @@ SlashCmdList["AZEROTHATLAS"] = function(msg)
   if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end
   AzerothAtlasDB.enabled = not AzerothAtlasDB.enabled
   Apply()
-  print("|cff7fd4ffAzeroth Atlas|r: " .. (AzerothAtlasDB.enabled and "on - your position is shown to the 3D map" or "off"))
+  say(AzerothAtlasDB.enabled and "on - your position is shown to the 3D map" or "off")
 end
