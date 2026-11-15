@@ -220,7 +220,8 @@ export class Camera {
       const rect = c.getBoundingClientRect();
       const px = e.clientX - rect.left, py = e.clientY - rect.top;
       const hit = this.pickAt(px, py) ?? this.pickAt(c.clientWidth / 2, c.clientHeight / 2);
-      this.drag = { orbit, x: e.clientX, y: e.clientY, pivot: hit, rev: this.rev, moved: false, travel: 0 };
+      // (went: how far the pointer has gone in all - a right-click that slips a pixel or two is still a click)
+      this.drag = { orbit, x: e.clientX, y: e.clientY, pivot: hit, rev: this.rev, moved: false, travel: 0, went: 0 };
     });
     c.addEventListener('pointermove', (e) => {
       const rect = c.getBoundingClientRect();
@@ -237,6 +238,7 @@ export class Camera {
       const dx = e.clientX - d.x, dy = e.clientY - d.y;
       d.x = e.clientX; d.y = e.clientY;
       if (Math.abs(dx) + Math.abs(dy) > 0) d.moved = true;
+      d.went += Math.abs(dx) + Math.abs(dy);
       if (this.lock) {
         if (d.orbit) {
           // tied to your character: the view swings around them, wherever the cursor is
@@ -271,7 +273,7 @@ export class Camera {
       this.onChange();
     });
     const end = (e) => {
-      if (this.drag && !this.drag.moved && e.type === 'pointerup') this.onClick?.(this.drag.pivot, e);
+      if (this.drag && e.type === 'pointerup' && (!this.drag.moved || (e.button === 2 && this.drag.went <= 4))) this.onClick?.(this.drag.pivot, e);
       this.drag = null;
     };
     c.addEventListener('pointerup', end);

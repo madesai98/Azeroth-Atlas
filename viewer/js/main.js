@@ -449,6 +449,7 @@ function render() {
   // You, as a figure standing in the world once the camera is close (the flat arrow from further away).
   const live = app.player?.markers() ?? null;
   // Where each route ends: marked in its colour, with what is left of the way there.
+  app.wayMark = null; // (where your waypoint's route ends in this picture: for a right-click on it)
   if (live) {
     live.targets = [];
     for (const r of app.trips.active()) {
@@ -459,6 +460,7 @@ function render() {
       const at = t.go ?? [t.x, t.y, t.z ?? r.planner.route?.target?.[2] ?? undefined];
       live.targets.push({ x: at[0] + off[0], y: at[1] + off[1], z: at[2] ?? app.ground.heightAt(t.x + off[0], t.y + off[1]) ?? 0, color: r.color,
         text: `${r.lead || !t.name ? '' : `${t.name} · `}${left ? `${Math.round(left.yards)} yd · ${clock(left.seconds)}` : ''}` });
+      if (r.kind === 'waypoint') { const mark = live.targets[live.targets.length - 1]; app.wayMark = { x: mark.x, y: mark.y, z: mark.z }; }
     }
   }
   if (live?.player && app.opts.figure && !live.player.beside) {
@@ -683,7 +685,10 @@ function updateReadout() {
   const p = aiming ? camera.pickAt(m[0], m[1]) : null;
   app.npcHover = aiming && app.npcs.count ? app.npcs.pick(camera.pos, app.vp, camera.canvas.clientWidth, camera.canvas.clientHeight, m[0], m[1]) : -1;
   $('npcLine').textContent = app.npcUi?.hover(app.npcHover) ?? '';
-  camera.canvas.style.cursor = app.npcHover >= 0 ? 'pointer' : '';
+  // (on your waypoint's mark: said, with how to take it away)
+  const onWay = aiming && app.npcHover < 0 && !camera.flyLook && onWaypoint(camera.mouse);
+  if (onWay) $('npcLine').textContent = 'Your waypoint. Right-click to take it away (Esc does the same).';
+  camera.canvas.style.cursor = app.npcHover >= 0 || onWay ? 'pointer' : '';
   const zoneInfo = $('zoneInfo');
   // The read-out is there only while the pointer is on the map and on something in the world:
   // off the page, over the sidebar, or on the open sky there is nothing to say.
@@ -717,6 +722,37 @@ function updateReadout() {
 // p: [x, y, z] on the map `on` (one of the open maps; the one in hand unless said), or null to take the marker away
 /** Is this the same place, to within a step? ({ map, x, y } each) */
 const samePlace = (a, b) => !!a && !!b && a.map === b.map && Math.hypot(a.x - b.x, a.y - b.y) < 1.5;
+
+/**
+ * Take your waypoint away, from here - whichever side it was placed on: the marker dropped on
+ * this map, or the waypoint placed in the game. It goes here at once. The game cannot be told
+ * anything unasked, so there it goes when the game next asks for a route (/atlas route asks at
+ * once); until then it is simply not shown here. True if there was one to take away.
+ */
+function clearWaypoint() {
+  const g = app.gameWay?.spot ?? null;
+  if (app.pin) { setPin(null); return true; }
+  if (g && !samePlace(g, app.wayDropped)) { app.wayDropped = { map: g.map, x: g.x, y: g.y, at: Date.now() }; app.dirty = true; return true; }
+  return false;
+}
+/** Where your waypoint is in the picture, in pixels of the map's canvas ([x, y]) - or null: you have none, or it is not in view. */
+function waypointAt() {
+  // (the marker dropped here is your waypoint where there is one - also with no game running, when no route is drawn to it; else where the waypoint's route ends)
+  const off = app.pin ? app.offsetOf(app.pin.map) : null;
+  const w = app.pin && off ? { x: app.pin.x + off[0], y: app.pin.y + off[1], z: app.pin.z } : app.wayMark, m = app.vp, c = app.camera;
+  if (!w || !m || !c) return null;
+  const p = [w.x - c.pos[0], w.y - c.pos[1], w.z - c.pos[2]];
+  const X = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12], Y = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13], W = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+  if (!(W > 0)) return null;
+  return [(X / W * 0.5 + 0.5) * c.canvas.clientWidth, (0.5 - Y / W * 0.5) * c.canvas.clientHeight];
+}
+const WAY_REACH = 26; // pixels from your waypoint's mark within which the pointer is on it
+/** Is the pointer on your waypoint's mark? (mouse: [x, y] on the canvas) */
+function onWaypoint(mouse) {
+  const at = mouse ? waypointAt() : null;
+  // (the mark stands a little above the spot, with its words over it: the reach is a circle round where it is drawn)
+  return !!at && Math.hypot(mouse[0] - at[0], mouse[1] - (at[1] - 10)) <= WAY_REACH;
+}
 
 /** @param byGame  (taking it off) a waypoint newly placed in the game has taken its place: nothing of the game's is to be let go of */
 function setPin(p, name = null, exact = false, quick = false, on = app.here, byGame = false) {
@@ -826,7 +862,7 @@ function bindSearch() {
   input.addEventListener('blur', () => setTimeout(() => { results = []; show(); }, 150));
   window.addEventListener('keydown', (e) => {
     if (e.key === '/' && document.activeElement !== input) { e.preventDefault(); input.focus(); }
-    if (e.key === 'Escape' && document.activeElement !== input) { setPin(null); $('help').style.display = 'none'; }
+    if (e.key === 'Escape' && document.activeElement !== input) { clearWaypoint(); $('help').style.display = 'none'; }
   });
 }
 
@@ -1152,6 +1188,7 @@ function showRoutes() {
       text = `${mmss(best.seconds)}${timed.length > 1 ? ` (+${timed.length - 1})` : ''}`;
     } else if (mine.length) text = mine.some((a) => a.planner.asked && !a.planner.asked.settled) ? '…' : 'no way';
     row.classList.toggle('none', !mine.length);
+    if (r.key === 'waypoint') $('routeClear_waypoint').style.display = mine.length || app.pin ? '' : 'none';
     if (when.textContent !== text) when.textContent = text;
     const why = mine.map((a) => `${a.target?.name ? `${a.target.name}: ` : ''}${a.planner.route ? `${Math.round(a.planner.remaining().yards)} yd on this map, about ${clock(a.planner.remaining().seconds)}` : a.planner.status || 'being worked out'}`).join('\n');
     when.title = why;
@@ -1466,6 +1503,14 @@ function bindUI() {
     when.className = 'when'; when.id = `routeWhen_${r.key}`;
     row.className = 'rt none';
     row.append(box, color, label, when);
+    if (r.key === 'waypoint') {
+      // (your waypoint can be taken away from here too)
+      const off = document.createElement('button');
+      off.id = 'routeClear_waypoint'; off.className = 'clear'; off.textContent = '×'; off.style.display = 'none';
+      off.title = 'Take your waypoint away. (A right-click on it on the map, or Esc, does the same. In the game it goes when the game next asks for a route: /atlas route asks at once.)';
+      off.addEventListener('click', () => { clearWaypoint(); showRoutes(); });
+      row.append(off);
+    }
     $('routeList').append(row);
     box.addEventListener('change', () => app.trips?.set(r.key, { on: box.checked }));
     color.addEventListener('input', () => app.trips?.set(r.key, { color: color.value }));
@@ -1585,6 +1630,8 @@ async function main() {
   app.questUi = bindQuests(app);
   { const told = app.npcs.onChange; app.npcs.onChange = () => { told(); app.questUi.update(); }; }
   app.setPin = setPin;
+  app.clearWaypoint = clearWaypoint;
+  app.waypointAt = waypointAt;
   app.labels = new Labels($('labels'));
   app.applyTools();
   app.camera = new Camera($('gl'), () => { app.dirty = true; });
@@ -1594,6 +1641,8 @@ async function main() {
   app.camera.gone = (x, y, z) => app.cutaway.hidesGround(x, y, z);
   app.camera.onHover = () => { app.hoverDirty = true; };
   app.camera.onClick = (hit, e) => {
+    // a right-click on your waypoint takes it away
+    if (e.button === 2 && !e.altKey && !e.ctrlKey && onWaypoint(app.camera.mouse)) { clearWaypoint(); return; }
     if (e.button !== 0 || e.altKey || e.ctrlKey) return;
     // a click on a marker opens that NPC's card; anywhere else drops the marker pin
     const m = app.camera.mouse;

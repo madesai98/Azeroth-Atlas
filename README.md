@@ -168,7 +168,8 @@ You can also run it from a terminal: `npm run extract` (add `--force` to rebuild
 | Right-drag / middle-drag / Alt-drag | Rotate and tilt around the point under the cursor; around your character while following. While a movement key is held it steers (turns in place), as in game |
 | Wheel | Zoom toward the cursor; toward your character while following |
 | Double-click | Zoom in on a point |
-| Click | Drop a marker on what is under the cursor: a street, a floor, a roof, or the ground (shows distance from it; Esc clears). Where that spot has more than one level, you are asked which |
+| Click | Drop a marker on what is under the cursor: a street, a floor, a roof, or the ground (shows distance from it). It is your waypoint. Where that spot has more than one level, you are asked which |
+| Right-click your waypoint, or Esc | Take your waypoint away (also one placed in the game: see "Route to your waypoint") |
 | Shift-click | Drop a quick marker: no question, the level nearest your own height |
 | W A S D / arrows | Move (Shift = faster); stops following your character |
 | Q / E, R / F | Turn (around your character while following), up / down |
@@ -640,6 +641,11 @@ read what it asks for): a marker dropped here, or taken off here, reaches the ga
 time it asks for a route - when you stray from the one you are on, when your guide moves on, or
 at once with `/atlas route`. Until then the game keeps the waypoint it had. The marker counts
 from when you dropped it, so a waypoint you have placed in the game since still stands.
+
+**Taking your waypoint away from the 3D map**: right-click it on the map (the pointer says so
+when it is on it), press **Esc**, or press the little **×** on the Waypoint line in the Routes
+list - whichever side the waypoint was placed on. It goes here at once; in the game it goes the
+next time the game asks for a route, and `/atlas route` there asks at once.
 
 `/atlas clear` in the game (or a key you bind to *Clear the route*, or a right-click on the
 route's end on the game's map) takes your waypoint away, and your guide's step, if it is on

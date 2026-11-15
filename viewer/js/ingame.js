@@ -273,6 +273,8 @@ export class InGameRoute {
     if (m.seen === 0) return 'In the game: restart the game once, so that it finds the route mailboxes.';
     if (m.left === 0) return 'In the game: type /reload to go on seeing the route (its deliveries for this login are used up).';
     if (m.stale) return 'In the game: the game is reading old copies of the route files, so the route cannot be shown there (it seems to read them only when it starts).';
+    // (taken away here, and the game still has it: it cannot be told unasked)
+    if (this.app.markerForGame?.off) return 'In the game: your waypoint is still there until the game next asks for its route. Type /atlas route in the game to clear it there now.';
     const left = m.left < 40 ? ` ${m.left} deliveries left before a /reload is needed.` : '';
     if (m.showing && m.read) return `In the game: showing this route.${left}`;
     if (m.showing) return `In the game: showing the route it last fetched.${left}`;
