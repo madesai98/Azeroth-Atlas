@@ -12,3 +12,5 @@ node_modules/
 # The application as built to hand on (npm run dist), and a shortcut to it of your own
 /dist/
 *.lnk
+# A separate tool of its own (its own git repository), for checking the database against Wowhead
+/wowhead-scraper/

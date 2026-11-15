@@ -20,7 +20,7 @@
 //     a neutral port, and the odd quest villain in a capital.
 import { packContainer, writeFileAtomic } from '../container.js';
 
-export const CREATURES_VERSION = 8;
+export const CREATURES_VERSION = 9;
 export const CSEC = { META: 1, SPAWNS: 2, SPAWN_CREATURE: 3, PATH_POINTS: 4, PATHS: 5 };
 
 // Faction group bits: 1 = any player, 2 = Alliance, 4 = Horde.

@@ -40,7 +40,7 @@
 import { packContainer, writeFileAtomic } from '../container.js';
 import { reactions } from './creatures.js';
 
-export const NPCS_VERSION = 6;
+export const NPCS_VERSION = 7;
 export const NSEC = { META: 1, SPAWNS: 2, OWNER: 3, SOURCE: 4 };
 export const HEIGHT = { NONE: 0, GUESS: 1, ONLY: 2, REFERENCE: 3, AGREED: 4 };
 

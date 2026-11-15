@@ -248,6 +248,7 @@ The map only redraws when the view changes, so it uses no GPU while you are just
 | `referenceFile` | A copy of that database of your own to use instead of downloading one |
 | `ingame` | `false` = never write the route into the game's route mailboxes (see "The same route in the game") |
 | `autoUpdate` | `false` = the map tool only says when a newer version of itself is out, and puts it in when you press the button (see "Updates"). `"never"` = it is never put in, whatever is pressed |
+| `database` | The Atlas database (see "The Atlas database"): `{ "share": false }` = this copy sends nothing of what it learns; `{ "url": "...", "apiKey": "..." }` = another database than the one this version names, and the key to sign in to it with; `{ "maintain": true }` = this copy also makes and publishes the database (the database must list it as a maintainer); `false` = off altogether |
 
 `config.json` is each computer's own: it need not exist, it is not part of what is published,
 and an update never touches it.
@@ -1564,6 +1565,69 @@ the card itself: if the game is drawing as fast as it possibly can, anything els
 waits its turn. Capping the game's frame rate (its own "Max Foreground FPS" setting, or vertical
 sync) leaves room for the map and usually costs nothing you can see.
 
+## The Atlas database
+
+Who and what is in the world - every creature, object and quest - is also kept in one database
+of Azeroth Atlas's own, which every copy of the map adds to and takes from. Much of this game
+is nowhere in its files: the game's server tells your game about a creature or a quest only
+when you meet it. So no single player, and no single source, has all of it; put together, the
+copies of the map do.
+
+**What is in it.** One record per creature, object and quest, made from every source there is,
+each fact with a note of where it came from:
+
+| Source | What it gives | Believed |
+| --- | --- | --- |
+| **The game's own cache** (`Cache/WDB` in the game folder: what the server told your game about what you have met) | A creature's name, kind, family and rank; a quest's level, what it asks for and how many, what it gives; an object's kind | first: it is the server's own answer, and the newest game build's before an older one's |
+| **Seen in game** | where an NPC really stands, noted when you talk to it | next |
+| **Wowhead** (its database for this game, which its own users' games feed; read by the database's maintainer and handed in as a file) | a creature's name, level, kind, rank and how it stands towards each side; a quest's level, experience, money and rewards; and, where its page was read, where a thing stands and what a quest asks for | next for what a thing is; after QuestieDB for where things stand and who gives which quest, so it fills in what QuestieDB lacks |
+| **QuestieDB** | everything it has for this game: names, levels, sides, where things stand, who gives and takes each quest, what comes before and after it; quest experience measured from players' sessions | next |
+| **cmangos classic-db** | the original game: heights, a creature's kind and health, how soon it is back, drop tables, how many of each thing a quest asks for | last: right for most of the old world, silent about everything new |
+
+Where two sources say different things the record keeps both: the one believed, and what the
+other said (the server calls a creature "Searing Lava Spider" where QuestieDB has "Greater Lava
+Spider"). Nothing is lost by merging, and a disagreement can be looked into.
+
+**What a copy sends.** While the map runs it reads the game's cache and its own sightings, and
+sends what it has not sent before: a little after it starts, whenever the game has written its
+cache again (it does when you log out or leave the game), after you have met an NPC, and every
+six hours besides. **Facts about the game world and nothing else**: not your account, your
+characters, your realm or your computer's name, and not where you were or when. A sighting goes
+as "this NPC stands here". The game's files are only ever read.
+
+**Who a copy is to the database.** Nobody in particular. The first time it runs, a copy asks the
+database for an anonymous account: a made-up name and a key to come back as the same one, kept in
+`<dataDir>/atlasdb/install.json`. No e-mail, no password, nothing about you; delete the file and
+the copy is a new nobody the next time. What a copy sends is filed under that name.
+
+**What a copy may do there** is settled by the database's own rules (`atlasdb/rules.json`), not
+by the copy: any copy that has signed in may read what is published; each may add to its own
+corner of what was sent, and may neither change nor take back what it has sent, nor see anybody
+else's; and only the copies the database lists as maintainers may publish. The address and the
+key in `atlasdb/database.json` are no secrets: the key only says which database is meant.
+
+**The switch.** At the bottom of the sidebar: **Share what this copy learns**. Unticked, the
+copy sends nothing and still gets what the others have found. (`"database": { "share": false }`
+in `config.json` is the same switch; `"database": false` switches the whole thing off.) The
+line is only there in a version that names a database.
+
+**By hand** (`npm run db -- <command>`, or `node atlasdb/cli.js <command>`):
+
+| Command | What it does |
+| --- | --- |
+| `status` | what is published, how many copies have sent something, what this copy has |
+| `collect` | send what this copy has learned, now (`--dry`: only say what would be sent) |
+| `pull` | fetch the database as published (only the parts that changed) into `<dataDir>/atlasdb` |
+| `show npc 263380` | one record (`quest`, `object` likewise; `--local`: as last fetched) |
+| `publish` | make the database again from the sources on this disk and everything every copy has sent, and write what changed. For the copy that keeps the database: `"database": { "maintain": true }` has the map do this by itself. The database lets only a maintainer do it |
+| `whoami` | the made-up name this copy is signed in under |
+
+The pieces: `atlasdb/records.js` (a record, and how sources are merged into one), `collect.js`
+(what a copy gathers and sends), `publish.js` (making, publishing and fetching the database),
+`rtdb.js` (talking to the database: plain web requests, nothing to install), `signin.js` (the
+anonymous account), `rules.json` (the database's rules, as pasted into the Firebase console),
+`extractor/wdb.js` (reading the game's cache), `server/atlasdb.js` (the map doing it by itself).
+
 ## Credits
 
 The map is built from your own installed game. What else it draws on, and where each comes from:
@@ -1576,6 +1640,7 @@ The map is built from your own installed game. What else it draws on, and where 
 | The doorways between maps (`extractor/doorways.json`) | **ShortestPathForever** by cjber, `Data/Portals.lua` (GPL-3.0-or-later) | Included; the addon's own, newer list is read instead where it is installed |
 | The timetables of boats, zeppelins and the tram (`viewer/transit.json`, `addon/AzerothAtlas/TransitData.lua`) | **DockWatch** by Wyveryx (MIT), recorded in the game; **NauticusClassicResurrected** (MIT) by way of **ForeverTransport** by Stilo | Included |
 | Guides in the game | Guide packs written for **Guidelime** | Read from your game's AddOns folder. Not included |
+| Facts in the Atlas database marked `w`: what a creature or quest is, and where QuestieDB is silent | **Wowhead** (wowhead.com/forever) | Read by the database's maintainer; in the database, not in the download |
 
 ## If the map does not come up
 

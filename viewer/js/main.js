@@ -1418,6 +1418,22 @@ function bindDanger() {
   applyDanger();
 }
 
+// The Atlas database (server/atlasdb.js): whether this copy sends what it learns, and which
+// version of the database it has. The line is only there where a database is set up.
+async function refreshDatabase(share) {
+  try {
+    const res = await fetch(share === undefined ? '/api/database' : `/api/database?share=${share ? 1 : 0}`, { method: share === undefined ? 'GET' : 'POST' });
+    const st = await res.json();
+    if (st.error) throw new Error(st.error);
+    $('dbRow').style.display = st.on ? '' : 'none';
+    $('optShare').checked = !!st.share;
+    const r = st.result, sent = r?.collect?.sent;
+    const n = sent ? sent.npc + sent.object + sent.quest + sent.seen : 0;
+    $('dbNow').textContent = st.error ? 'not reached' : st.running ? 'working…' : n ? `${n.toLocaleString()} sent` : r?.pull?.rev ? `database ${r.pull.rev}` : '';
+    $('dbNow').title = st.error ?? '';
+  } catch { /* an older server: no such line */ }
+}
+
 // what: nothing (only look), 'install' (Update addon) or 'guides' (Convert guide packs)
 async function refreshAddon(what) {
   const btn = $('btnAddon'), msg = $('addonMsg');
@@ -1583,6 +1599,7 @@ function bindUI() {
   $('appCheck').addEventListener('click', lookForApp(false));
   $('appUpdate').addEventListener('click', lookForApp(true));
   $('btnAddon').addEventListener('click', () => refreshAddon('install'));
+  $('optShare').addEventListener('change', (e) => refreshDatabase(e.target.checked));
   $('btnGuides').addEventListener('click', () => refreshAddon('guides'));
   $('update').addEventListener('click', async () => {
     $('update').disabled = true;
@@ -1759,6 +1776,8 @@ async function main() {
   resumeCheck();
   // (a guide pack installed or updated since is offered for converting without reloading the page)
   setInterval(() => { if (!document.hidden) refreshAddon(false); }, 30000);
+  refreshDatabase();
+  setInterval(() => { if (!document.hidden) refreshDatabase(); }, 60000);
   app.player.connect();
 }
 

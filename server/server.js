@@ -17,6 +17,7 @@ import { OLD as OLD_ADDON, legacyInstalled } from './legacy.js';
 import { Changes } from './changes.js';
 import { AppUpdate } from './appupdate.js';
 import { MIME, sendFile, safeJoin } from './http.js';
+import { AtlasDb } from './atlasdb.js';
 
 // node server/server.js [--open] [--config=path/to/config.json]
 // (server/watch.js runs this and starts it again whenever the map's code changes)
@@ -50,6 +51,9 @@ const mail = new RouteMail(cfg.ingame === false ? null : addonsDir(cfg), oldAddo
 const tracker = new PlayerTracker({ pathHint: flavourFolder(cfg) ?? '', ...(cfg.tracker ?? {}), mail });
 // Where NPCs really stand, as you have seen for yourself in the game (see seen.js).
 const seen = new SeenStore(cfg.dataDir);
+// What every copy of the map learns about the game world, put together in one database (see atlasdb.js).
+const atlas = new AtlasDb(cfg, configFile, { hold: () => job.running });
+atlas.start();
 const VIEWER_DIR = path.join(PROJECT_ROOT, 'viewer');
 // The page's own files, watched: a page that is open loads itself again when they change (changes.js).
 const changes = new Changes(VIEWER_DIR);
@@ -176,10 +180,24 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       try {
         const d = body ? JSON.parse(body) : {};
-        if (req.method === 'POST') json(200, { ok: true, record: seen.add(d), count: seen.list.length });
+        if (req.method === 'POST') { json(200, { ok: true, record: seen.add(d), count: seen.list.length }); atlas.nudge(); }
         else json(200, { ok: true, forgotten: seen.forget(d.map, d.id, d.object), count: seen.list.length });
       } catch (err) { json(400, { error: err.message }); }
     });
+    return;
+  }
+  if (p === '/api/database') {
+    // the Atlas database: what this copy sends and has fetched (?share=0 or 1: keep what it learns to itself, or send it; ?run=1: now)
+    const json = (code, body) => { res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
+    if (req.method === 'GET') { json(200, atlas.status()); return; }
+    if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
+    const origin = req.headers.origin;
+    if (origin && new URL(origin).host !== req.headers.host) { res.writeHead(403); res.end(); return; }
+    try {
+      if (url.searchParams.has('share')) atlas.setShare(url.searchParams.get('share') === '1');
+      if (url.searchParams.get('run') === '1') atlas.run();
+      json(200, atlas.status());
+    } catch (err) { json(500, { error: err.message }); }
     return;
   }
   if (p === '/api/ingame/route') {
@@ -244,7 +262,7 @@ const server = http.createServer((req, res) => {
 // reads the game window is put away first), and not left behind should the watcher go.
 if (process.send) {
   // (a map build in hand goes with it: nobody would see it finish, and the next one picks up where it stopped)
-  const leave = () => { try { tracker.stop(); } catch { /* going anyway */ } try { if (job.running) job.child?.kill(); } catch { /* gone */ } process.exit(0); };
+  const leave = () => { try { tracker.stop(); } catch { /* going anyway */ } try { atlas.stop(); } catch { /* going anyway */ } try { if (job.running) job.child?.kill(); } catch { /* gone */ } process.exit(0); };
   process.on('message', (m) => { if (m?.stop) leave(); });
   process.on('disconnect', leave);
 }
