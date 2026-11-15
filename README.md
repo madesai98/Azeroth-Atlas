@@ -40,7 +40,7 @@ of the old one, or be put anywhere else, and nothing is lost.
 same application as a folder: unpack it somewhere of your own (your Documents or Desktop: not
 Program Files, and not inside the game's folder) and double-click **Azeroth Atlas.exe**.
 
-Installed, the application is in `%LOCALAPPDATA%\Programs\Azeroth Atlas`, and is removed like
+Installed, the application is in `%LOCALAPPDATA%\Programs\azeroth-atlas`, and is removed like
 any other (Windows' list of installed apps). Removing it, or installing a newer one over it,
 leaves what is yours where it is; delete `%LOCALAPPDATA%\Azeroth Atlas` yourself to be rid of
 the settings and the map data too.
