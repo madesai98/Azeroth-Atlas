@@ -1,0 +1,13 @@
+{
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": ["node_modules", ".git", "*.log", "prepare.mjs"],
+      "predeploy": ["node functions/prepare.mjs"]
+    }
+  ],
+  "database": {
+    "rules": "atlasdb/rules.json"
+  }
+}

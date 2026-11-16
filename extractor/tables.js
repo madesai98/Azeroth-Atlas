@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readTable } from './formats/db2.js';
+import { readTable, tableHashOf } from './formats/db2.js';
 
 const DBD_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dbd');
 const DBD_URL = 'https://raw.githubusercontent.com/wowdev/WoWDBDefs/master/definitions/';
@@ -26,6 +26,31 @@ export const TABLE_FDID = {
   Light: 1375579,
   LightParams: 1334669,
   LightData: 1375580,
+  // items: what each is, and the tables its stats, armor and damage are worked out from (jobs/items.js)
+  Item: 841626,
+  ItemSparse: 1572924,
+  ItemSubClass: 1261604,
+  RandPropPoints: 1310245,
+  ItemArmorTotal: 1283022,
+  ItemArmorQuality: 1283021,
+  ItemArmorShield: 1277741,
+  ArmorLocation: 1284818,
+  ItemDamageOneHand: 1277743,
+  ItemDamageTwoHand: 1277738,
+  ItemDamageOneHandCaster: 1277739,
+  ItemDamageTwoHandCaster: 1277742,
+  ItemDamageThrown: 6156257,
+  ItemDamageWand: 6156258,
+  ItemDamageAmmo: 1277740,
+  GlobalStrings: 1394440,
+  // recipes: what each profession makes, and out of what (jobs/recipes.js)
+  SkillLine: 1240935,
+  SkillLineAbility: 1266278,
+  SpellReagents: 841946,
+  SpellEffect: 1140088,
+  SpellName: 1990283,
+  ItemEffect: 969941,
+  ItemXItemEffect: 3177687,
 };
 
 async function refreshDefinition(name) {
@@ -44,8 +69,10 @@ async function refreshDefinition(name) {
 /**
  * Load a table as plain row objects. Returns { rows, hash } or null when the table is
  * unavailable (not downloaded / fully encrypted / no matching definition).
+ * hotfixes: records out of the game's hotfix cache to lay over the table (hotfix.js); or
+ * cache: the whole cache (readCache(cfg)), out of which the table's own records are taken.
  */
-export async function loadTable(casc, name, log = () => {}) {
+export async function loadTable(casc, name, log = () => {}, { hotfixes = null, cache = null } = {}) {
   const fdid = TABLE_FDID[name];
   let buf;
   try {
@@ -55,13 +82,14 @@ export async function loadTable(casc, name, log = () => {}) {
     return null;
   }
   if (!buf) { log(`table ${name}: not present in local game data`); return null; }
+  if (!hotfixes && cache) hotfixes = cache.get(tableHashOf(buf)) ?? null;
   const file = path.join(DBD_DIR, name + '.dbd');
   let dbd = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       if (!dbd) throw Object.assign(new Error('no definition yet'), { code: 'ELAYOUT', first: true });
-      const t = readTable(buf, dbd, { build: casc.build.version });
-      return { rows: t.rows, hash: casc.contentHash(fdid), skippedEncryptedSections: t.skippedEncryptedSections };
+      const t = readTable(buf, dbd, { build: casc.build.version, hotfixes });
+      return { rows: t.rows, hash: casc.contentHash(fdid), skippedEncryptedSections: t.skippedEncryptedSections, hotfixed: t.hotfixed };
     } catch (err) {
       if (err.code !== 'ELAYOUT' || attempt === 1) { log(`table ${name}: ${err.message}`); return null; }
       try {

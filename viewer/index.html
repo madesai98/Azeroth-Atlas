@@ -162,6 +162,63 @@
   #loading { bottom: 64px; }
   #flyhint { top: 14px; }
   #crosshair { position: absolute; left: calc(var(--side-w) + (100% - var(--side-w)) / 2); top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 1.5px solid rgba(255,255,255,.8); border-radius: 50%; pointer-events: none; display: none; }
+
+  /* ---- auction prices: the list, or one item with its charts, over the map ---- */
+  #prices { left: calc(var(--side-w) + 10px); top: 10px; bottom: 10px; width: min(880px, calc(100vw - var(--side-w) - 20px)); flex-direction: column; gap: 8px; padding: 10px 12px; z-index: 6; background: rgba(16, 19, 26, 0.97); }
+  #prices .phead { display: flex; align-items: flex-start; gap: 8px; flex: none; }
+  #prices .phead .grow { flex: 1; }
+  #prices button.x { width: 28px; height: 28px; padding: 0; font-size: 17px; line-height: 1; flex: none; }
+  #prices .pbody { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding-right: 4px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent; }
+  #prices .pfilters { display: flex; gap: 6px; align-items: center; flex: none; }
+  #prices .pfilters input { flex: 2; }
+  #prices .pfilters select { flex: 1; width: auto; }
+  #prices .pfilters div { white-space: nowrap; }
+  .ptable { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  .ptable th { position: sticky; top: 0; background: #161a23; font-weight: 600; padding: 5px 8px; border-bottom: 1px solid var(--line); cursor: pointer; user-select: none; white-space: nowrap; }
+  .ptable th:hover, .ptable th:focus-visible { color: var(--accent); outline: none; }
+  .ptable td { padding: 4px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); white-space: nowrap; }
+  .ptable td.name { white-space: normal; }
+  .ptable .left { text-align: left; }
+  .ptable .right { text-align: right; }
+  .ptable tbody tr { cursor: pointer; }
+  .ptable tbody tr:hover, .ptable tbody tr:focus-visible { background: rgba(255, 255, 255, 0.08); outline: none; }
+  .ptable.plain th { position: static; cursor: default; background: none; }
+  .ptable.plain tbody tr { cursor: default; }
+  #prices .pscroll > button { margin-top: 6px; }
+  #prices button.back { width: auto; align-self: flex-start; padding: 3px 10px; flex: none; }
+  .pname { font-size: 16px; font-weight: 600; }
+  .ptiles { display: flex; flex-wrap: wrap; gap: 8px; }
+  .ptile { flex: 1 1 150px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg2); }
+  .ptile .v { font-size: 17px; font-weight: 600; }
+  .prange { flex: none; }
+  .prange button { width: auto; }
+  .prange button.chosen { border-color: var(--accent); color: var(--accent); background: rgba(243, 201, 105, 0.12); }
+  .pchead { display: flex; align-items: baseline; gap: 14px; margin-top: 4px; }
+  .plegend { display: flex; gap: 14px; color: var(--dim); font-size: 12px; }
+  .plegend > span { display: inline-flex; align-items: center; gap: 5px; }
+  .key { display: inline-block; width: 12px; height: 2px; border-radius: 1px; flex: none; }
+  .key.none { background: none; }
+  .pchartwrap { position: relative; }
+  svg.pchart { display: block; width: 100%; height: auto; outline: none; border-radius: 4px; }
+  svg.pchart:focus-visible { outline: 1px solid var(--accent); }
+  svg.pchart .grid { stroke: rgba(255, 255, 255, 0.08); stroke-width: 1; }
+  svg.pchart .axis { fill: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+  svg.pchart .endlabel { fill: var(--text); font-size: 11px; font-variant-numeric: tabular-nums; }
+  svg.pchart .hair { stroke: rgba(255, 255, 255, 0.35); stroke-width: 1; }
+  .ptip { position: absolute; pointer-events: none; background: #1b2030; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12px; white-space: nowrap; z-index: 2; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); }
+  .ptip .when { color: var(--dim); margin-bottom: 3px; }
+  .ptip .trow { display: flex; align-items: center; gap: 6px; }
+  .pnumbers summary { cursor: pointer; color: var(--dim); }
+  .ptabs { flex: none; }
+  .pgives { padding: 6px 10px; border-left: 2px solid var(--line); display: flex; flex-direction: column; gap: 1px; }
+  .pmade { padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg2); display: flex; flex-direction: column; gap: 4px; }
+  .pmade .ptable td { padding: 2px 8px 2px 0; border-bottom: none; }
+  .pmade a, .puses a { text-decoration: none; }
+  .pmade a:hover, .puses a:hover { text-decoration: underline; }
+  .puses { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; padding-top: 2px; }
+  .ptable tbody tr.still { cursor: default; }
+  #prices .pfilters label.row { flex: none; white-space: nowrap; }
+  .pnumbers[open] summary { margin-bottom: 4px; }
   @media (max-width: 700px) { :root { --side-w: 0px; } #side { box-shadow: 8px 0 30px rgba(0,0,0,.5); } }
 </style>
 </head>
@@ -278,6 +335,11 @@
     <details class="sec" data-sec="quests">
       <summary><span class="grow">Quests</span><span id="questCount" class="dim small"></span></summary>
       <div class="secb" id="questBody"></div>
+    </details>
+
+    <details class="sec" data-sec="prices">
+      <summary><span class="grow">Auction prices</span><span id="priceWhen" class="dim small"></span></summary>
+      <div class="secb" id="priceBody"></div>
     </details>
 
     <details class="sec" data-sec="layers">

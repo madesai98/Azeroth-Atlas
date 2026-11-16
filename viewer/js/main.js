@@ -10,6 +10,7 @@ import { DangerLayer, BANDS } from './danger.js';
 import { NpcLayer, NpcRenderer, makeIconSheet } from './npcs.js';
 import { bindNpcs } from './npcui.js';
 import { bindQuests } from './quests.js';
+import { bindPrices } from './prices.js';
 import { NpcFigures } from './npcfigures.js';
 import { FloorFinder } from './floors.js';
 import { TravelRoutes } from './travel.js';
@@ -1695,6 +1696,8 @@ async function main() {
   app.npcUi = bindNpcs(app, sheet);
   // every quest there is, to search and look into (the Quests section)
   app.questUi = bindQuests(app);
+  // what things cost at the auction house, and how that has moved (the Auction prices section)
+  app.priceUi = bindPrices();
   { const told = app.npcs.onChange; app.npcs.onChange = () => { told(); app.questUi.update(); }; }
   app.setPin = setPin;
   app.clearWaypoint = clearWaypoint;

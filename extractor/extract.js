@@ -29,6 +29,8 @@ import { fetchReference, readReference } from './reference.js';
 import { NavReader } from './navread.js';
 import { NAV_VERSION } from './jobs/nav.js';
 import { loadTable } from './tables.js';
+import { ensureItems } from './jobs/items.js';
+import { ensureRecipes } from './jobs/recipes.js';
 import { MAP_HALF } from './formats/chunked.js';
 import { DATA_STAMP } from './stamp.js';
 
@@ -424,6 +426,28 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
     } catch (err) {
       log(`NPC layer unavailable: ${err.message}`);
     }
+  }
+
+  // ---- items ---------------------------------------------------------------------------
+  // Every item's name and kind (jobs/items.js), for wherever an item is shown. It is made again
+  // whenever the game has been sent new records, which is most times you have played: so it is
+  // not counted among what makes the map "changed".
+  report({ type: 'phase', name: 'Listing items' });
+  try {
+    const made = await ensureItems(casc, cfg, log);
+    if (!made) log('items: the item tables of the game could not be read');
+    else if (made.built) stats.built++; else stats.reused++;
+  } catch (err) {
+    log(`items unavailable: ${err.message}`);
+  }
+  // and everything the professions make, and out of what (jobs/recipes.js)
+  report({ type: 'phase', name: 'Listing recipes' });
+  try {
+    const made = await ensureRecipes(casc, cfg, log);
+    if (!made) log('recipes: the profession tables of the game could not be read');
+    else if (made.built) stats.built++; else stats.reused++;
+  } catch (err) {
+    log(`recipes unavailable: ${err.message}`);
   }
 
   // ---- metadata ------------------------------------------------------------------------

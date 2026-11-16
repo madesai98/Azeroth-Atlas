@@ -14,3 +14,8 @@ node_modules/
 *.lnk
 # A separate tool of its own (its own git repository), for checking the database against Wowhead
 /wowhead-scraper/
+# The scheduled function (functions/): its libraries, the copy of the files it shares with the map
+# (functions/prepare.mjs makes it), and what the Firebase tools keep for themselves
+/functions/node_modules/
+/functions/shared/
+/.firebase/

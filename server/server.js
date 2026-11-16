@@ -18,6 +18,7 @@ import { Changes } from './changes.js';
 import { AppUpdate } from './appupdate.js';
 import { MIME, sendFile, safeJoin } from './http.js';
 import { AtlasDb } from './atlasdb.js';
+import { Auctions } from './auctions.js';
 
 // node server/server.js [--open] [--config=path/to/config.json]
 // (server/watch.js runs this and starts it again whenever the map's code changes)
@@ -54,6 +55,9 @@ const seen = new SeenStore(cfg.dataDir);
 // What every copy of the map learns about the game world, put together in one database (see atlasdb.js).
 const atlas = new AtlasDb(cfg, configFile, { hold: () => job.running });
 atlas.start();
+// What things cost at the auction house, and how that has moved (see auctions.js).
+const auctions = new Auctions(cfg, configFile, { hold: () => job.running });
+auctions.start();
 const VIEWER_DIR = path.join(PROJECT_ROOT, 'viewer');
 // The page's own files, watched: a page that is open loads itself again when they change (changes.js).
 const changes = new Changes(VIEWER_DIR);
@@ -200,6 +204,30 @@ const server = http.createServer((req, res) => {
     } catch (err) { json(500, { error: err.message }); }
     return;
   }
+  if (p === '/api/prices' || p === '/api/prices/list' || p === '/api/prices/item' || p === '/api/prices/recipes') {
+    // auction prices: what this copy shows and where it has them from (POST ?house=us-110: choose the
+    // house; ?run=1: look now), a house's whole list (/list), one item's history (/item?id=), every
+    // recipe costed at the house's prices (/recipes)
+    const json = (code, body) => { res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(typeof body === 'string' ? body : JSON.stringify(body)); };
+    try {
+      if (req.method === 'POST' && p === '/api/prices') {
+        const origin = req.headers.origin;
+        if (origin && new URL(origin).host !== req.headers.host) { res.writeHead(403); res.end(); return; }
+        if (url.searchParams.has('house')) auctions.setHouse(url.searchParams.get('house'));
+        else if (url.searchParams.get('run') === '1') auctions.run();
+        json(200, { ...auctions.status(), regions: auctions.houses() });
+        return;
+      }
+      if (req.method !== 'GET') { res.writeHead(405); res.end(); return; }
+      auctions.touch();
+      const house = url.searchParams.get('house') || undefined;
+      if (p === '/api/prices') json(200, { ...auctions.status(), regions: auctions.houses() });
+      else if (p === '/api/prices/list') json(200, auctions.list(house) ?? { none: true });
+      else if (p === '/api/prices/recipes') json(200, auctions.recipes(house) ?? { none: true });
+      else json(200, auctions.item(Number(url.searchParams.get('id')), house) ?? { none: true });
+    } catch (err) { json(err.message.startsWith('no such auction house') ? 400 : 500, { error: err.message }); }
+    return;
+  }
   if (p === '/api/ingame/route') {
     // the route the map page shows now, to be drawn in the game as well
     const json = (code, body) => { res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
@@ -262,7 +290,7 @@ const server = http.createServer((req, res) => {
 // reads the game window is put away first), and not left behind should the watcher go.
 if (process.send) {
   // (a map build in hand goes with it: nobody would see it finish, and the next one picks up where it stopped)
-  const leave = () => { try { tracker.stop(); } catch { /* going anyway */ } try { atlas.stop(); } catch { /* going anyway */ } try { if (job.running) job.child?.kill(); } catch { /* gone */ } process.exit(0); };
+  const leave = () => { try { tracker.stop(); } catch { /* going anyway */ } try { atlas.stop(); } catch { /* going anyway */ } try { auctions.stop(); } catch { /* going anyway */ } try { if (job.running) job.child?.kill(); } catch { /* gone */ } process.exit(0); };
   process.on('message', (m) => { if (m?.stop) leave(); });
   process.on('disconnect', leave);
 }

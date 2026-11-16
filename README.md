@@ -248,6 +248,7 @@ The map only redraws when the view changes, so it uses no GPU while you are just
 | `referenceFile` | A copy of that database of your own to use instead of downloading one |
 | `ingame` | `false` = never write the route into the game's route mailboxes (see "The same route in the game") |
 | `autoUpdate` | `false` = the map tool only says when a newer version of itself is out, and puts it in when you press the button (see "Updates"). `"never"` = it is never put in, whatever is pressed |
+| `auctions` | Auction prices (see "Auction prices"): `{ "house": "us-110" }` = the auction house this copy shows (chosen on the page); `false` = off altogether |
 | `database` | The Atlas database (see "The Atlas database"): `{ "share": false }` = this copy sends nothing of what it learns; `{ "url": "...", "apiKey": "..." }` = another database than the one this version names, and the key to sign in to it with; `{ "maintain": true }` = this copy also makes and publishes the database (the database must list it as a maintainer); `false` = off altogether |
 
 `config.json` is each computer's own: it need not exist, it is not part of what is published,
@@ -1667,7 +1668,8 @@ the copy is a new nobody the next time. What a copy sends is filed under that na
 **What a copy may do there** is settled by the database's own rules (`atlasdb/rules.json`), not
 by the copy: any copy that has signed in may read what is published; each may add to its own
 corner of what was sent, and may neither change nor take back what it has sent, nor see anybody
-else's; and only the copies the database lists as maintainers may publish. The address and the
+else's; and only the copies the database lists as maintainers may publish (the records, and the
+auction prices: see "Auction prices"). The address and the
 key in `atlasdb/database.json` are no secrets: the key only says which database is meant.
 
 **The switch.** At the bottom of the sidebar: **Share what this copy learns**. Unticked, the
@@ -1693,6 +1695,161 @@ The pieces: `atlasdb/records.js` (a record, and how sources are merged into one)
 anonymous account), `rules.json` (the database's rules, as pasted into the Firebase console),
 `extractor/wdb.js` (reading the game's cache), `server/atlasdb.js` (the map doing it by itself).
 
+## Auction prices
+
+What every item costs at your auction house, and how that has moved: the **Auction prices**
+section of the sidebar. Choose your house there (your ruleset and your side), then **Open the
+price list**: every item for sale, to search, filter by kind and quality, and sort by any
+column. Click an item for its own page: what it gives (its armor, damage and stats), what it
+costs now, how much of it is for sale, which recipe makes it and what that costs, and two
+charts, its price and the pieces for sale, day by day or look by look. **Crafting**, beside
+**Items** at the top of the list, is every recipe of every profession, costed at today's prices.
+
+Two prices are told apart everywhere:
+
+| | |
+| --- | --- |
+| **Lowest** | the cheapest anybody asks for one piece right now |
+| **Going price** | what the cheap end of the market asks, with the oddities left out. Of all the pieces for sale, cheapest first: the cheapest 15% are taken, then more, up to 30%, for as long as each costs no more than 1.2 times the one before; their average is taken, anything further from it than one and a half times their spread is dropped, and the average is taken again. One seller dumping a single piece moves the lowest, not this |
+
+**Where it comes from.**
+
+| Source | What it gives | How fresh |
+| --- | --- | --- |
+| **Blizzard's own game data** (its API for developers) | every auction in every house: the item, how many, the price | Blizzard makes each house's list anew once an hour |
+| **The game's own tables**, read from your installed game | each item's name, quality, kind, levels, what a vendor pays for it; its armor, damage and stats; every recipe and what it uses | whenever the game has been sent new records |
+| **TradeSkillMaster's public price files** | what no list of auctions can say: how often an item sells of the times it is put up, how many sell in a day and for how much (for the whole region); and TSM's own market value for your house, to hold ours against | the house every few hours, the region daily |
+
+Blizzard gives its lists only to someone with an "API client" of their own, and a client may
+not be handed on. So the lists are read in one place: a scheduled function in the cloud, part
+of the Atlas database's own Firebase project (`functions/`). Once an hour, with nobody's
+computer switched on, it asks Blizzard for every house whose list is newer than the one in the
+database, boils it down (one line per item, not the auctions themselves) and writes it there.
+Every copy of the map reads the prices from the database: nobody else needs a client or an
+account. A copy fetches only the one house it is set to, and only while somebody is looking at
+prices.
+TradeSkillMaster's files are different: each copy fetches them for itself, straight from
+TradeSkillMaster, and nothing of them goes into the Atlas database.
+
+**What an item gives.** This game keeps no stats on an item (the original game did). An item
+only says what share of a budget each of its stats takes, and the budget comes from the item's
+level, its quality and where it is worn. So an item's armor, a weapon's damage and every stat
+are worked out the way the game works them out, from the tables of your own installed game
+(`extractor/jobs/items.js` has the sums, and says where each comes from). The words for the
+stats are the game's own, the ones only this game has among them ("Fire Damage", "Axes Skill",
+"Attack Power Vs Undead"). Held against the forever-ref project's results, which were checked
+against Wowhead's tooltips, for every item both know: the same armor for all 4,706, the same
+damage range and speed for 1,785 of 1,786 weapons, and the same stats for 4,639 of 4,676 (their
+copy of the game is three weeks older, and the game has changed some items since). Not shown yet: what an item does when used or
+equipped (its spells), sets, and what a random ending ("of the Monkey") adds.
+
+**Crafting.** Every recipe of every profession is in the game's files whether or not you know
+it: 2,521 of them. Each is costed at your house's prices now: what its reagents cost, what the
+thing it makes goes for, and the difference. A reagent costs the going price at the auction
+house, or a vendor's price where a vendor sells it for no more (which reagents a vendor sells is
+taken from QuestieDB: thread, vials, flux and the like). A recipe with a reagent that has no
+price, because none is for sale and no vendor is known to sell it, is shown with the rest costed
+and the gap said, and no difference is worked out. An item's page shows the recipe that makes
+it, reagent by reagent, and the recipes it goes into. What the sums leave out: the auction
+house's cut and deposit (how much this game takes is not in its files), what the recipe itself
+costs to learn, and whether the thing sells at all, which is what the Sells column
+(TradeSkillMaster's) is beside it for. A difference is between two prices asked, not a promise.
+The skill at which a recipe turns yellow and grey is in the files; the skill at which a trainer
+teaches it is the trainer's to say, and is not.
+
+**Thirty days, and no longer.** Blizzard's terms for its API say that what is read from it may
+be kept "for no longer than 30 days". So that is as far back as any chart reaches: on every
+run, days older than that are deleted, on each computer and in the Atlas database. An hour in
+which a house could not be read (Blizzard's API not answering, say) has no look, and a day
+without any has no line.
+
+**Which house is which.** Blizzard lists fifteen houses for a region (five each called
+"Alliance", "Horde" and "Blackwater", the neutral one) and does not say which ruleset each
+serves. `auctions/houses.js` says it, and how it was found: each house was held against
+TradeSkillMaster's file for a ruleset and side, and one house fits each file far better than
+any other (for PvP Alliance in the Americas: all 6,505 items with the same lowest price and
+the same number of auctions as TSM's data of the same hour). Checked that way for the Americas
+and Europe on 16 November 2026, and for two of Korea's houses; the rest of Korea and Taiwan
+are taken to be numbered alike. The neutral houses have nothing to be held against: theirs is
+taken from their place in the list, and the page says so. `houses --check` does it again.
+
+**What is kept where.** In `<dataDir>/auctions`: each house as last listed, one line a day per
+item (the lowest, highest and last going price of the day, the lowest anybody asked, the
+pieces for sale), every look of the last 7 days, and TradeSkillMaster's files as last fetched.
+Beside it, `items.json` and `recipes.json`: every item and every recipe, made from the game's
+files when the map is built and again whenever the game has been sent new records.
+In the Atlas database, under `/market`: each house as last listed, its days, and every single
+look of today and yesterday (so a copy that is opened seldom still has the last two days look
+by look, and one that is opened often gathers seven).
+
+**In `config.json`:** `"auctions": { "house": "us-110" }` is the house this copy shows (the
+page writes it); `"auctions": false` switches the whole thing off.
+
+**By hand** (`node auctions/cli.js <command>`):
+
+| Command | What it does |
+| --- | --- |
+| `status` | what this computer has of each house |
+| `house us-110` | choose the house this copy shows (`houses` lists them) |
+| `show linen cloth` | an item's price now, day by day, and what TradeSkillMaster says of it (a name, part of one, or the item's number) |
+| `pull` | fetch this copy's house from the Atlas database |
+| `tsm` | fetch TradeSkillMaster's files for this copy's house |
+| `houses --check` | hold each house's prices in the Atlas database against TradeSkillMaster's file for it, to see that `houses.js` still says which house is which |
+| `auto` | what the map does by itself, once |
+
+**No copy of the map reads the auction houses.** A copy only fetches prices from the Atlas
+database: it holds no API client, asks Blizzard nothing, and has no code to. The reading is in
+one place, the function below, and belongs to whoever keeps the database.
+
+**The function in the cloud** (for whoever keeps the Atlas database). `functions/` is all of
+it: `index.js` runs at 20 and at 45 minutes past every hour (Blizzard's new list is out at about
+18 past; the second run is for a list that came late); `blizzard.js` asks Blizzard, `summary.js`
+boils a house's auctions down to a line per item, and `cloud.js` writes the database. It keeps
+nothing of its own: what it must know from one hour to the next (when each house was last
+listed, the day's line so far) it reads from the database it writes to, and it asks Blizzard
+for a house only if its list is newer than the one there. It needs the database's Firebase
+project to be on the pay-as-you-go plan (Firebase runs no functions without it) and a Blizzard
+API client, made for free at https://develop.battle.net:
+
+| Command | What it does |
+| --- | --- |
+| `node tools/cloud.mjs login` | sign in to Firebase, once |
+| `node tools/cloud.mjs key --id-file=<file> --secret-file=<file>` | hand the client to the function: its two values, each from a file holding nothing else, go into the project's Secret Manager. Never into the repository or the database, and nothing of it is kept on the computer |
+| `node tools/cloud.mjs deploy` | put the function in the cloud (and again whenever anything in `functions/`, or `houses.js`, `days.js` or `pack.js` in `auctions/`, has changed) |
+| `node tools/cloud.mjs logs` | what its last runs said |
+| `node tools/cloud.mjs rules` | publish `atlasdb/rules.json` as the database's rules (the same as pasting it into the console) |
+
+Which regions it reads is `AUCTION_REGIONS` in `functions/.env` (`us`; `us,eu,kr,tw` for all
+four). For the Americas it reads about 77 MB of lists an hour and writes under 2 MB; a run takes
+about 20 seconds.
+
+If the publishing is ever given up, `/market` should be deleted from the database with it:
+nothing else takes away what is there, and it may not be kept past 30 days.
+
+The addresses these lists are read from are not in Blizzard's documentation yet (November
+2026): they were found by people trying them, and may change. A house that cannot be read is
+said so in the function's log (`logs`), and the others go on; the page then shows the last
+list it has, and when that was.
+
+**Blizzard's and TradeSkillMaster's data, and you.** The auction lists are Blizzard
+Entertainment's data, handed on here as its terms for developers allow: to the people using
+this application, for their own use, for free, kept no longer than 30 days, and as they
+are, with no promise from Blizzard or from this project that they are complete or right.
+Azeroth Atlas is not affiliated with or endorsed by Blizzard Entertainment or by
+TradeSkillMaster. Nothing about you is involved in any of it: the lists hold no seller's
+name, and reading prices sends nothing but the request for a house.
+
+The pieces. In a copy of the map: `auctions/share.js` (fetching a house from the database),
+`store.js` (what a computer keeps), `days.js` (days, and the 30 of them), `pack.js` (how prices
+are written in the database), `houses.js` (which house is which), `tsm.js` (TradeSkillMaster's
+files), `craft.js` (what a recipe costs), `view.js` (the list, an item's history and the recipes
+as the page takes them), `server/auctions.js` (the map fetching by itself),
+`viewer/js/prices.js` (the page), `extractor/jobs/items.js` (every item's name, kind, armor,
+damage and stats), `extractor/jobs/recipes.js` (every recipe) and `extractor/hotfix.js` (what
+the game was sent after its files were made, laid over its tables: four items in ten are known
+to it from there alone). In the cloud: `functions/` (the scheduled function; `prepare.mjs`
+copies in the three files it shares with the map), put there with `tools/cloud.mjs`.
+
 ## Credits
 
 The map is built from your own installed game. What else it draws on, and where each comes from:
@@ -1705,6 +1862,9 @@ The map is built from your own installed game. What else it draws on, and where 
 | The doorways between maps (`extractor/doorways.json`) | **ShortestPathForever** by cjber, `Data/Portals.lua` (GPL-3.0-or-later) | Included; the addon's own, newer list is read instead where it is installed |
 | The timetables of boats, zeppelins and the tram (`viewer/transit.json`, `addon/AzerothAtlas/TransitData.lua`) | **DockWatch** by Wyveryx (MIT), recorded in the game; **NauticusClassicResurrected** (MIT) by way of **ForeverTransport** by Stilo | Included |
 | Guides in the game | Guide packs written for **Guidelime** | Read from your game's AddOns folder. Not included |
+| How an item's stats, armor and damage are worked out, and where the game keeps its recipes | **forever-ref** by alcaras (github.com/alcaras/forever-ref), which found that this game uses the formulas TrinityCore worked out for the client, and checked its results against Wowhead | The method only. The code is this project's own; its results were held against forever-ref's |
+| Auction prices | **Blizzard Entertainment**'s game data (its API for developers) | Read hourly by a scheduled function of the database's own; in the database for 30 days, not in the download |
+| How often and how fast an item sells; a second opinion on its price | **TradeSkillMaster**'s public price files (tradeskillmaster.com) | Fetched by each copy for itself. Not included |
 | Facts in the Atlas database marked `w`: what a creature or quest is, and where QuestieDB is silent | **Wowhead** (wowhead.com/forever) | Read by the database's maintainer; in the database, not in the download |
 
 ## If the map does not come up

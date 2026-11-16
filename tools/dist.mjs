@@ -24,7 +24,7 @@ const out = path.join(root, 'dist');
 const NAME = 'Azeroth Atlas';
 fs.rmSync(out, { recursive: true, force: true });
 // (what is this computer's own, or built here, is no part of it: the same list as .gitignore)
-const ignore = [/^\/config\.json$/, /^\/data($|\/)/, /^\/dist($|\/)/, /^\/server\/\.build($|\/)/, /^\/extractor\/dbd($|\/)/, /^\/\.app-version\.json$/, /^\/\.git($|\/)/, /\.lnk$/, /\.log$/, /^\/wowhead-scraper($|\/)/];
+const ignore = [/^\/config\.json$/, /^\/data($|\/)/, /^\/dist($|\/)/, /^\/server\/\.build($|\/)/, /^\/extractor\/dbd($|\/)/, /^\/\.app-version\.json$/, /^\/\.git($|\/)/, /\.lnk$/, /\.log$/, /^\/wowhead-scraper($|\/)/, /^\/functions\/(node_modules|shared)($|\/)/, /^\/\.firebase($|\/)/];
 const [built] = await packager({
   dir: root, name: NAME, platform: 'win32', arch: 'x64', out, overwrite: true, asar: false, prune: true, ignore,
   icon: path.join(root, 'app', 'icon.ico'), appVersion: pkg.version,

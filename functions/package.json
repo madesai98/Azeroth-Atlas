@@ -1,0 +1,14 @@
+{
+  "name": "azeroth-atlas-functions",
+  "description": "Azeroth Atlas in the cloud: the auction houses, looked at once an hour (see index.js)",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.5.1",
+    "firebase-functions": "^7.4.0"
+  }
+}

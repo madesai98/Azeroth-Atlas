@@ -8,6 +8,9 @@
     "truth": {
       ".read": "auth != null"
     },
+    "market": {
+      ".read": "auth != null"
+    },
     "inbox": {
       "$copy": {
         "$delivery": {

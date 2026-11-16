@@ -20,8 +20,9 @@ const SETTLE_MS = 350;  // an update writes several files: wait until it has gon
 const args = process.argv.slice(2);
 const configArg = args.find((a) => a.startsWith('--config='));
 const CONFIG = configArg ? path.resolve(configArg.slice(9)) : path.join(ROOT, 'config.json');
-// What the server is made of: its own folder, and the extractor's code that it shares.
-const FOLDERS = [path.join(ROOT, 'server'), path.join(ROOT, 'extractor')];
+// What the server is made of: its own folder, and the code it shares with the extractor, the
+// Atlas database and the auction prices (it runs parts of each inside itself).
+const FOLDERS = [path.join(ROOT, 'server'), path.join(ROOT, 'extractor'), path.join(ROOT, 'atlasdb'), path.join(ROOT, 'auctions')];
 const CODE = /\.(js|mjs|cs)$/i;
 const NOT_CODE = /(^|[\\/])(\.build|node_modules)([\\/]|$)/;
 

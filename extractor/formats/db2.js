@@ -74,7 +74,10 @@ export class DB2 {
       }
     }
 
-    if (h.flags & 1) throw new Error('Sparse (offset-map) DB2 tables are not supported');
+    // A "sparse" table (ItemSparse is one) keeps records of any length, their texts inside them:
+    // where each record starts and how long it is stands in an offset map, and its fields are
+    // read one after the other (readTable does that; raw() and string() are for the other kind).
+    this.sparse = (h.flags & 1) !== 0;
     const hasIdList = (h.flags & 4) !== 0;
     this.rows = [];
     this.skippedEncryptedSections = 0;
@@ -84,16 +87,21 @@ export class DB2 {
       const sec = sections[s];
       let pos = sec.fileOffset;
       const recordsPos = pos;
-      pos += sec.recordCount * h.recordSize;
-      stringParts.push(buf.subarray(pos, pos + sec.stringTableSize));
-      pos += sec.stringTableSize;
+      if (this.sparse) pos = sec.offsetRecordsEnd;
+      else {
+        pos += sec.recordCount * h.recordSize;
+        stringParts.push(buf.subarray(pos, pos + sec.stringTableSize));
+        pos += sec.stringTableSize;
+      }
       const idListPos = pos;
       pos += sec.idListSize;
       const copyPos = pos;
       pos += sec.copyTableCount * 8;
+      const offsetMapPos = pos;
       pos += sec.offsetMapIdCount * 6;
       const relPos = pos;
       pos += sec.relationshipDataSize;
+      const offsetIdsPos = pos;
       pos += sec.offsetMapIdCount * 4;
 
       let encryptedAndMissing = false;
@@ -113,7 +121,14 @@ export class DB2 {
         for (let i = 0; i < n; i++) refIds.set(buf.readUInt32LE(relPos + 12 + i * 8 + 4), buf.readUInt32LE(relPos + 12 + i * 8));
       }
       const byId = new Map();
-      for (let i = 0; i < sec.recordCount; i++) {
+      for (let i = 0; this.sparse && i < sec.offsetMapIdCount; i++) {
+        const size = buf.readUInt16LE(offsetMapPos + i * 6 + 4);
+        if (!size) continue; // (a number with no record behind it)
+        const row = { id: buf.readUInt32LE(offsetIdsPos + i * 4), refId: refIds.get(i) ?? 0, base: buf.readUInt32LE(offsetMapPos + i * 6), size };
+        this.rows.push(row);
+        byId.set(row.id, row);
+      }
+      for (let i = 0; !this.sparse && i < sec.recordCount; i++) {
         const base = recordsPos + i * h.recordSize;
         const row = {
           id: 0, refId: refIds.get(i) ?? 0, base,
@@ -181,6 +196,13 @@ export class DB2 {
   }
 }
 
+/** The number a table goes by wherever it is spoken of by number (the hotfix cache does: hotfix.js). It stands in the table's own header. */
+export function tableHashOf(buf) {
+  const magic = buf.latin1Slice(0, 4);
+  if (magic !== 'WDC5' && magic !== 'WDC4' && magic !== 'WDC3') return null;
+  return buf.readUInt32LE((magic === 'WDC5' ? 136 : 4) + 16);
+}
+
 /** Parse a WoWDBDefs .dbd file into { columns, layouts }. */
 export function parseDBD(text) {
   const lines = text.split(/\r?\n/);
@@ -216,8 +238,9 @@ export function parseDBD(text) {
 /**
  * Decode a DB2 into plain row objects using a .dbd definition.
  * Throws an error with code 'ELAYOUT' when the table layout is not described by the definition.
+ * `hotfixes`: [{ id, data }] from the game's hotfix cache, laid over the table (data null: taken away).
  */
-export function readTable(buf, dbdText, { build } = {}) {
+export function readTable(buf, dbdText, { build, hotfixes = null } = {}) {
   const db = new DB2(buf);
   const dbd = parseDBD(dbdText);
   let layout = dbd.layouts.find((l) => l.hashes.includes(db.layoutHash));
@@ -233,24 +256,51 @@ export function readTable(buf, dbdText, { build } = {}) {
     err.code = 'ELAYOUT';
     throw err;
   }
-  const rows = [];
-  for (const row of db.rows) {
+  // One record into a row. The fields of a sparse table's record, and of a record out of the
+  // game's hotfix cache (row.buf: hotfix.js), stand one after the other, the texts among them:
+  // in the table as wide as the table says, in the cache as wide as the definition says.
+  const decode = (row) => {
+    const src = row.buf ?? buf;
+    const inline = db.sparse || !!row.buf;
+    const end = row.base + row.size;
     const out = {};
     let fi = 0;
+    let at = row.base;
     for (const f of layout.fields) {
       if (f.nonInline) {
         out[f.name] = f.isId ? row.id : f.isRelation ? row.refId : 0;
         continue;
       }
-      const raw = db.raw(row, fi);
       const st = db.storage[fi];
-      let vals;
-      if (f.type === 'string' || f.type === 'locstring') vals = raw.map((v, j) => db.string(row, fi, v, j));
+      const text = f.type === 'string' || f.type === 'locstring';
+      const elemBits = row.buf ? f.bits : 32 - db.fields[fi].size;
+      let raw, vals;
+      if (!inline) raw = db.raw(row, fi);
+      else if (!row.buf && st.type === 2) raw = [st.common.get(row.id) ?? st.v1];
+      else if (!row.buf && st.type !== 0) throw new Error(`A sparse table with a packed field (storage type ${st.type}) is not supported`);
+      else if (text) {
+        // the texts themselves, each ended by a zero byte
+        vals = [];
+        for (let j = 0; j < (f.arrayLen || 1); j++) {
+          let stop = src.indexOf(0, at);
+          if (stop < 0 || stop > end) stop = end;
+          vals.push(src.toString('utf8', at, stop));
+          at = Math.min(stop + 1, end);
+        }
+      } else {
+        raw = [];
+        for (let j = 0; j < (f.arrayLen || 1); j++, at += elemBits >>> 3) {
+          if (at + (elemBits >>> 3) > end) raw.push(0); // (cut short: nothing there)
+          else raw.push(elemBits > 32 ? src.readUInt32LE(at + 4) * 4294967296 + src.readUInt32LE(at) : readBits(src, at, 0, elemBits));
+        }
+      }
+      if (vals) { /* read above */ }
+      else if (text) vals = raw.map((v, j) => db.string(row, fi, v, j));
       else if (f.type === 'float') vals = raw.map(bitsToFloat);
       else if (f.bits > 32) vals = raw;
       else {
         // Packed/pallet values can carry junk above the declared width: mask, then sign-extend.
-        const width = st.type === 0 ? Math.min(f.bits, 32 - db.fields[fi].size) : f.bits;
+        const width = row.buf ? f.bits : st.type === 0 ? Math.min(f.bits, 32 - db.fields[fi].size) : f.bits;
         vals = raw.map((v) => {
           if (width >= 32) return f.unsigned ? v >>> 0 : v | 0;
           v = (v & ((1 << width) - 1)) >>> 0;
@@ -260,8 +310,28 @@ export function readTable(buf, dbdText, { build } = {}) {
       out[f.name] = f.arrayLen ? vals : vals[0];
       fi++;
     }
+    // What a record belongs to (a spell's effect to its spell, say) a table keeps beside its
+    // records, not in them; a record out of the cache carries it after its last field.
+    if (row.buf) for (const f of layout.fields) if (f.nonInline && f.isRelation) out[f.name] = end - at >= 4 ? src.readUInt32LE(at) : 0;
     if (out.ID === undefined) out.ID = row.id;
-    rows.push(out);
+    return out;
+  };
+  const rows = [];
+  const where = new Map();
+  for (const row of db.rows) { where.set(row.id, rows.length); rows.push(decode(row)); }
+  // What the game was sent after its files were made (hotfixes): a record put in the place of the
+  // table's own, a record the table never had, or one taken away. In the order they were sent.
+  let hotfixed = 0;
+  for (const h of hotfixes ?? []) {
+    const i = where.get(h.id);
+    if (!h.data) {
+      if (i !== undefined) { rows[i] = null; where.delete(h.id); hotfixed++; }
+      continue;
+    }
+    let out;
+    try { out = decode({ id: h.id, refId: 0, base: 0, size: h.data.length, buf: h.data }); } catch { continue; }
+    if (i === undefined) { where.set(h.id, rows.length); rows.push(out); } else rows[i] = out;
+    hotfixed++;
   }
-  return { rows, layoutHash: db.layoutHash, skippedEncryptedSections: db.skippedEncryptedSections };
+  return { rows: hotfixed ? rows.filter(Boolean) : rows, layoutHash: db.layoutHash, skippedEncryptedSections: db.skippedEncryptedSections, hotfixed };
 }
