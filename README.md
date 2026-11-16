@@ -1578,7 +1578,7 @@ each fact with a note of where it came from:
 
 | Source | What it gives | Believed |
 | --- | --- | --- |
-| **The game's own cache** (`Cache/WDB` in the game folder: what the server told your game about what you have met) | A creature's name, kind, family and rank; a quest's level, what it asks for and how many, what it gives; an object's kind | first: it is the server's own answer, and the newest game build's before an older one's |
+| **The game's own cache** (`Cache/WDB` in the game folder: what the server told your game about what you have met) | A creature's name, kind, family and rank; a quest's level, what it asks for and how many, what it gives; an object's kind | first: it is the server's own answer. Every copy's cache is believed; where several have sent the same thing, a vote settles it (below) |
 | **Seen in game** | where an NPC really stands, noted when you talk to it | next |
 | **Wowhead** (its database for this game, which its own users' games feed; read by the database's maintainer and handed in as a file) | a creature's name, level, kind, rank and how it stands towards each side; a quest's level, experience, money and rewards; and, where its page was read, where a thing stands and what a quest asks for | next for what a thing is; after QuestieDB for where things stand and who gives which quest, so it fills in what QuestieDB lacks |
 | **QuestieDB** | everything it has for this game: names, levels, sides, where things stand, who gives and takes each quest, what comes before and after it; quest experience measured from players' sessions | next |
@@ -1634,6 +1634,24 @@ The map is built from your own installed game. What else it draws on, and where 
 
 | What | From | How it gets here |
 | --- | --- | --- |
+**Where copies disagree about the game's cache**, a vote settles it, fact by fact (a name, a
+level, what a quest gives). Each copy has one voice about a thing: the last it sent.
+
+| Copies that have sent the thing | Believed |
+| --- | --- |
+| one | what it says |
+| two | what the later one says |
+| three or more | what most say; where that is a tie, the side whose latest voice is the later |
+
+A copy that has the thing but not a fact the others give (no money for the quest, say) counts
+as saying "there is none", so one copy cannot add a fact of its own to what several agree on.
+"Later" is when the database took the delivery, which a copy cannot set ahead. A delivery is
+believed only for what a game cache holds (the facts in the table above, each in its own
+shape): anything else sent with it, such as where a creature stands, is left out. What the vote
+does not do: a thing only one copy has ever sent is believed as it stands, and a voice is an
+anonymous account, of which one person can make several. `votes` (below) lists every fact the
+copies disagree about, who said what, and what was believed.
+
 | Creatures, NPCs, quests, where they stand | **QuestieDB** (the addon) | Read from your game's AddOns folder when the map is built. Not included |
 | NPC heights, what quests ask for, drop rates, creature health and respawn times | **cmangos classic-db** | Downloaded when the map is built, kept in the map data. Not included |
 | The layout of the game's data tables | **WoWDBDefs** (wowdev) | Each definition is fetched the first time it is needed, kept in `extractor/dbd/`. Not included |
@@ -1667,6 +1685,7 @@ The 3D map shows them, the game does not. In the order worth looking:
 3. **Type `/atlas status`** in the game. It says how many deliveries are left (when they are
    used up: `/reload`), whether a route is showing, and whether Azeroth Atlas is answering at
    all. The list of routes says the same in a line where a waypoint has no route.
+| `votes` | every fact on which the copies' game caches disagree, and how the vote went (`votes quest 95534`: one thing). For a maintainer: it reads what was sent |
 4. **Azeroth Atlas has to be running**, but its window need not be in view: behind the game or
    minimized is fine (before version 0.3.0 it was not: with one screen, routes then reached the
    game only now and then).

@@ -8,6 +8,8 @@
 //   node atlasdb/cli.js show npc 263380    one record (as published; --local: as last fetched)
 //   node atlasdb/cli.js status             what is published, and what this copy has sent
 //   node atlasdb/cli.js whoami             the name this copy is signed in under
+//   node atlasdb/cli.js votes              where the copies' game caches disagree, and how each vote went
+//                                          (votes quest 95534: one thing; for the maintainers: it reads what was sent)
 //   node atlasdb/cli.js auto               what the map does by itself: collect (unless "share" is off), publish (where
 //                                          "maintain" is on), pull
 //
@@ -23,7 +25,7 @@ import { loadConfig, CONFIG_FILE, PROJECT_ROOT } from '../extractor/config.js';
 import { Rtdb, entries } from './rtdb.js';
 import { LocalStore } from './local.js';
 import { gather, share } from './collect.js';
-import { buildTruth, publish, pull, lookup } from './publish.js';
+import { buildTruth, publish, pull, lookup, fold } from './publish.js';
 import { databaseSettings } from './settings.js';
 import { signIn } from './signin.js';
 
@@ -107,6 +109,16 @@ try {
     log(`this copy is known to the database as ${copy ?? store.install()} and has sent ${Object.keys(store.read('sent.json', {})).length} facts`);
   } else if (command === 'whoami') {
     console.log(copy ?? `${store.install()} (the database is open to all: nobody is signed in)`);
+  } else if (command === 'votes') {
+    const kind = words[1], id = Number(words[2]);
+    const got = fold(await db.get('inbox'));
+    const list = got.splits.filter((s) => (!kind || s.kind === kind) && (!words[2] || s.id === id));
+    const short = (v) => { const t = v === null ? 'nothing' : JSON.stringify(v); return t.length > 70 ? t.slice(0, 67) + '...' : t; };
+    if (json) console.log(JSON.stringify({ votes: list }));
+    else {
+      for (const s of list) console.log(`${s.kind} ${s.id} ${s.field}: ${s.said.map((x) => `${x.won ? 'believed ' : ''}${short(x.value)} (${x.copies.length}: ${x.copies.map((c) => c.slice(0, 6)).join(' ')})`).join('  |  ')}`);
+      console.log(`${got.copies} ${got.copies === 1 ? 'copy has' : 'copies have'} sent the game's cache of ${(got.cache.npc.size + got.cache.object.size + got.cache.quest.size).toLocaleString()} things; they disagree about ${list.length.toLocaleString()} ${list.length === 1 ? 'fact' : 'facts'}${kind ? ' of those asked for' : ''}`);
+    }
   } else if (command === 'auto') {
     // each step on its own: one that fails does not stop the next
     const out = { errors: [] };
@@ -116,7 +128,7 @@ try {
     await step('pull', async () => pull(db, store, log));
     console.log(json ? JSON.stringify(out) : JSON.stringify(out, null, 1));
   } else {
-    fail(`unknown command "${command}": collect, publish, pull, show, status, whoami, auto`, 2);
+    fail(`unknown command "${command}": collect, publish, pull, show, status, whoami, votes, auto`, 2);
   }
 } catch (err) {
   fail(said(err));

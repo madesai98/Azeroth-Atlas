@@ -5,7 +5,9 @@
 //
 //   g  the game's own cache    what the game's server told a player's game about something they
 //                              met (extractor/wdb.js). The server's own answer: believed first,
-//                              the newest game build before an older one.
+//                              from every copy alike. Where several copies have sent the same
+//                              thing, a vote settles each fact (publish.js, vote): of two
+//                              copies the later is believed, of three or more what most say.
 //   s  seen in game            where someone really stands, noted by the map when a player talks
 //                              to them (server/seen.js).
 //   w  Wowhead                 its database for this game (wowhead.com/forever), which its own
@@ -24,7 +26,7 @@
 // says which source that was wherever it was not QuestieDB; `alt` keeps what the other sources
 // said where they said something else (a name spelt differently, another level), so a
 // disagreement can be seen and looked into rather than lost. `obs` says how many copies of the
-// map reported the fact, and on which game build.
+// map reported the thing, and the newest game build any of them was on.
 //
 // Shapes (every field optional but the name):
 //
@@ -255,6 +257,38 @@ export function fromCache(kind, r) {
     money: r.money > 0 ? r.money : undefined, srcItem: r.startItem || undefined, limit: r.timeAllowed || undefined,
     ri: list(r.rewardItems), rc: list(r.choiceItems), rep: list(r.rewardFactions), o: tidy(o),
   });
+}
+
+// What a record of the game's cache may hold as a copy sends it: the fields fromCache() gives, each
+// in its own shape. (A field added to fromCache() is added here too.)
+const whole = Number.isInteger;
+const number = (v) => typeof v === 'number' && Number.isFinite(v);
+const words = (v) => typeof v === 'string' && v.length > 0 && v.length <= 200;
+const listOf = (ok, most = 64) => (v) => Array.isArray(v) && v.length > 0 && v.length <= most && v.every(ok);
+const pair = (v) => Array.isArray(v) && v.length === 2 && v.every(whole);
+// (a quest's reputation: [faction, amount or none, step])
+const repRow = (v) => Array.isArray(v) && v.length >= 1 && v.length <= 3 && whole(v[0]) && v.slice(1).every((x) => x === null || x === undefined || number(x));
+const wanted = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length > 0
+  && Object.entries(v).every(([k, list]) => (k === 'r' ? pair(list) : ['n', 'o', 'i'].includes(k) && listOf(pair)(list)));
+const CACHE_SAYS = {
+  npc: { n: words, sub: words, type: whole, fam: whole, rank: whole, disp: listOf(whole), hpMul: number, qi: listOf(whole), boss: (v) => v === 1 },
+  object: { n: words, type: whole, disp: whole, size: number, qi: listOf(whole), data: listOf(number) },
+  quest: {
+    n: words, l: whole, m: whole, z: whole, type: whole, grp: whole, nx: whole, xp: whole, money: whole, srcItem: whole, limit: whole,
+    ri: listOf(pair), rc: listOf(pair), rep: listOf(repRow), o: wanted,
+  },
+};
+
+/**
+ * What a delivery's record of the game's cache says, as far as a cache can say it: the fields
+ * the cache has, each in its own shape. Whatever else was sent with it (where a creature
+ * stands, its level, anything misshapen) is not the cache speaking and is left out.
+ */
+export function cacheSays(kind, rec) {
+  const out = {};
+  if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return out;
+  for (const [f, ok] of Object.entries(CACHE_SAYS[kind])) if (rec[f] !== undefined && rec[f] !== null && ok(rec[f])) out[f] = rec[f];
+  return out;
 }
 
 // ---- putting them together ---------------------------------------------------------------------

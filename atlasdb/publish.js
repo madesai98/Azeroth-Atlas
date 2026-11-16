@@ -8,7 +8,9 @@
 //                              holds the ids n to n+499
 //   /inbox/<copy>/<key>        what each copy of the map has sent (collect.js): added to, never
 //                              changed. Everything published can be made again from these and
-//                              the sources on the maker's own disk.
+//                              the sources on the maker's own disk. Where several copies have
+//                              sent the game's cache of the same thing, a vote settles each fact
+//                              (vote).
 //   /installs/<copy>           when a copy last sent something, and which version it runs
 //
 // Making it (buildTruth) reads QuestieDB and the reference database from the maker's own disk
@@ -19,7 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { findQuestieDb, readQuestie } from '../extractor/questie.js';
 import { readReference } from '../extractor/reference.js';
-import { KINDS, SCHEMA, LAYERS, fromQuestie, fromReference, mergeAll, shards, hashOf, tidy } from './records.js';
+import { KINDS, SCHEMA, LAYERS, fromQuestie, fromReference, mergeAll, shards, canonical, tidy, cacheSays } from './records.js';
 import { entries, SERVER_TIME } from './rtdb.js';
 
 const SAME = 30;            // yards: sightings of one NPC this close together are the same spot
@@ -61,29 +63,79 @@ export function readLayers(dataDir, log = () => {}) {
   return out;
 }
 
+/** The fields that are words: a cache in another language than English is sent without them (collect.js), and so says nothing about them. */
+const WORDS = ['n', 'sub'];
+const NOTHING = '(nothing)';
+/** Which of two voices spoke later: by when the database took the delivery, then by the order of the deliveries, then by name (so that it is always the same one). */
+const later = (a, b) => a.at - b.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0) || (a.copy < b.copy ? -1 : a.copy > b.copy ? 1 : 0);
+
 /**
- * What the copies have sent, put together: per kind the facts of the game's cache (the newest
- * game build's, and among those what most copies say), the sightings, and who reported what.
+ * What the game's cache says about one thing, where several copies have sent theirs. Every copy
+ * is believed, and each has one voice: the last it said about the thing. Fact by fact:
+ *
+ *   one copy            what it says
+ *   two copies          what the later one says
+ *   three or more       what most say; where that is a tie, the side whose latest voice is the later
+ *
+ * A copy that has the thing and does not have a fact others give (no second name, no money for
+ * the quest) says "there is none", and that is counted like any other answer: one copy cannot
+ * add a fact of its own to what several agree on.
+ * @param voices [{ copy, at, key, rec }], one per copy
+ * @returns { rec, split: [{ field, said: [{ value, copies: [name], won }] }] } split: the facts they did not agree on
+ */
+export function vote(voices) {
+  const order = [...voices].sort(later);
+  const fields = new Set();
+  for (const v of order) for (const f of Object.keys(v.rec)) fields.add(f);
+  const rec = {}, split = [];
+  for (const f of fields) {
+    const sides = new Map(); // what is said -> { value, copies, last }
+    order.forEach((v, i) => {
+      const value = v.rec[f];
+      const has = value !== undefined && value !== null;
+      if (!has && WORDS.includes(f) && !('n' in v.rec)) return; // (sent without its words: no voice on them)
+      const k = has ? canonical(value) : NOTHING;
+      const side = sides.get(k) ?? { value: has ? value : undefined, copies: [], last: i };
+      side.copies.push(v.copy); side.last = i;
+      sides.set(k, side);
+    });
+    const ranked = [...sides.values()].sort((a, b) => b.copies.length - a.copies.length || b.last - a.last);
+    if (!ranked.length) continue;
+    if (ranked[0].value !== undefined) rec[f] = ranked[0].value;
+    if (ranked.length > 1) split.push({ field: f, said: ranked.map((s, i) => ({ value: s.value ?? null, copies: s.copies, won: i === 0 })) });
+  }
+  return { rec, split };
+}
+
+/**
+ * What the copies have sent, put together: per kind the facts of the game's cache (settled by
+ * vote where several copies have sent the same thing: vote()), the sightings, and who reported what.
  * @param inbox what GET /inbox returned
+ * @returns { cache, seen, obs, copies, deliveries, splits: [{ kind, id, field, said }] }
  */
 export function fold(inbox) {
-  const reports = { npc: new Map(), object: new Map(), quest: new Map() }; // id -> Map<copy, { build, rec }>
+  const reports = { npc: new Map(), object: new Map(), quest: new Map() }; // id -> Map<copy, { copy, at, key, build, rec }>
   const spots = new Map(); // "n123:m0" -> [{ x, y, z, copies: Set }]
   let deliveries = 0;
   const copies = entries(inbox);
   for (const [copy, list] of copies) {
-    for (const [, b] of entries(list)) {
+    for (const [key, b] of entries(list)) {
       if (!b || b.v !== 1) continue;
       deliveries++;
-      const build = Number(b.build) || 0;
+      const build = Number(b.build) || 0, at = Number(b.at) || 0;
       for (const kind of KINDS) {
-        for (const [key, rec] of entries(b[kind])) {
-          const id = Number(String(key).replace(/^i/, ''));
-          if (!Number.isInteger(id) || id <= 0 || !rec || typeof rec !== 'object') continue;
+        for (const [idKey, sent] of entries(b[kind])) {
+          const id = Number(String(idKey).replace(/^i/, ''));
+          if (!Number.isInteger(id) || id <= 0) continue;
+          // (only what a cache can say: a delivery is believed as the game's cache, not as anything it likes)
+          const rec = cacheSays(kind, sent);
+          if (!Object.keys(rec).length) continue;
           let per = reports[kind].get(id);
           if (!per) reports[kind].set(id, (per = new Map()));
+          // (a copy's voice about a thing is the last it said: what it sent before no longer counts)
+          const now = { copy, at, key, build, rec };
           const had = per.get(copy);
-          if (!had || had.build <= build) per.set(copy, { build, rec });
+          if (!had || later(had, now) <= 0) per.set(copy, now);
         }
       }
       for (const [, line] of entries(b.seen)) {
@@ -104,14 +156,15 @@ export function fold(inbox) {
     }
   }
   const cache = { npc: new Map(), object: new Map(), quest: new Map() }, obs = { npc: new Map(), object: new Map(), quest: new Map() };
+  const splits = [];
   for (const kind of KINDS) {
     for (const [id, per] of reports[kind]) {
-      const newest = Math.max(...[...per.values()].map((r) => r.build));
-      const votes = new Map(); // fingerprint -> { rec, n }
-      for (const r of per.values()) { if (r.build !== newest) continue; const h = hashOf(r.rec); const v = votes.get(h) ?? { rec: r.rec, n: 0 }; v.n++; votes.set(h, v); }
-      const best = [...votes.values()].sort((a, b) => b.n - a.n)[0];
-      cache[kind].set(id, best.rec);
-      obs[kind].set(id, { g: [per.size, newest] });
+      const voices = [...per.values()];
+      const { rec, split } = vote(voices);
+      for (const s of split) splits.push({ kind, id, ...s });
+      // (a thing every one of whose facts was voted away is left to the other sources)
+      if (Object.keys(rec).length) cache[kind].set(id, rec);
+      obs[kind].set(id, { g: [per.size, Math.max(...voices.map((v) => v.build))] });
     }
   }
   const seen = { npc: new Map(), object: new Map() };
@@ -126,7 +179,7 @@ export function fold(inbox) {
     o.s = [Math.max(o.s?.[0] ?? 0, ...list.map((s) => s.by.size))];
     obs[kind].set(id, o);
   }
-  return { cache, seen, obs, copies: copies.length, deliveries };
+  return { cache, seen, obs, copies: copies.length, deliveries, splits };
 }
 
 /**
@@ -177,10 +230,12 @@ export async function buildTruth(cfg, dataDir, inbox, log = () => {}) {
     if (got.seen[kind]) sources[kind].push(['s', got.seen[kind]]);
   }
   from.copies = got.copies; from.deliveries = got.deliveries;
+  if (got.splits.length) from.split = got.splits.length;
   log(`${got.copies} ${got.copies === 1 ? 'copy has' : 'copies have'} sent ${got.deliveries} ${got.deliveries === 1 ? 'delivery' : 'deliveries'}: ${got.cache.npc.size.toLocaleString()} creatures, ${got.cache.object.size.toLocaleString()} objects and ${got.cache.quest.size.toLocaleString()} quests from the game's cache, sightings of ${(got.seen.npc.size + got.seen.object.size).toLocaleString()}`);
+  if (got.splits.length) log(`the copies' caches disagree about ${got.splits.length.toLocaleString()} ${got.splits.length === 1 ? 'fact' : 'facts'}: settled by vote ("votes" lists them)`);
   const records = {};
   for (const kind of KINDS) records[kind] = mergeAll(kind, sources[kind], got.obs[kind]);
-  return { records, from };
+  return { records, from, splits: got.splits };
 }
 
 /**
