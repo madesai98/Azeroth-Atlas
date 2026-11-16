@@ -19,11 +19,17 @@ import { AppUpdate } from './appupdate.js';
 import { MIME, sendFile, safeJoin } from './http.js';
 import { AtlasDb } from './atlasdb.js';
 import { Auctions } from './auctions.js';
+import { openLogs, logDir, note, noteCrashes } from './log.js';
+import { Reports } from './report.js';
 
 // node server/server.js [--open] [--config=path/to/config.json]
 // (server/watch.js runs this and starts it again whenever the map's code changes)
 const configArg = process.argv.find((a) => a.startsWith('--config='));
 const configFile = configArg ? path.resolve(configArg.slice(9)) : CONFIG_FILE;
+// What happens from here on is noted (log.js), for "Report a problem" to pack (report.js).
+openLogs(logDir(configFile));
+noteCrashes('the map server');
+note('server', 'starting', { node: process.versions.node, electron: process.versions.electron ?? null, asApplication: !!process.env.AZEROTH_ATLAS_APP, folder: PROJECT_ROOT, config: configFile, pid: process.pid });
 // The map tool keeps itself current (appupdate.js). While it writes its files, and while a map
 // build runs, server/watch.js is asked not to start the server again.
 const job = { running: false, phase: '', done: 0, total: 0, log: [], summary: null, error: null, startedAt: null, finishedAt: null };
@@ -31,7 +37,8 @@ let updating = false;
 const busy = () => process.send?.({ busy: job.running || updating });
 let cfg;
 try { cfg = loadConfig(configFile); } catch (err) {
-  if (err.code !== 'NO_GAME') throw err;
+  if (err.code !== 'NO_GAME') { note('server', 'the settings could not be taken', { error: err.message }); throw err; }
+  note('server', 'the game was not found: the page asks where it is', { error: err.message, configured: err.configured ?? null });
   // The game could not be found: the page asks where it is (setup.js), and this starts again once it has been told.
   const { runSetup } = await import('./setup.js');
   // (whether it may update itself is in the settings all the same, and holds here as anywhere)
@@ -61,6 +68,9 @@ auctions.start();
 const VIEWER_DIR = path.join(PROJECT_ROOT, 'viewer');
 // The page's own files, watched: a page that is open loads itself again when they change (changes.js).
 const changes = new Changes(VIEWER_DIR);
+// "Report a problem": everything that may explain one, in a zip (report.js)
+const reports = new Reports({ configFile, cfg, live: { status: () => status(), tracker, mail, atlas, auctions, addon: () => addonStatus(cfg) } });
+note('server', 'the settings in use', { game: cfg.installRoot, found: !!cfg.foundGame, flavour: flavourFolder(cfg), data: cfg.dataDir, port: cfg.port, ingame: cfg.ingame !== false, autoUpdate: cfg.autoUpdate ?? true, oldAddonInUse: oldAddon });
 
 // ---- update job ---------------------------------------------------------------------------
 
@@ -71,6 +81,7 @@ function startUpdate(force) {
   if (force) args.push('--force');
   const child = spawn(process.execPath, args, { cwd: PROJECT_ROOT, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   job.child = child;
+  note('map', force ? 'the map is being built again, all of it' : 'the map is being built or updated');
   busy(); // (not to be started again by watch.js in the middle of this)
   let pending = '';
   child.stdout.on('data', (chunk) => {
@@ -94,6 +105,7 @@ function startUpdate(force) {
     job.running = false;
     job.finishedAt = Date.now();
     if (code !== 0 && !job.error) job.error = stderr.trim() || `extractor exited with code ${code}`;
+    note('map', job.error ? 'the map build failed' : 'the map build is done', { seconds: Math.round((job.finishedAt - job.startedAt) / 1000), error: job.error ?? undefined, summary: job.summary ?? undefined, lastSaid: job.error ? job.log.slice(-12) : undefined, stderr: job.error && stderr ? stderr.slice(-1500) : undefined });
     busy();
   });
   return true;
@@ -124,6 +136,9 @@ function status() {
 }
 
 // ---- http ---------------------------------------------------------------------------------
+// (how the addon in the game's folder stands is asked for often: noted when it is another answer than before)
+let addonSaid = '';
+const changedAddon = (st) => { const now = JSON.stringify([st.installed, st.installedVersion, st.version, st.current, st.mail, st.legacy, st.guides, st.reason]); if (now === addonSaid) return false; addonSaid = now; return true; };
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const p = decodeURIComponent(url.pathname);
@@ -131,6 +146,7 @@ const server = http.createServer((req, res) => {
   const host = (req.headers.host ?? '').split(':')[0];
   if (host !== 'localhost' && host !== '127.0.0.1') { res.writeHead(403); res.end(); return; }
 
+  if (reports.handle(req, res, url, p)) return;
   if (p === '/api/status') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(status()));
@@ -150,6 +166,7 @@ const server = http.createServer((req, res) => {
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
     const origin = req.headers.origin;
     if (origin && new URL(origin).host !== req.headers.host) { res.writeHead(403); res.end(); return; }
+    note('update', url.searchParams.get('apply') === '1' ? 'asked on the page: look for a newer version and put it in' : 'asked on the page: look for a newer version');
     appUpdate.check({ apply: url.searchParams.get('apply') === '1' ? true : undefined });
     res.writeHead(202, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(appUpdate.status()));
@@ -184,7 +201,7 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       try {
         const d = body ? JSON.parse(body) : {};
-        if (req.method === 'POST') { json(200, { ok: true, record: seen.add(d), count: seen.list.length }); atlas.nudge(); }
+        if (req.method === 'POST') { json(200, { ok: true, record: seen.add(d), count: seen.list.length }); note('seen', `where ${d.object ? 'object' : 'NPC'} ${d.id} stands was noted`, { map: d.map, at: [d.x, d.y, d.z] }); atlas.nudge(); }
         else json(200, { ok: true, forgotten: seen.forget(d.map, d.id, d.object), count: seen.list.length });
       } catch (err) { json(400, { error: err.message }); }
     });
@@ -242,7 +259,7 @@ const server = http.createServer((req, res) => {
         const st = mail.setRoute(JSON.parse(body));
         tracker.mailChanged();
         json(200, st);
-      } catch (err) { json(400, { error: err.message }); }
+      } catch (err) { note('mail', 'what the page sent as its route could not be taken', { error: err.message, sent: body.slice(0, 600) }); json(400, { error: err.message }); }
     });
     return;
   }
@@ -257,9 +274,13 @@ const server = http.createServer((req, res) => {
     try {
       const st = install ? installAddon(cfg, { gameSeen: ['live', 'minimized', 'nosignal'].includes(tracker.state.status) }) : guides ? convertGuides(cfg) : addonStatus(cfg);
       if (install) mail.use(ADDON);
+      if (install) note('addon', `the addon was installed in the game's folder: version ${st.installedVersion ?? '?'}`, { restartNeeded: st.restart, carriedOver: st.carried ?? undefined, current: st.current, mailboxes: st.mail });
+      else if (guides) note('addon', 'guide packs were converted', { done: st.done });
+      else if (changedAddon(st)) note('addon', 'the addon in the game\'s folder', { installed: st.installed, version: st.installedVersion, brought: st.version, current: st.current, mailboxes: st.mail, oldCopy: st.legacy || undefined, guides: st.guides, why: st.reason });
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(st));
     } catch (err) {
+      note('addon', install ? 'the addon could not be installed' : guides ? 'guide packs could not be converted' : 'the addon could not be looked at', { error: err.message });
       res.writeHead(500, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
     }
@@ -290,7 +311,7 @@ const server = http.createServer((req, res) => {
 // reads the game window is put away first), and not left behind should the watcher go.
 if (process.send) {
   // (a map build in hand goes with it: nobody would see it finish, and the next one picks up where it stopped)
-  const leave = () => { try { tracker.stop(); } catch { /* going anyway */ } try { atlas.stop(); } catch { /* going anyway */ } try { auctions.stop(); } catch { /* going anyway */ } try { if (job.running) job.child?.kill(); } catch { /* gone */ } process.exit(0); };
+  const leave = () => { note('server', 'asked to make way: its code has changed, or the application is closing'); try { tracker.stop(); } catch { /* going anyway */ } try { atlas.stop(); } catch { /* going anyway */ } try { auctions.stop(); } catch { /* going anyway */ } try { if (job.running) job.child?.kill(); } catch { /* gone */ } process.exit(0); };
   process.on('message', (m) => { if (m?.stop) leave(); });
   process.on('disconnect', leave);
 }
@@ -300,9 +321,11 @@ server.listen(cfg.port, '127.0.0.1', () => {
   console.log(`Azeroth Atlas: ${url}`);
   console.log(`  game:  ${cfg.installRoot}${cfg.foundGame ? '  (found there: "installRoot" in config.json names another)' : ''}`);
   console.log(`  data:  ${cfg.dataDir}`);
+  note('server', `answering on port ${cfg.port}`);
   if (process.argv.includes('--open')) spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
 });
 server.on('error', (err) => {
   console.error(err.code === 'EADDRINUSE' ? `Port ${cfg.port} is already in use (is the map already running?)` : err.message);
+  note('server', err.code === 'EADDRINUSE' ? `port ${cfg.port} is in use by another program` : 'the server could not start answering', { error: err.message });
   process.exit(err.code === 'EADDRINUSE' ? 3 : 1); // (3: watch.js gives up on this one, where it would otherwise wait for a fix)
 });

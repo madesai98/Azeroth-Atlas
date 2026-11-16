@@ -9,6 +9,8 @@ import { spawn } from 'node:child_process';
 import { PROJECT_ROOT, HOME, checkInstall, readConfigFile } from '../extractor/config.js';
 import { Changes } from './changes.js';
 import { sendFile, safeJoin, localOnly, ownPage, json, readJson, MIME } from './http.js';
+import { note } from './log.js';
+import { Reports } from './report.js';
 
 /**
  * @param problem  the error loadConfig gave up with (code 'NO_GAME': configured, product, port)
@@ -25,6 +27,8 @@ export function runSetup(problem, file, app) {
     setup: { message: problem.message, configured: problem.configured ?? null, dataDir: path.join(HOME, 'data') },
     installed: null, installError: problem.message, extracted: null, updateAvailable: false, updateReason: null, job: idle, app: app?.status() ?? null,
   });
+  // ("Report a problem" works here too: not finding the game is a problem like any other)
+  const reports = new Reports({ configFile: file, cfg: null, problem, live: { status } });
 
   /** The answer, checked: the settings to write, or a sentence saying what is wrong with it. */
   function answer(d) {
@@ -59,6 +63,7 @@ export function runSetup(problem, file, app) {
     const url = new URL(req.url, 'http://localhost');
     const p = decodeURIComponent(url.pathname);
     if (!localOnly(req)) { res.writeHead(403); res.end(); return; }
+    if (reports.handle(req, res, url, p)) return;
     if (p === '/api/status') { json(res, 200, status()); return; }
     if (p === '/api/changes') { changes.subscribe(req, res); return; }
     if (p === '/api/app/check') {
@@ -71,6 +76,7 @@ export function runSetup(problem, file, app) {
       if (req.method !== 'POST' || !ownPage(req)) { res.writeHead(req.method === 'POST' ? 403 : 405); res.end(); return; }
       readJson(req).then((d) => {
         const a = answer(d);
+        note('setup', typeof a === 'string' ? 'the folder given for the game was not taken' : 'the game\'s folder was given, and taken', { given: d.installRoot, data: d.dataDir || undefined, answer: a });
         if (typeof a === 'string') { json(res, 200, { ok: false, error: a }); return; }
         let had = {};
         try { had = readConfigFile(file); } catch { /* one that could not be read is written anew */ }

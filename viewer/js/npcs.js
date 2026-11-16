@@ -375,7 +375,11 @@ export class NpcLayer {
    *                  server's strip.js: heads().tracked): what is done is not led to any more.
    *                  null: not said - then every thing it asks for counts, and whether it is
    *                  ready to hand in is taken from your quest log.
-   * @returns { x, y, z (null where the height is not known), name, done (it is to be handed in) } or null
+   * Where everything it still asks for is inside a dungeon, it is the dungeon's door (the nearest
+   * on this map, else one on another): leading to who takes a quest you have not done yet leads
+   * nowhere you want to go.
+   * @returns { x, y, z (null where the height is not known), name, done (it is to be handed in),
+   *            map (only where it is not on this map: a dungeon's door on another) } or null
    */
   questGoal(id, from, progress = null) {
     const d = this.data, q = this.quests?.quests?.[id];
@@ -391,7 +395,11 @@ export class NpcLayer {
     let who = done ? takers() : this.#targets(id, new Set(), left), handIn = done;
     // (a place it has you go to and look at: no one stands there, it is a spot of its own)
     const spots = !done && (!left || left.tr) ? (q.tr?.at ?? []).filter((s) => s[0] === d.map) : [];
-    if (!who.size && !spots.length && !done) { who = takers(); handIn = true; }
+    if (!who.size && !spots.length && !done) {
+      const door = this.#door(q, from);
+      if (door) return door;
+      who = takers(); handIn = true;
+    }
     let best = -1, bestD = Infinity, spot = null;
     for (let i = 0; i < d.n; i++) {
       if (!who.has(d.owner[i])) continue;
@@ -405,6 +413,26 @@ export class NpcLayer {
     if (spot) return { x: spot[1], y: spot[2], z: null, name: q.tr.t || 'the place it names', done: false };
     if (best < 0) return null;
     return { x: d.x[best], y: d.y[best], z: Number.isFinite(d.z[best]) ? d.z[best] : null, name: d.entries[d.owner[best]].n, done: handIn };
+  }
+
+  /**
+   * The way in to the dungeon a quest is done in, where the map knows of one (world.json:
+   * dungeons, from QuestieDB - a quest is filed under its dungeon's area): the nearest door on
+   * this map, else one on another. { x, y, z: null, name, done: false, map (where not this one) } or null.
+   */
+  #door(q, from) {
+    const list = this.app.world?.dungeons;
+    if (!list?.length || !(q.z > 0)) return null;
+    const dungeon = list.find((x) => x.area === q.z || x.also?.includes(q.z));
+    if (!dungeon) return null;
+    let best = null, bestD = Infinity;
+    for (const door of dungeon.doors) {
+      // (one on the map you are on comes before any that is not)
+      const dist = door.map === this.data.map ? Math.hypot(door.pos[0] - from[0], door.pos[1] - from[1]) : 1e9;
+      if (dist < bestD) { bestD = dist; best = door; }
+    }
+    if (!best) return null;
+    return { x: best.pos[0], y: best.pos[1], z: null, name: `${dungeon.name}, the way in`, done: false, ...(best.map === this.data.map ? {} : { map: best.map }) };
   }
 
   /** What each NPC is to you: the kinds it counts as, for your side and level. */

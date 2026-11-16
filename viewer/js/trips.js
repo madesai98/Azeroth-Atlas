@@ -69,6 +69,7 @@ export class Trips {
     let x = this.extra.get(slot);
     if (!x) {
       const planner = new RoutePlanner(this.app, this.lead);
+      planner.label = slot;
       planner.walkOnly = slot === 'death';
       planner.onChange = () => this.onChange();
       if (this.map) planner.setMap(this.map);

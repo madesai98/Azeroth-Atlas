@@ -1,7 +1,7 @@
 // Application entry point: wires data, renderer, camera and UI together.
 import { initGPU, resizeTargets, GLOBALS_SIZE } from './gpu.js';
 import { TerrainRenderer } from './terrain.js';
-import { MapScene } from './scene.js';
+import { MapScene, placed } from './scene.js';
 import { Camera } from './camera.js';
 import { Labels } from './labels.js';
 import { ModelRenderer, ObjectLayer } from './models.js';
@@ -25,6 +25,7 @@ import { pickSurface } from './pick.js';
 import { Cutaway } from './cutaway.js';
 import { worldLayout, Ground, shareSea } from './joined.js';
 import { viewProj, frustumPlanes, DEG, clamp } from './math.js';
+import { note, changed } from './log.js';
 
 const $ = (id) => document.getElementById(id);
 const lin = (c) => c.map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); // sRGB -> linear
@@ -57,6 +58,7 @@ app.offsetOf = (id) => (id === app.here?.id ? ZERO : id === app.beside?.id ? app
 app.letGo = () => app.player?.setFollow(false);
 
 function fatal(title, msg) {
+  note('stopped', `${title}: ${msg}`);
   $('fatalTitle').textContent = title;
   $('fatalMsg').textContent = msg;
   $('fatal').style.display = 'flex';
@@ -71,6 +73,7 @@ const GPU_WAITS = [15, 30, 60];         // seconds before each of those tries
 const gpuTries = () => { try { return +sessionStorage.getItem(GPU_TRIES_KEY) || 0; } catch { return 0; } };
 function gpuTrouble(title, msg, detail) {
   fatal(title, msg);
+  note('gpu', title, { said: detail ?? null, triedAgainBefore: gpuTries() });
   $('fatalMore').textContent = detail ?? '';
   const again = $('fatalAgain');
   again.style.display = '';
@@ -203,7 +206,7 @@ function shownWith(id) {
 
 /** One map, opened: its terrain, what stands on it, its spawn zones and its named zones. */
 async function openScene(entry) {
-  const map = await getJSON(`/data/maps/${entry.id}/map.json?v=${entry.rev}`);
+  const map = placed(await getJSON(`/data/maps/${entry.id}/map.json?v=${entry.rev}`));
   const scene = new MapScene(app.gpu, app.terrain, map, app.world, () => { app.dirty = true; });
   // Buildings and objects placed on this map.
   const objects = new ObjectLayer(app.models, scene, app.m2Radius);
@@ -266,6 +269,7 @@ async function openMap(id, view) {
   const entry = app.manifest.maps.find((m) => m.id === id) ?? app.manifest.maps.find((m) => m.kind === 'terrain');
   if (!entry) throw new Error('No map data has been extracted yet.');
   const ids = shownWith(entry.id);
+  note('map', `opening ${entry.name} (map ${entry.id})`, { with: ids.filter((k) => k !== entry.id), asked: id });
   const turn = ++app.opening;
   const missing = ids.filter((k) => !app.open.has(k));
   let fresh = [];
@@ -549,6 +553,11 @@ function step(now, seen) {
   if (seen) app.unseen = false;
   else if (!app.unseen) { app.unseen = true; unseenDrawn = now; }
   app.steps = (app.steps ?? 0) + 1; // (how many steps have been taken, and - app.drawn - pictures drawn: for the tests)
+  // (noted once a minute - log.js: how the drawing goes)
+  if (now - (app.paceAt ?? -1e9) > 60000) {
+    if (app.paceAt !== undefined) note('pace', app.perfText ?? '', { pictures: (app.drawn ?? 0) - app.paceDrawn, steps: app.steps - app.paceSteps, inSight: seen, resolution: app.gpu?.scale, memoryMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : undefined });
+    app.paceAt = now; app.paceDrawn = app.drawn ?? 0; app.paceSteps = app.steps;
+  }
   const dt = Math.min(0.1, (now - lastTime) / 1000);
   lastTime = now;
   if (app.camera.update(dt)) app.dirty = true;
@@ -633,7 +642,8 @@ function step(now, seen) {
       if (heads.quest) {
         // (how far it has got, as the game says: what is done is not led to any more)
         const g = app.npcs.questGoal(heads.quest, me, heads.tracked?.id === heads.quest ? heads.tracked : null);
-        if (g) want.quest = { map: here, x: g.x, y: g.y, z: g.z ?? undefined, name: `${app.npcs.quests?.quests?.[heads.quest]?.n ?? 'Quest'}: ${g.done ? 'hand in to ' : ''}${g.name}`, source: 'quest' };
+        // (g.map: a dungeon's door on another map than this one - the way there is a journey)
+        if (g) want.quest = { map: g.map ?? here, x: g.x, y: g.y, z: g.z ?? undefined, name: `${app.npcs.quests?.quests?.[heads.quest]?.n ?? 'Quest'}: ${g.done ? 'hand in to ' : ''}${g.name}`, source: 'quest' };
       }
       if (heads.corpse && P.state.player?.dead) want.death = { ...heads.corpse, name: 'Your body', source: 'corpse' };
     }
@@ -641,6 +651,10 @@ function step(now, seen) {
     // the game with them (ingame.js). The game knows that at first hand - it hears of a thing
     // done before this page does - and so can tell the route from before from the one it waits for.
     app.questFor = heads ? { id: heads.quest ?? 0, state: heads.tracked?.id === heads.quest ? heads.tracked.state : 0, done: heads.tracked?.id === heads.quest ? heads.tracked.done : 0 } : null;
+    // (noted when it changes - log.js: what the routes of the moment are worked out for)
+    if (changed('quest', app.questFor)) note('quest', app.questFor?.id ? `the quest you track: ${app.npcs.quests?.quests?.[app.questFor.id]?.n ?? app.questFor.id}` : 'no quest is tracked', { ...app.questFor, asTheGameSays: heads?.tracked ?? null, leadsTo: want.quest ? { name: want.quest.name, at: [Math.round(want.quest.x), Math.round(want.quest.y)] } : null, knownToTheMap: !!app.npcs.quests?.quests?.[app.questFor?.id] });
+    if (changed('lead', [leadKind, target?.source ?? null, !!app.route.enabled])) note('route', target ? `the route that leads is the one to your ${leadKind === 'guide' ? "guide's step" : 'waypoint'}` : 'nothing leads: the game has no waypoint, and no marker is dropped here', { said: target?.source ?? null, drawn: app.route.enabled });
+    if (changed('marker', app.markerForGame)) note('route', app.markerForGame ? (app.markerForGame.off ? 'the game is to let go of its waypoint (taken off here)' : 'the marker dropped here is offered to the game as its waypoint') : 'no marker of this map is offered to the game', app.markerForGame ?? undefined);
     // (a marker dropped here is a waypoint of your own too, where the game has none)
     if (!want.waypoint && marker && leadKind !== 'waypoint') want.waypoint = marker;
     if (P?.live && me) for (const m of P.state.party ?? []) if (m.x !== null && m.x !== undefined) want[`ally${m.slot}`] = { map: here, x: m.x, y: m.y, name: m.name ?? `Party ${m.slot}`, source: 'ally' };
@@ -989,7 +1003,7 @@ async function checkAll(resume = null) {
   if (btn.disabled && !resume) return;
   const run = resume ?? { step: 1, at: Date.now(), lines: [] };
   const keep = () => { try { sessionStorage.setItem(RUN_KEY, JSON.stringify(run)); } catch { /* it starts over after a reload, that is all */ } };
-  const say = (i, text, cls = 'busy') => { run.lines[i] = { text, cls }; showRun(run); keep(); };
+  const say = (i, text, cls = 'busy') => { run.lines[i] = { text, cls }; showRun(run); keep(); if (cls !== 'busy') note('check', text); };
   const post = async (url) => { const res = await fetch(url, { method: 'POST' }); return res.json(); };
   // (the server starts itself again when its own code has been updated: asked until it answers)
   const status = async () => { for (let i = 0; ; i++) { try { return await getJSON('/api/status'); } catch (err) { if (i > 40) throw err; await sleep(700); } } };
@@ -1085,6 +1099,9 @@ function resumeCheck() {
 let pollTimer = 0;
 function showStatus(st) {
   app.status = st;
+  if (changed('status', [st.installed?.version, st.extracted?.build.version, st.extracted?.revision, st.updateAvailable, st.updateReason, st.installError, st.job.running, st.job.error, st.app?.version, st.app?.commit, st.app?.state, st.app?.error, st.app?.note, !!st.setup])) {
+    note('status', st.setup ? 'the game has not been found: asked for' : st.job.running ? 'the map is being built' : st.installError ? `the game: ${st.installError}` : !st.extracted ? 'no map has been built yet' : st.updateAvailable ? `the map could be updated (${st.updateReason})` : 'the map is up to date', { game: st.installed?.version ?? null, mapFrom: st.extracted?.build.version ?? null, mapRevision: st.extracted?.revision ?? null, buildError: st.job.error ?? undefined, application: st.app ? { version: st.app.version, commit: st.app.commit, kind: st.app.kind, state: st.app.state, newerOut: st.app.available, error: st.app.error ?? undefined, note: st.app.note ?? undefined } : null });
+  }
   showApp(st.app);
   const btn = $('update'), msg = $('updateMsg'), bar = $('progress');
   const inst = st.installed?.version, ext = st.extracted?.build.version;
@@ -1165,6 +1182,8 @@ function showPlayer() {
   else msg = 'Player link: starting…';
   dot.className = `dot ${cls}`;
   text.textContent = msg;
+  // (noted when it is another state of things - log.js - in the words the sidebar has for it)
+  if (changed('link', [s.status, s.reason, s.capture, p?.map ?? null, !!p?.dead, !!link.me, link.onThisMap])) note('link', msg, { status: s.status, reason: s.reason ?? undefined, read: s.capture ?? undefined });
   $('btnFind').disabled = s.status !== 'live';
   syncDangerFromGame();
   showInGame();
@@ -1320,7 +1339,11 @@ function showInGame() {
   const live = app.player?.state.status === 'live';
   // (your hearthstone, where you have said in the game that routes are to leave it out)
   const hearth = live && app.player.travel?.hearth?.avoid ? 'Your hearthstone is left out of routes (the button beside "Routes" in the game brings it back).' : '';
-  $('ingameMsg').textContent = [live && app.route?.enabled ? app.ingame?.describe(app.player.state.mail) ?? '' : '', hearth].filter(Boolean).join(' ');
+  // (...and where the map cannot tell which inn the game means by the name it gives: route.js looks for it, and says here that it could not)
+  const h = live ? app.player.travel?.hearth : null;
+  const lost = h?.has && !h.avoid ? [app.route, ...(app.trips?.active() ?? []).map((x) => x.planner)].find((q) => q?.noBind)?.noBind : null;
+  const where = lost ? `Your hearthstone is left out of routes: the map cannot tell which inn "${lost}" is. Set it again at the innkeeper, and it will know.` : '';
+  $('ingameMsg').textContent = [live && app.route?.enabled ? app.ingame?.describe(app.player.state.mail) ?? '' : '', hearth, where].filter(Boolean).join(' ');
 }
 
 // ---- spawn zones ---------------------------------------------------------------------------
@@ -1677,6 +1700,8 @@ async function main() {
   app.placeAt = placeAt;
   app.pickSurface = (px, py) => pickSurface(app, px, py);
   app.ingame = new InGameRoute(app);
+  // (for "Report a problem" - report.js: the picture as it is now, drawn so that it can be read back)
+  app.snap = () => render();
   app.onInGame = showInGame;
   // (the server has been started again - after an update of the map, see reload.js: it is sent the route once more)
   window.addEventListener('wfmap-server', () => { app.ingame.sig = ''; });
@@ -1736,6 +1761,9 @@ async function main() {
     [app.manifest, app.world] = await Promise.all([getJSON('/data/manifest.json'), getJSON(`/data/world.json?v=${st.extracted.revision}`)]);
   } catch (err) { fatal('Map data could not be loaded', err.message); return; }
   app.models.rev = app.manifest.revision;
+  // Portals that put you on another floor of the same building: the map has to know them to
+  // follow you through (teleports.json, which comes with the page; height.js).
+  try { const res = await fetch('/teleports.json', { cache: 'no-cache' }); app.world.teleports = res.ok ? (await res.json()).teleports ?? [] : []; } catch (err) { app.world.teleports = []; console.warn('the list of portals between floors is unavailable', err); }
   // Sizes of all placeable objects (for distance culling before a model is downloaded).
   app.m2Radius = new Map();
   try {

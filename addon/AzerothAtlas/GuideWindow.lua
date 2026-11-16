@@ -812,7 +812,7 @@ local function LimeCommand()
   SLASH_AZEROTHATLASGUIDE1, SLASH_AZEROTHATLASGUIDE2 = "/lime", "/guidelime"
   SlashCmdList.AZEROTHATLASGUIDE = function(msg)
     local word = type(msg) == "string" and string.lower(string.match(msg, "^%s*(%S*)") or "") or ""
-    pcall(shared.GuideWord, "guide", word == "complete" and "skip" or word)
+    shared.Try("guide word", shared.GuideWord, "guide", word == "complete" and "skip" or word)
   end
 end
 -- Guide packs that could not load are said once when you log in: with none loaded there is no
@@ -837,7 +837,7 @@ _G["BINDING_NAME_CLICK AzerothAtlasGuideItem1:LeftButton"] = "Use the item the g
 local toggle = CreateFrame("Button", "AzerothAtlasGuideToggle", UIParent)
 toggle:SetSize(1, 1)
 toggle:Hide()
-toggle:SetScript("OnClick", function() pcall(shared.GuideWord, "guide", "") end)
+toggle:SetScript("OnClick", function() shared.Try("guide word", shared.GuideWord, "guide", "") end)
 
 -- (for the tests, and for a look from the game with /dump AzerothAtlas.GuideWin())
 function shared.GuideWin()

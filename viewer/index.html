@@ -44,7 +44,7 @@
   .secb > .gap { height: 3px; }
   .off { opacity: 0.45; }
 
-  select, input[type=text], input[type=number], button {
+  select, input[type=text], input[type=number], button, textarea {
     font: inherit; color: var(--text); background: rgba(255, 255, 255, 0.07); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; width: 100%;
   }
   select option, select optgroup { background: #1a1f29; color: var(--text); }
@@ -113,7 +113,7 @@
   #checkLines div.warn::before { content: '!'; }
   #fatalMore { opacity: .7; word-break: break-word; }
   #fatalMore:empty { display: none; }
-  #fatalAgain { width: auto; padding: 6px 22px; margin-top: 6px; }
+  #fatalAgain, #fatalReport { width: auto; padding: 6px 22px; margin: 6px 3px 0; }
   body.setup details.sec:not([data-sec="map"]), body.setup #btnFind { display: none; }
   body.setup #loading { bottom: 50%; }
   #dangerBody select { width: auto; flex: 1; padding: 2px 4px; }
@@ -219,6 +219,29 @@
   .ptable tbody tr.still { cursor: default; }
   #prices .pfilters label.row { flex: none; white-space: nowrap; }
   .pnumbers[open] summary { margin-bottom: 4px; }
+  /* ---- "Report a problem": a window over everything, the stopped page included ---- */
+  #report { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(8, 10, 14, 0.74); padding: 16px; z-index: 10; }
+  #report .rbox { position: static; width: min(620px, 100%); max-height: 100%; overflow-y: auto; padding: 14px 18px 16px; display: flex; flex-direction: column; gap: 9px; background: rgba(16, 19, 26, 0.98); scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent; }
+  #report .rhead { display: flex; align-items: center; gap: 8px; }
+  #report h3 { margin: 0; font-size: 15px; flex: 1; }
+  #report p { margin: 0; }
+  #report button.x { width: 28px; height: 28px; padding: 0; font-size: 17px; line-height: 1; flex: none; }
+  #reportForm, #reportDone { display: flex; flex-direction: column; gap: 9px; }
+  #report textarea { resize: vertical; min-height: 92px; line-height: 1.45; }
+  #report textarea::placeholder { color: #6f7a8c; }
+  #report select { width: auto; }
+  #report .rtip { padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg2); display: flex; flex-direction: column; gap: 4px; }
+  #report .rchoose { display: flex; flex-direction: column; gap: 5px; }
+  #report .rchoose label.row { align-items: flex-start; }
+  #report .rchoose input { margin-top: 3px; flex: none; }
+  #report details summary { cursor: pointer; color: var(--dim); user-select: none; }
+  #report details ul { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
+  #report .rbtns { justify-content: flex-end; margin-top: 3px; }
+  #report .rbtns button { width: auto; padding: 6px 18px; }
+  #reportAddon:empty, #reportMsg:empty, #reportDoneLeft:empty { display: none; }
+  #reportDoneText { font-weight: 600; word-break: break-all; }
+  #reportDoneLeft { white-space: pre-line; }
+  #btnReport { color: var(--dim); }
   @media (max-width: 700px) { :root { --side-w: 0px; } #side { box-shadow: 8px 0 30px rgba(0,0,0,.5); } }
 </style>
 </head>
@@ -368,6 +391,7 @@
   <div id="sideFoot">
     <button id="checkAll" class="primary" title="Brings everything up to date, in turn, and leaves alone what already is: Azeroth Atlas itself, the map's data, the addon in the game, your guide packs">Check for updates</button>
     <div id="checkLines" class="small"></div>
+    <button id="btnReport" title="Something not working as it should? Say what, and Azeroth Atlas packs your words into one zip file with everything that may help find the cause: this computer, its own notes of what it did, the game and its addons. You choose where it is saved. Nothing is sent anywhere">Report a problem</button>
     <label id="dbRow" class="row small" style="display:none" title="Azeroth Atlas keeps one database of the game world that every copy of it adds to. Ticked, this copy sends what it learns: what the game's server has told your game about the creatures, objects and quests you have met (read from the game's own cache), and where NPCs stand when you talk to them. Facts about the game world only: nothing about your account, your characters, your realm or your computer, and not where you were or when. Unticked, this copy sends nothing and still gets what the others have found"><input type="checkbox" id="optShare"><span class="grow">Share what this copy learns</span><span id="dbNow" class="dim small"></span></label>
   </div>
 </aside>
@@ -410,8 +434,57 @@
   <div class="btnrow" style="margin-top:10px"><button id="helpClose">Close</button></div>
 </div>
 
-<div id="fatal"><div><h2 id="fatalTitle">Something went wrong</h2><p id="fatalMsg" class="dim"></p><p id="fatalMore" class="dim small"></p><button id="fatalAgain" class="primary" style="display:none">Try again</button></div></div>
+<div id="fatal"><div><h2 id="fatalTitle">Something went wrong</h2><p id="fatalMsg" class="dim"></p><p id="fatalMore" class="dim small"></p><button id="fatalAgain" class="primary" style="display:none">Try again</button><button id="fatalReport">Report a problem</button></div></div>
+
+<div id="report" role="dialog" aria-modal="true" aria-labelledby="reportTitle">
+  <div class="panel rbox">
+    <div class="rhead"><h3 id="reportTitle">Report a problem</h3><button id="reportClose" class="x" title="Close" aria-label="Close">×</button></div>
+    <div id="reportForm">
+      <p class="dim">Say what went wrong. Your words go into one zip file together with what may help find the cause: this computer, this copy of Azeroth Atlas and its notes of what it did, the game and its addons. You are asked where to save it. <b>Nothing is sent anywhere</b>: the file is yours to pass on.</p>
+      <label for="reportText">What went wrong, and what did you expect instead?</label>
+      <textarea id="reportText" rows="5" spellcheck="true" placeholder="For example: I finished the second thing my quest asks for, and the route in the game still led to the first."></textarea>
+      <div class="row"><label for="reportWhen" class="grow">When did it happen?</label>
+        <select id="reportWhen">
+          <option>Just now</option>
+          <option>In the last few minutes</option>
+          <option>Earlier today</option>
+          <option>It keeps happening</option>
+          <option>Some days ago</option>
+        </select>
+      </div>
+      <div class="rtip">
+        <div><b>Is it about the game?</b> Type <b>/reload</b> in the game before you save the report. The addon keeps notes of what it did, and the game writes them to the disk only on a /reload or when you log out.</div>
+        <div id="reportAddon" class="small dim"></div>
+      </div>
+      <div class="rchoose">
+        <label class="row"><input type="checkbox" id="reportShot" checked><span class="grow">A picture of the map as it is now</span></label>
+        <label class="row"><input type="checkbox" id="reportCache" checked><span class="grow">The game's cache of what its server has told it about creatures, objects and quests</span></label>
+        <label class="row"><input type="checkbox" id="reportOthers"><span class="grow">What every other addon has saved as well, not only this one and the ones it works with <span class="dim">(whatever those addons keep, which may be chat or lists of names)</span></span></label>
+        <label class="row"><input type="checkbox" id="reportHotfixes"><span class="grow">The game's cache of hotfixes <span class="dim">(several megabytes)</span></span></label>
+      </div>
+      <details>
+        <summary>What goes into the file, and what never does</summary>
+        <ul class="small">
+          <li><b>This computer:</b> the version of Windows, the processor, memory, graphics card and its driver, drives and how full they are, the antivirus program, and the names of the programs running (an overlay or a capture program can be in the way).</li>
+          <li><b>Azeroth Atlas:</b> its version and a digest of each of its own files, its settings, its notes of what it did (the game found or lost, each route handed to the game and whether the game read it, errors), what the map was showing when you made the report, and the route mailboxes as they stood.</li>
+          <li><b>The game:</b> its build and settings, the addons installed and which are switched on, what this addon has saved (with its own notes) and what the addons it works with have saved (Questie, Guidelime and guide packs, TomTom, Shortest Path Forever, DockWatch and the like), the game's own logs about itself and its addons, the beginning of its last three crash reports.</li>
+          <li><b>Never:</b> account names, passwords, e-mail addresses, your Windows user name and the computer's name (struck from every text and path); the game's chat and combat logs; your macros; crash dumps; anything of the game itself. Character and realm names are in it: the game keeps what addons save under them.</li>
+        </ul>
+      </details>
+      <div id="reportMsg" class="small dim"></div>
+      <div class="btnrow rbtns"><button id="reportCancel">Cancel</button><button id="reportSave" class="primary">Save the report as…</button></div>
+    </div>
+    <div id="reportDone" style="display:none">
+      <p id="reportDoneText" class="good"></p>
+      <p id="reportDoneMore"></p>
+      <p id="reportDoneLeft" class="dim small"></p>
+      <div class="btnrow rbtns"><button id="reportShow">Show it in its folder</button><button id="reportAgain" class="primary">Close</button></div>
+    </div>
+  </div>
+</div>
+<script type="module" src="js/log.js"></script>
 <script type="module" src="js/reload.js"></script>
+<script type="module" src="js/report.js"></script>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

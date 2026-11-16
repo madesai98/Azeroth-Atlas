@@ -173,6 +173,73 @@ end
 AzerothAtlas = AzerothAtlas or {}
 local shared = AzerothAtlas
 
+-- ---- its own notes ----------------------------------------------------------------------------
+-- What the addon did and why, a short line each: a mailbox opened and what was in it, the route
+-- taken or not, the quest you track moving on, anything that went wrong. The last few hundred
+-- are kept with what the addon saves for the character (AzerothAtlasCharDB.log), which the game
+-- writes to the disk when you log out or type /reload. Nobody reads them but "Report a
+-- problem" on the 3D map, which packs them for whoever looks into what went wrong.
+-- A line: the time of day (as this computer's clock has it, in seconds), the game's own clock,
+-- and what happened. /atlas log shows the last of them.
+local LOG_MAX = 400
+local logged = nil   -- AzerothAtlasCharDB.log, once what the addon saved has been read: { at (where the next line goes), [1..LOG_MAX] }
+local early = {}     -- what was noted before that
+function shared.Log(what)
+  local line = time() .. " " .. string.format("%.1f", GetTime()) .. " " .. string.sub(tostring(what), 1, 240)
+  if not logged then
+    if #early < 60 then early[#early + 1] = line end
+    return
+  end
+  local at = tonumber(logged.at) or 1
+  if at < 1 or at > LOG_MAX then at = 1 end
+  logged[at] = line
+  logged.at = at % LOG_MAX + 1
+end
+-- (once what the addon saved is there: the notes go on where they were, and what was noted before goes in first)
+local function OpenLog()
+  if logged or type(AzerothAtlasCharDB) ~= "table" then return end
+  if type(AzerothAtlasCharDB.log) ~= "table" then AzerothAtlasCharDB.log = { at = 1 } end
+  logged = AzerothAtlasCharDB.log
+  for _, line in ipairs(early) do
+    local at = tonumber(logged.at) or 1
+    if at < 1 or at > LOG_MAX then at = 1 end
+    logged[at] = line
+    logged.at = at % LOG_MAX + 1
+  end
+  early = {}
+end
+-- The last lines, the oldest first (/atlas log).
+function shared.LastLog(count)
+  local out = {}
+  if not logged then return early end
+  local at = tonumber(logged.at) or 1
+  for i = LOG_MAX - 1, 0, -1 do
+    local line = logged[(at - 1 - i - 1) % LOG_MAX + 1]
+    if type(line) == "string" then out[#out + 1] = line end
+  end
+  while #out > count do table.remove(out, 1) end
+  return out
+end
+
+-- Much of what the addon does is done so that a mistake in it cannot stop the rest (pcall). A
+-- mistake caught that way is seen by nobody - the route simply stays as it was. So it is noted:
+-- the first time it happens, and again at the tenth, the hundredth, the thousandth.
+local wrong, wrongs = {}, 0
+local function Caught(what, ok, ...)
+  if not ok then
+    local key = what .. ": " .. tostring((...))
+    local n = wrong[key]
+    if not n and wrongs >= 40 then return ok, ... end -- (enough kinds of mistake noted: no list without end)
+    if not n then wrongs = wrongs + 1 end
+    n = (n or 0) + 1
+    wrong[key] = n
+    if n == 1 or n == 10 or n == 100 or n == 1000 then shared.Log("ERROR " .. (n > 1 and ("(" .. n .. " times) ") or "") .. key) end
+  end
+  return ok, ...
+end
+-- As pcall: f(...) run, true and what it gave back - or false and what went wrong, noted under `what`.
+function shared.Try(what, f, ...) return Caught(what, pcall(f, ...)) end
+
 -- ---- what we know ---------------------------------------------------------------------------
 -- (world, north, west: where you are in yards, for Route.lua; the rest is as the strip sends it)
 local player = { flags = 0, map = 0, x = 0, y = 0, z = 0, facing = 0, zone = 0, level = 0, world = false, north = 0, west = 0 }
@@ -366,7 +433,7 @@ end
 -- plan to again is not a new one here either.
 local function GuideStep()
   if shared.GuideGoal then
-    local ok, map, north, west, a, b, c = pcall(shared.GuideGoal)
+    local ok, map, north, west, a, b, c = shared.Try("guide goal", shared.GuideGoal)
     if ok and map ~= false then
       if map and north and west then return map, north, west, a, b, c end
       return nil
@@ -807,12 +874,12 @@ local function BuildMessages()
   local list = {}
   -- the level you chose for a waypoint with more than one under it (Route.lua), first: the 3D map is waiting for it
   if shared.ChoiceReport then
-    local ok, bytes = pcall(shared.ChoiceReport)
+    local ok, bytes = shared.Try("choice report", shared.ChoiceReport)
     if ok and type(bytes) == "string" then list[#list + 1] = { T_TALK, 2, bytes } end
   end
   -- how the route's way into the game is doing (Route.lua): which delivery comes next, which one is showing
   if shared.MailReport then
-    local ok, bytes = pcall(shared.MailReport)
+    local ok, bytes = shared.Try("mail report", shared.MailReport)
     if ok and type(bytes) == "string" then list[#list + 1] = { T_TALK, 1, bytes } end
   end
   -- every place you could be heading for (the 3D map draws a route to each): your guide's step,
@@ -828,7 +895,7 @@ local function BuildMessages()
     .. (progress and strchar(q.qstate + q.qn * 4, q.qdone, floor(q.qkinds / 256), q.qkinds % 256, 1) or strchar(0, 0, 0, 0, 1)) }
   -- when the boats, zeppelins and tram run, as far as known (Transit.lua): a few lines a round, in turn
   if shared.TransitReport then
-    local ok, reports = pcall(shared.TransitReport)
+    local ok, reports = shared.Try("transit report", shared.TransitReport)
     if ok and type(reports) == "table" then
       for _, r in ipairs(reports) do list[#list + 1] = { T_TALK, r[1], r[2] } end
     end
@@ -869,8 +936,15 @@ local function BuildMessages()
   if bind then
     list[#list + 1] = { T_BIND, 0, bind }
     local saved = AzerothAtlasCharDB and AzerothAtlasCharDB.bind
-    if type(saved) == "table" and saved.name == bind and saved.x and saved.y then
+    local known = type(saved) == "table" and saved.name == bind and saved.x and saved.y
+    if known then
       list[#list + 1] = { T_BINDPOS, 0, Byte2(saved.map or 0) .. Byte3((saved.x + 32768) * 128) .. Byte3((saved.y + 32768) * 128) .. strchar(1) }
+    end
+    -- (noted when it is another place: the game gives the name, the spot is known only where you set it with this addon running)
+    local now = bind .. (known and " (the spot is known)" or " (only the name is known)")
+    if now ~= shared.bindSaid then
+      shared.bindSaid = now
+      shared.Log("hearthstone is set to " .. now)
     end
   end
   for chunk = 0, floor((#flights - 1) / 18) do
@@ -879,7 +953,7 @@ local function BuildMessages()
     if #bytes > 0 and chunk < 64 then list[#list + 1] = { T_FLIGHTS, chunk, table.concat(bytes) } end
   end
   -- your quests: two pieces a round, in turn
-  pcall(RefreshQuests)
+  shared.Try("quests", RefreshQuests)
   local bulk = quests.bulk
   for _ = 1, math.min(2, #bulk) do
     quests.at = quests.at % #bulk + 1
@@ -1018,7 +1092,7 @@ local function Update(scan)
     local quest = heads.quest .. "." .. heads.qstate .. "." .. heads.qdone
     if quest ~= questSaid then questSaid, textFresh = quest, true end
     -- the route in the game (Route.lua); whatever goes wrong there must not stop the strip
-    if shared.Scan then pcall(shared.Scan, GetTime()) end
+    if shared.Scan then shared.Try("route", shared.Scan, GetTime()) end
   end
 
   local layout = partyPresent and L_PARTY or 0
@@ -1091,7 +1165,7 @@ strip:SetScript("OnUpdate", function(_, dt)
   tick = tick + 1
   if tick % 40 == 0 then pcall(OnTop) end
   -- position every frame; party five times a second
-  local ok = pcall(Update, tick % 4 == 1)
+  local ok = shared.Try("strip", Update, tick % 4 == 1)
   if not ok then lastSum = -1 end
 end)
 
@@ -1140,7 +1214,8 @@ function shared.SetHearth(use)
   AzerothAtlasCharDB.noHearth = off or nil
   -- (said to the 3D map in the next round of messages, and the routes are fetched anew once it has them: Route.lua)
   messagesAt = -100
-  if shared.HearthChanged then pcall(shared.HearthChanged) end
+  shared.Log(off and "hearthstone: left out of routes from now on" or "hearthstone: used in routes again")
+  if shared.HearthChanged then shared.Try("hearth changed", shared.HearthChanged) end
 end
 
 -- What else you could be heading for (for Route.lua, which asks for the routes there when it
@@ -1184,18 +1259,27 @@ strip:SetScript("OnEvent", function(_, event)
     if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end
     if AzerothAtlasDB.enabled == nil then AzerothAtlasDB.enabled = true end
     if type(AzerothAtlasCharDB) ~= "table" then AzerothAtlasCharDB = {} end
+    -- (its notes go on where they were; and this login is the first of the new ones)
+    OpenLog()
+    shared.Try("login note", function()
+      local meta = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+      local version, build, _, interface = "?", "?", nil, "?"
+      if GetBuildInfo then version, build, _, interface = GetBuildInfo() end
+      shared.Log("LOGIN addon " .. tostring(meta and meta("AzerothAtlas", "Version") or "?") .. ", game " .. tostring(version) .. " build " .. tostring(build) .. " interface " .. tostring(interface)
+        .. ", level " .. tostring(UnitLevel and plain(UnitLevel("player")) or "?") .. ", strip " .. (AzerothAtlasDB.enabled and "on" or "off"))
+    end)
     -- the quick waypoint you had before the /reload
     local q = AzerothAtlasCharDB.quick
     if type(q) == "table" and type(q.map) == "number" and type(q.north) == "number" and type(q.west) == "number" then
       quick.on, quick.map, quick.north, quick.west, quick.serial = true, q.map, q.north, q.west, 1
     end
   elseif event == "TAXIMAP_OPENED" then
-    pcall(ScanFlightMaster)
+    shared.Try("flight master", ScanFlightMaster)
     messagesAt = -100
-    pcall(Talking)
+    shared.Try("talking", Talking)
     return
   elseif TALK_EVENTS[event] then
-    pcall(Talking)
+    shared.Try("talking", Talking)
     return
   elseif QUEST_EVENTS[event] then
     quests.dirty = true
@@ -1209,10 +1293,11 @@ strip:SetScript("OnEvent", function(_, event)
     if x and y and name and type(AzerothAtlasCharDB) == "table" then
       AzerothAtlasCharDB.bind = { name = name, map = map or 0, x = x, y = y }
     end
+    shared.Log("hearthstone set here: " .. tostring(name) .. " map " .. tostring(map) .. " " .. tostring(x and floor(x)) .. " " .. tostring(y and floor(y)))
     messagesAt = -100
     return
   end
-  if event == "PLAYER_ENTERING_WORLD" then quests.dirty = true; quests.retry = 3 end
+  if event == "PLAYER_ENTERING_WORLD" then quests.dirty = true; quests.retry = 3; shared.Log("entering the world (a login, a /reload or a loading screen)") end
   if AzerothAtlasDB then Apply() end
 end)
 
@@ -1252,8 +1337,18 @@ SlashCmdList["AZEROTHATLAS"] = function(msg)
     if not (shared.OpenOptions and shared.OpenOptions()) then say("the options are under Esc > Options > AddOns > Azeroth Atlas.") end
     return
   end
+  if word == "log" then
+    -- /atlas log: the last of the addon's own notes (all of them go into a report made on the 3D map, after a /reload)
+    for _, line in ipairs(shared.LastLog(tonumber(rest) or 15)) do
+      local at, what = string.match(line, "^(%d+) [%d%.%-]+ (.*)$")
+      print("|cff888888" .. (at and date and date("%H:%M:%S", tonumber(at)) or "") .. "|r " .. (what or line))
+    end
+    say("its notes, the last of them. To hand them on: type /reload, then press Report a problem in Azeroth Atlas.")
+    return
+  end
   if word ~= "" then
-    if shared.Command then pcall(shared.Command, word, rest) end
+    shared.Log("/atlas " .. word .. (rest ~= "" and (" " .. rest) or ""))
+    if shared.Command then shared.Try("/atlas " .. word, shared.Command, word, rest) end
     return
   end
   if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end

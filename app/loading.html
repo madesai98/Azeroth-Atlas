@@ -12,6 +12,13 @@
   #what { color: #8f9bb3; }
   #said { display: none; max-width: 760px; margin: 6px 24px 0; padding: 10px 14px; border: 1px solid #263044; border-radius: 8px; background: #10141d; color: #c2cad8; font: 12px/1.5 Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
   #where { display: none; color: #6b7690; font-size: 12px; }
+  #report { display: none; flex-direction: column; align-items: center; gap: 8px; width: min(560px, calc(100% - 48px)); }
+  #report textarea { width: 100%; min-height: 64px; resize: vertical; font: inherit; color: #d7dde8; background: #10141d; border: 1px solid #263044; border-radius: 6px; padding: 6px 8px; box-sizing: border-box; }
+  #report button { font: inherit; color: #d7dde8; background: #1d2535; border: 1px solid #33405a; border-radius: 6px; padding: 5px 16px; cursor: pointer; }
+  #report button:hover:not(:disabled) { background: #263149; }
+  #report button:disabled { opacity: .5; cursor: default; }
+  #reported { color: #8f9bb3; font-size: 12px; text-align: center; word-break: break-all; }
+  #reported:empty { display: none; }
 </style>
 </head>
 <body>
@@ -20,6 +27,12 @@
 <div id="what">Starting the map…</div>
 <div id="said"></div>
 <div id="where"></div>
+<!-- there once the map is taking its time (window.say): "Report a problem", made by the application itself -->
+<div id="report">
+  <textarea id="words" placeholder="Will it not start? Say here what you see, then save a report: one zip file with what may help find the cause (this computer, Azeroth Atlas and its notes, the game and its addons). Nothing is sent anywhere."></textarea>
+  <button id="make">Report a problem: save the report as…</button>
+  <div id="reported"></div>
+</div>
 <script>
   // (told by the application when the map's server is taking its time: what the server has said so far)
   window.say = (text, log) => {
@@ -30,7 +43,17 @@
     const where = document.getElementById('where');
     where.textContent = 'All of it: ' + log;
     where.style.display = 'block';
+    if (window.azerothAtlas && window.azerothAtlas.report) document.getElementById('report').style.display = 'flex';
   };
+  document.getElementById('make').addEventListener('click', async () => {
+    const btn = document.getElementById('make'), told = document.getElementById('reported');
+    btn.disabled = true;
+    told.textContent = 'Gathering everything: this takes a few seconds…';
+    let r = null;
+    try { r = await window.azerothAtlas.report(document.getElementById('words').value); } catch (err) { r = { error: String(err && err.message || err) }; }
+    told.textContent = !r ? '' : r.error ? 'That did not work: ' + r.error : 'Saved: ' + r.file + '. Nothing has been sent anywhere: pass that file on to whoever is looking into the problem.';
+    btn.disabled = false;
+  });
 </script>
 </body>
 </html>

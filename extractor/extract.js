@@ -16,13 +16,14 @@ import { buildWorld } from './world.js';
 import { parseWDT } from './formats/wdt.js';
 import { Pool } from './pool.js';
 import { writeFileAtomic, unpackContainer } from './container.js';
-import { TILE_VERSION, placementToWorld } from './jobs/tile.js';
+import { TILE_VERSION } from './jobs/tile.js';
 import { PAGE_VERSION, TOP_LEVEL } from './jobs/page.js';
 import { AREAS_VERSION } from './jobs/areas.js';
 import { PLACEMENTS_VERSION } from './jobs/placements.js';
 import { MODEL_VERSION } from './jobs/model.js';
 import { TREES_VERSION, isTree } from './trees.js';
-import { CREATURES_VERSION, placeCreatures, placeInns, writeCreatures } from './jobs/creatures.js';
+import { CREATURES_VERSION, placeCreatures, placeInns, placeDungeons, writeCreatures } from './jobs/creatures.js';
+import { readQuestieDungeons } from './questie-extras.js';
 import { findQuestieDb, readQuestie, questieStamp } from './questie.js';
 import { NPCS_VERSION, placeNpcs, resolveHeights, writeNpcs, buildQuests } from './jobs/npcs.js';
 import { fetchReference, readReference } from './reference.js';
@@ -313,7 +314,7 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
   report({ type: 'phase', name: 'Placing creatures' });
   let danger = null;
   let questie = null; // which QuestieDB file this map was built from (even if it was unusable)
-  let innsSig = null;
+  let innsSig = null, dungeonsSig = null;
   let questieDb = null, factionTemplates = null, factionHash = null; // kept for the NPC layer below
   try {
     const file = findQuestieDb(cfg);
@@ -329,7 +330,12 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
       const source = `QuestieDB ${db.version ?? '?'}`;
       // innkeepers, for the route planner (where a hearthstone leads) and for knowing the towns
       world.data.inns = placeInns(db.npcs, world.data.zones, templates);
-      innsSig = sig('inns2', db.hash, ft?.hash ?? null);
+      innsSig = sig('inns3', db.hash, ft?.hash ?? null);
+      // the dungeons' doors, for leading a quest that is done inside one to the way in
+      const dungeons = readQuestieDungeons(file);
+      world.data.dungeons = placeDungeons(dungeons.list, world.data.zones, world.data.areas);
+      dungeonsSig = sig('dungeons1', dungeons.hash, sig(world.data.zones));
+      if (dungeons.list.length) log(`${world.data.dungeons.length} dungeons with their doors, from QuestieDB`);
       // the game's area under a spot, on any map (from the area grids built above)
       const grids = new Map();
       const areaAt = (mapId, x, y) => {
@@ -350,6 +356,8 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
         const cx = Math.floor((32 - y / TILE_YARDS) * 16) - g.minCol * 16, cy = Math.floor((32 - x / TILE_YARDS) * 16) - g.minRow * 16;
         return cx < 0 || cy < 0 || cx >= g.cols * 16 || cy >= g.rows * 16 ? 0 : g.grid[cy * g.cols * 16 + cx];
       };
+      // (the area each innkeeper stands in: a zone with two inns, and the game names only the place your hearthstone is set to)
+      for (const i of world.data.inns) { const a = areaAt(i.map, i.pos[0], i.pos[1]); if (a) i.area = a; }
       const places = { areaAt, areas: world.data.areas, capitals: world.data.capitals, inns: world.data.inns, taxiNodes: world.data.taxiNodes };
       const { maps: placed, dropped } = placeCreatures(db.npcs, world.data.zones, templates, places);
       let total = 0;
@@ -463,7 +471,8 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
     const g = wdt.globalWmo && wdt.globalWmo.isFdid ? wdt.globalWmo : null;
     const pages = {};
     for (let level = 1; level <= TOP_LEVEL; level++) pages[level] = (map.pages[level] ?? []).map((e) => [e.x, e.y, round1(e.meta.minH), round1(e.meta.maxH), e.meta.water ? 1 : 0]);
-    let rev = sig(FORMAT_VERSION, map.tiles.map((e) => e.sig), Object.values(map.pages).flat().map((e) => e.sig), map.areasEntry?.sig, map.wmosEntry?.sig, map.creaturesEntry?.sig, map.npcsEntry?.sig ?? null, g?.fdid ?? 0, ckey(g?.fdid)).slice(0, 10);
+    // (a map that is one building: 'middle' is how that building is placed - see below - so that a map built before it was put right is written anew)
+    let rev = sig(FORMAT_VERSION, map.tiles.map((e) => e.sig), Object.values(map.pages).flat().map((e) => e.sig), map.areasEntry?.sig, map.wmosEntry?.sig, map.creaturesEntry?.sig, map.npcsEntry?.sig ?? null, g?.fdid ?? 0, ckey(g?.fdid), ...(g ? ['middle'] : [])).slice(0, 10);
     // the walkable-ground data has its own revision (it changes when a building model does)
     const navRev = map.nav?.length ? sig(map.nav.map((n) => n.sig)) : null;
     if (navRev) rev = sig(rev, navRev);
@@ -481,9 +490,16 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
       npcs: map.npcsEntry?.meta ?? null, // maps/<id>/npcs.bin
       nav: navRev ? { tiles: map.nav.length, rev: navRev, cells: 512 } : null, // maps/<id>/nav/<col>_<row>.bin
       heightRange: map.tiles.length ? [minH, maxH] : null,
+      // A map that is one building (the Deeprun Tram, a dungeon) has it placed from the middle of
+      // the world, not from the map's corner as everything that stands on a map with ground is:
+      // the game's files put every one of them at (0, 0, 0), and you walk about in them at the
+      // building's own coordinates. (Placed from the corner, the building stood 17,067 yards north
+      // and west of everyone in it. `middle` says it is placed aright: the page moves one that is
+      // not, from a map built before this - viewer/js/scene.js.)
       globalWmo: g ? {
-        fdid: g.fdid, uniqueId: g.uniqueId, pos: placementToWorld(g.pos), rot: g.rot, scale: g.scale, doodadSet: g.doodadSet, nameSet: g.nameSet,
-        bounds: [MAP_HALF - g.extents[5], MAP_HALF - g.extents[3], g.extents[1], MAP_HALF - g.extents[2], MAP_HALF - g.extents[0], g.extents[4]],
+        fdid: g.fdid, uniqueId: g.uniqueId, pos: [-g.pos[2], -g.pos[0], g.pos[1]], rot: g.rot, scale: g.scale, doodadSet: g.doodadSet, nameSet: g.nameSet,
+        bounds: [-g.extents[5], -g.extents[3], g.extents[1], -g.extents[2], -g.extents[0], g.extents[4]],
+        middle: true,
       } : null,
       rev,
     };
@@ -500,7 +516,7 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
     });
   }
   writeFileAtomic(abs('world.json'), JSON.stringify(world.data));
-  next.artifacts['world.json'] = { sig: sig(world.hash, innsSig) };
+  next.artifacts['world.json'] = { sig: sig(world.hash, innsSig, dungeonsSig) };
 
   // A filtered run (--maps) must not drop the other maps that were extracted earlier.
   if (mapFilter && !prev.stale) {

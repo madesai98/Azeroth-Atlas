@@ -9,6 +9,8 @@ import { fork } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CONFIG_FILE } from '../extractor/config.js';
+import { openLogs, logDir, note, noteCrashes } from './log.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -19,14 +21,18 @@ const SELF = path.basename(fileURLToPath(import.meta.url)).toLowerCase();
 const SETTLE_MS = 350;  // an update writes several files: wait until it has gone quiet
 const args = process.argv.slice(2);
 const configArg = args.find((a) => a.startsWith('--config='));
-const CONFIG = configArg ? path.resolve(configArg.slice(9)) : path.join(ROOT, 'config.json');
+// (where the settings are: beside the map tool - or, in the installed application, where it keeps what is yours)
+const CONFIG = configArg ? path.resolve(configArg.slice(9)) : CONFIG_FILE;
 // What the server is made of: its own folder, and the code it shares with the extractor, the
 // Atlas database and the auction prices (it runs parts of each inside itself).
 const FOLDERS = [path.join(ROOT, 'server'), path.join(ROOT, 'extractor'), path.join(ROOT, 'atlasdb'), path.join(ROOT, 'auctions')];
 const CODE = /\.(js|mjs|cs)$/i;
 const NOT_CODE = /(^|[\\/])(\.build|node_modules)([\\/]|$)/;
 
-const say = (text) => console.log(`[${new Date().toLocaleTimeString()}] ${text}`);
+// (what is said here is noted as well: log.js)
+openLogs(logDir(CONFIG));
+noteCrashes('the map\'s starter');
+const say = (text) => { console.log(`[${new Date().toLocaleTimeString()}] ${text}`); note('starter', text); };
 if (+process.versions.node.split('.')[0] < 20) {
   console.error(`Node.js ${process.versions.node} is too old for the map: it needs version 20 or newer. Install the LTS version from https://nodejs.org and start the map again.`);
   process.exit(1);
@@ -51,9 +57,10 @@ function start() {
     process.send?.({ busy }); // (the application, where it is what runs this, waits with starting itself again too)
     if (!busy && waiting) restart();
   });
-  mine.on('exit', (code) => {
+  mine.on('exit', (code, signal) => {
     if (child !== mine) return;
     child = null;
+    note('starter', 'the map server has gone', { code, signal, wanted: quitting || stopping || waiting });
     if (quitting) return;
     if (stopping || waiting) { stopping = false; waiting = false; start(); return; }
     if (code === PORT_TAKEN) { quitting = true; process.exitCode = 1; for (const w of watchers) w.close(); return; }
@@ -112,6 +119,7 @@ try {
 const quit = () => {
   if (quitting) return;
   quitting = true;
+  note('starter', 'closing: the map server is put away');
   const mine = child;
   if (!mine) process.exit(0);
   mine.once('exit', () => process.exit(0));

@@ -5,6 +5,8 @@
 // (as a flat track: stretches of x, y points), which leaves it where the addon can pick it up
 // (server/mail.js explains how something gets into a running game at all).
 
+import { note, changed } from './log.js';
+
 const TOLERANCE = 0.6;   // yards a point may lie off the line through its neighbours and be left out
 const POINT_BUDGET = 1800; // points in one delivery; past that the track is thinned further
 const BREAK = 8;         // (route.js) kind bit: this point starts a new stretch
@@ -234,6 +236,8 @@ export class InGameRoute {
     this.sig = '';
     this.timer = 0;
     this.status = null;   // what the server last said of the route's way into the game
+    this.handed = null;   // what was last sent, and when (for "Report a problem": report.js)
+    this.handedAt = 0;
   }
 
   /**
@@ -339,9 +343,16 @@ export class InGameRoute {
 
   async #send() {
     try {
-      const res = await fetch('/api/ingame/route', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(this.#payload()) });
-      if (res.ok) { this.status = await res.json(); this.app.onInGame?.(); }
-    } catch { /* the server is gone: the page says so elsewhere */ }
+      const sent = this.#payload();
+      this.handed = sent;
+      this.handedAt = Date.now();
+      // (noted - log.js - when it says another thing than before: not the same route with fewer yards left)
+      const shape = { state: sent.state, slot: sent.slot, to: sent.target ? [sent.target.map, Math.round(sent.target.x), Math.round(sent.target.y), sent.target.source] : null, plan: sent.plan, quest: sent.quest, hearthLeftOut: sent.hearth, routes: sent.routes.map((o) => `${o.slot}:${o.state}${o.state === 'route' ? `:${o.plan}` : ''}`), marker: sent.marker ? [sent.marker.stamp, !!sent.marker.off] : null, words: sent.state === 'route' ? null : sent.text };
+      if (changed('ingame.sent', shape)) note('ingame', `for the game: ${sent.state}${sent.head ? ` (${sent.head})` : ''}`, { ...shape, steps: sent.steps?.map((s) => s.text), stretches: sent.stretches.length, atTheWaypoint: sent.there, onTheRoute: sent.sure });
+      const res = await fetch('/api/ingame/route', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(sent) });
+      if (res.ok) { this.status = await res.json(); if (changed('ingame.status', this.status)) note('ingame', 'the route\'s way into the game, as the server has it', this.status); this.app.onInGame?.(); }
+      else if (changed('ingame.refused', res.status)) note('ingame', `the server would not take the route (${res.status})`);
+    } catch (err) { if (changed('ingame.away', String(err?.message))) note('ingame', 'the route could not be sent to the server', { error: String(err?.message) }); /* the server is gone: the page says so elsewhere */ }
   }
 
   /** A line for the panel about the route in the game ('' when there is nothing worth saying). */

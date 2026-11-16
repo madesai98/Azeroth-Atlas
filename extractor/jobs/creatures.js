@@ -21,6 +21,10 @@
 import { packContainer, writeFileAtomic } from '../container.js';
 
 export const CREATURES_VERSION = 9;
+// What extract.js adds to world.json from QuestieDB and the map's own area grids: the area each
+// innkeeper stands in, the dungeons' doors. Raise it when that changes: the page then offers
+// "Update map", which writes world.json anew and builds nothing else again.
+export const PLACES_VERSION = 2;
 export const CSEC = { META: 1, SPAWNS: 2, SPAWN_CREATURE: 3, PATH_POINTS: 4, PATHS: 5 };
 
 // Faction group bits: 1 = any player, 2 = Alliance, 4 = Horde.
@@ -243,7 +247,35 @@ const INNKEEPER = 128; // QuestieDB npc flag
  * Every innkeeper and where they stand, for knowing where a hearthstone leads (the game only
  * tells an addon the name of the place it is set to).
  * @returns [{ name, map, zone (area id of the zone map they are on), pos: [x, y], a, h (reaction to each side: 0 friendly, 1 neutral, 2 hostile) }]
+ *          (extract.js adds to each: area, the game's own area under their feet, where the map says)
  */
+/**
+ * The dungeons, each with where its doors are in the world: for leading a quest that is done
+ * inside one to the way in (nobody in a dungeon new to this game can be placed, and nothing in
+ * any dungeon is on the map you stand on outside it).
+ * @param list   from QuestieDB (questie-extras.js: readQuestieDungeons): doors as per cent of a zone's map
+ * @param areas  the game's areas (world.js): the map a dungeon's own area is on is the dungeon's map
+ * @returns [{ area, name, also (area ids its quests are filed under as well), map (the dungeon's own, or null), doors: [{ map, pos: [x, y] }] }]
+ */
+export function placeDungeons(list, zones, areas) {
+  const zoneByArea = new Map();
+  for (const z of [...zones].sort((a, b) => (a.type === 3 ? 0 : 1) - (b.type === 3 ? 0 : 1) || a.order - b.order)) {
+    if (z.area && !zoneByArea.has(z.area)) zoneByArea.set(z.area, z);
+  }
+  const out = [];
+  for (const d of list) {
+    const doors = [];
+    for (const q of d.doors) {
+      const z = zoneByArea.get(q.zone);
+      if (!z) continue;
+      const x = z.region[2] - (q.y / 100) * (z.region[2] - z.region[0]), y = z.region[3] - (q.x / 100) * (z.region[3] - z.region[1]);
+      doors.push({ map: z.map, pos: [Math.round(x * 10) / 10, Math.round(y * 10) / 10] });
+    }
+    if (doors.length) out.push({ area: d.area, name: d.name, also: d.also, map: areas[d.area]?.m ?? null, doors });
+  }
+  return out;
+}
+
 export function placeInns(npcs, zones, templates) {
   const zoneByArea = new Map();
   for (const z of [...zones].sort((a, b) => (a.type === 3 ? 0 : 1) - (b.type === 3 ? 0 : 1) || a.order - b.order)) {

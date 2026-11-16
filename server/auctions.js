@@ -15,6 +15,7 @@ import { AuctionStore } from '../auctions/store.js';
 import { auctionSettings, setHouse } from '../auctions/settings.js';
 import { HOUSES, REGION_NAMES, REGION_RULESETS, RULESETS, SIDES, housesOf, houseName } from '../auctions/houses.js';
 import { listHouse, listRecipes, itemHistory } from '../auctions/view.js';
+import { note } from './log.js';
 
 const TICK = 5 * 60 * 1000;        // how often it is asked whether a fetch is due, while prices are being looked at
 const HOUR = 3600;                 // Blizzard's lists: one an hour
@@ -96,6 +97,7 @@ export class Auctions {
       for (const line of out.trim().split('\n').reverse()) { try { result = JSON.parse(line); break; } catch { /* not the result line */ } }
       this.state.result = result ? { pulled: result.pull?.fetched ?? 0, tsm: result.tsm ?? null, t: result.t ?? null } : null;
       this.state.error = result?.errors?.length ? result.errors.join('; ') : code ? (err.trim().split('\n').pop() || `ended with code ${code}`) : null;
+      note('auctions', this.state.error ? 'auction prices: something went wrong' : 'auction prices: looked', { error: this.state.error ?? undefined, result: this.state.result ?? undefined, code: code || undefined, said: this.state.error ? err.slice(-800) : undefined });
     };
     child.on('close', done);
     child.on('error', (e) => { err += e.message; done(1); });

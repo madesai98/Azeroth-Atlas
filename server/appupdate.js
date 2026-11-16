@@ -28,6 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { execFile } from 'node:child_process';
+import { note } from './log.js';
 
 const CHECK_EVERY = 6 * 3600 * 1000;  // how often it looks while the map is running
 const NOT_AGAIN_FOR = 30 * 60 * 1000; // a start of the server soon after a look does not look again
@@ -180,7 +181,9 @@ export class AppUpdate {
         if (this.never && this.s.available) { this.s.canApply = false; this.s.note = 'A newer version is out, but this copy is set never to update itself ("autoUpdate": "never" in config.json).'; }
         this.s.checkedAt = Date.now();
         this.#remember();
-        return this.status();
+        const st = this.status();
+        note('update', st.error ? 'could not look for a newer version' : st.updated && Date.now() - st.updated.at < 60000 ? 'a newer version was put in' : st.available ? 'a newer version is out, and was not put in' : 'this version is the newest', { version: st.version, commit: st.commit, latest: st.latest, kind: st.kind, from: st.from, bySelf: st.auto, error: st.error ?? undefined, note: st.note ?? undefined, updated: st.updated ?? undefined });
+        return st;
       });
     return this.running;
   }

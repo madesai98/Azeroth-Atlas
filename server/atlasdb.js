@@ -10,6 +10,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { PROJECT_ROOT, flavourFolder, readConfigFile } from '../extractor/config.js';
 import { databaseSettings } from '../atlasdb/settings.js';
+import { note } from './log.js';
 
 const FIRST = 90 * 1000;          // after the map has started
 const LOOK = 10 * 60 * 1000;      // how often the game's cache is looked at for a change
@@ -88,6 +89,7 @@ export class AtlasDb {
       for (const line of out.trim().split('\n').reverse()) { try { result = JSON.parse(line); break; } catch { /* not the result line */ } }
       this.state.result = result;
       this.state.error = result?.errors?.length ? result.errors.join('; ') : code ? (err.trim().split('\n').pop() || `ended with code ${code}`) : null;
+      note('database', this.state.error ? 'the Atlas database: something went wrong' : 'the Atlas database: sent and fetched', { error: this.state.error ?? undefined, result: result ?? undefined, code: code || undefined, said: this.state.error ? err.slice(-800) : undefined });
     };
     child.on('close', done);
     child.on('error', (e) => { err += e.message; done(1); });

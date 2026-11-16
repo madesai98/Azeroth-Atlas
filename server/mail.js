@@ -10,6 +10,7 @@
 // Only folders named AzerothAtlas_Mail### in the game's AddOns folder are ever written.
 import fs from 'node:fs';
 import path from 'node:path';
+import { note, changed } from './log.js';
 
 export const MAIL_COUNT = 300;  // mailboxes installed: deliveries per login or /reload
 const WINDOW = 6;               // mailboxes kept filled ahead of the one the addon opens next
@@ -83,7 +84,9 @@ export class RouteMail {
     this.history = [];    // recent deliveries: { written, state }
     this.boxes = new Map(); // mailbox -> { first: when it was first filled, written: [the deliveries put in it] }
     this.stale = 0;       // mailboxes in a row that the game opened and read something older in
+    this.alike = 0;       // deliveries since the last one noted (log.js) that said the same but for the yards and seconds left
     this.count();
+    note('mail', this.dir ? `the route mailboxes: ${this.size} found` : 'no route mailboxes: the game\'s AddOns folder is not known, or "ingame" is switched off', this.dir ? { in: this.dir, named: this.prefix } : undefined);
   }
 
   /** How many mailboxes are installed. */
@@ -97,13 +100,16 @@ export class RouteMail {
   /** The addon has been installed afresh (perhaps under its new name): its mailboxes are the ones written from now on. */
   use(prefix = NAME) {
     if (prefix !== this.prefix) { this.prefix = prefix; this.filled = ''; this.boxes.clear(); this.stale = 0; }
-    return this.count();
+    const n = this.count();
+    note('mail', `the addon has been installed: ${n} route mailboxes`, { named: this.prefix });
+    return n;
   }
 
   /** From the strip: the addon's own account of its mailboxes. */
   setReport(r) {
     const was = this.report;
     this.report = r;
+    const fresh = !was || was.session !== r.session || r.next < was.next;
     // It has opened a mailbox: did it read what was put there? (If the game only ever sees the
     // files as they were when it started, it reads something older, and the route cannot get in.)
     if (!was || was.session !== r.session || r.next < was.next) {
@@ -113,6 +119,14 @@ export class RouteMail {
     } else if (r.next === was.next + 1) {
       const put = this.boxes.get(was.next);
       if (put && Date.now() - put.first > 1500) this.stale = put.written.includes(r.have) ? 0 : this.stale + 1;
+    }
+    // (noted: what the game says of its mailboxes, each time that is something new)
+    if (changed('mail.report', r)) {
+      const opened = was && !fresh && r.next > was.next ? { opened: `mailbox ${was.next}${r.next > was.next + 1 ? ` to ${r.next - 1}` : ''}`, put: this.boxes.get(was.next)?.written ?? null } : {};
+      note('mail', fresh ? 'the game has logged in or reloaded: its mailboxes can all be opened again' : 'the game says of its mailboxes', {
+        session: r.session, next: r.next, of: r.size, read: r.have, ...opened,
+        showing: !!(r.flags & 1), waiting: !!(r.flags & 2), gaveUp: !!(r.flags & 4), hearsNothing: !!(r.flags & 8), olderInARow: this.stale || undefined,
+      });
     }
     if (!was || was.session !== r.session || was.next !== r.next) this.flush();
   }
@@ -132,6 +146,7 @@ export class RouteMail {
   setLive(live) {
     if (live === this.live) return;
     this.live = live;
+    note('mail', live ? 'the game is heard from: the mailboxes are kept filled' : `the game is no longer heard from: the mailboxes are kept filled for ${Math.round(this.grace / 1000)} s more`);
     clearTimeout(this.cooling);
     if (live) {
       this.warm = true;
@@ -269,6 +284,9 @@ export class RouteMail {
       end: Array.isArray(r.end) && Number.isFinite(r.end[0]) && Number.isFinite(r.end[1]) ? [r.end[0], r.end[1]] : null,
       endMap: Number.isInteger(r.endMap) && r.endMap >= 0 && r.endMap <= 65535 ? r.endMap : null,
     };
+    // (noted: what the page said, each time it is another thing than before - not each yard walked along the same route)
+    const R = this.route, said = { state: R.state, slot: R.slot, plan: R.plan, at: R.at, game: R.game, quest: this.tracked, hearthLeftOut: this.hearth, routes: this.whole?.map((o) => `${o.slot}:${o.state}${o.state === 'route' ? `:${o.plan}` : ''}`) ?? null, marker: this.marker ? [this.marker.stamp, !!this.marker.off] : null, levels: R.levels ? [R.levels.id, R.levels.at, R.levels.ask] : null };
+    if (changed('mail.page', said)) note('mail', `the map page says: ${R.state}${R.head ? ` (${R.head})` : ''}`, { ...said, text: R.text || undefined, steps: R.steps.map((s) => s.text), stretches: R.stretches.length, points: R.stretches.reduce((n, s) => n + s.points.length / 2, 0), detached: R.detached || undefined, there: R.there, onRoute: R.sure });
     this.flush();
     return this.status();
   }
@@ -369,6 +387,12 @@ export class RouteMail {
       this.written = (this.written % 65535) + 1;
       this.history.push({ written: this.written, state: b.state, at: Date.now() });
       if (this.history.length > 40) this.history.shift();
+      // (noted: a delivery that says another thing than the one before - the same route with fewer yards left is only counted)
+      const R = this.route, shape = { state: b.state, to: [b.tk, b.tm, b.tx, b.ty], plan: R?.plan ?? null, slot: R?.slot ?? null, quest: this.tracked, hearthLeftOut: this.hearth, routes: this.whole?.map((o) => `${o.slot}:${o.state}${o.state === 'route' ? `:${o.plan}` : ''}`) ?? null, marker: this.marker ? [this.marker.stamp, !!this.marker.off] : null };
+      if (changed('mail.delivery', shape)) {
+        note('mail', `delivery ${this.written}: ${b.state}`, { ...shape, answersTheGamesWaypoint: this.target ? b.state !== 'pending' || !!(R && R.game && R.at && R.at.tm === this.target.tm && R.at.tx === this.target.tx && R.at.ty === this.target.ty) : null, mailboxes: filled, letters: text.length, alikeBefore: this.alike || undefined });
+        this.alike = 0;
+      } else this.alike++;
     }
     this.text = text;
     this.filled = filled;
@@ -390,6 +414,7 @@ export class RouteMail {
         try { fs.renameSync(tmp, file); } catch { fs.writeFileSync(file, lua); fs.rmSync(tmp, { force: true }); }
       } catch (err) { this.error = err.message; }
     }
+    if (changed('mail.error', this.error) && this.error) note('mail', 'a mailbox could not be written', { error: this.error });
   }
 
   /** For the map page: how the route's way into the game is doing. */

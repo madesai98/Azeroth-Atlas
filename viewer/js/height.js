@@ -5,7 +5,9 @@
 //   riding    On a flight path (the game says so) or carried by a zeppelin or boat (you move
 //             faster than you could yourself, along its route): the route's own 3D points give
 //             the height. Where it sets you down, you are on the ground at the flight master's
-//             height, or at the route's height where the map has no ground to offer.
+//             height, or at the route's height where the map has no ground to offer. A zeppelin
+//             slows down long before its tower: you are on its deck, at its height, for as long
+//             as you are on its line - until you step onto something the map does have.
 //   walking   The way from your previous position is retraced in small steps over the surfaces
 //             you could be standing on (terrain, the floors, stairs and bridges in the buildings'
 //             collision data, and the surface of deep water), staying on the ground as it rises
@@ -13,6 +15,11 @@
 //             you falling for long enough to cover it; until then you are taken to be on
 //             something the map does not have (a rope bridge that is a prop, a ship's deck).
 //   swimming  You are at the water surface.
+//   stepping  Through a portal that puts you on another floor of the same building (the Mage
+//   through   Tower in Stormwind and the Wizard's Sanctum under it): a few yards across the map
+//             and a long way up or down, in no time. The map knows those portals and where they
+//             lead (teleports.json): at one's doorstep on its level, then all at once where it
+//             puts you down, you have gone through.
 //   arriving  After a jump with no way in between (teleport, hearthstone, login, new map): the
 //             height remembered for that spot from an earlier visit, else a flight master's
 //             there, else the topmost surface outdoors and the lowest sensible floor indoors.
@@ -36,6 +43,14 @@ const RIDE_KEEP = 9;     // once carried, you still are while moving at least th
 const RIDE_NEAR = 40;    // yards from the route for that to count
 const RIDE_AFTER = 1200; // milliseconds of it before it is believed
 const LAND_REACH = 6;    // set down by a ride: the ground is within this much of the expected height
+const ABOARD = 16;       // yards from a boat's or zeppelin's line within which you are still on its deck, once it has slowed for its stop
+const DOORSTEP = 5;      // a portal to another floor: you were last seen within this many yards of where it takes hold...
+const DOOR_LEVEL = 9;    // ...and within this much of its height;
+const HOP_REACH = 10;    // you are now within this many yards of where it puts you down,
+const HOP_SPEED = 20;    // having got there faster than anything carries you on the ground (yards a second),
+const HOP_STEP = 3;      // by at least this many yards in one go - or this many,
+const HOP_STEP_SAME = 6; // where the floor you were on carries on under where you are now
+const HOP_FLOOR = 4;     // the floor it puts you on is within this much of the height it is said to
 const SAME_SPOT = 4;     // yards: the height saved for your last position applies if you are still there
 const SPOT = 3;          // yards: size of the cells that visited places are remembered in
 const SPOTS_MAX = 3000;
@@ -67,6 +82,7 @@ export class HeightTracker {
     this.fallEnd = -1e9;
     this.knowsFalling = false;
     this.fastSince = null;
+    this.heard = 0;         // the time of the newest reading that has been taken into account (see #leap)
     this.reset();
   }
 
@@ -80,6 +96,7 @@ export class HeightTracker {
     this.sure = false;     // the height has been followed from somewhere unambiguous
     this.ride = null;      // the route carrying you, if any
     this.loose = false;    // set down where the map has no surface: waiting for one to come within reach
+    this.aboard = null;    // ...by a boat or zeppelin that has only slowed down: its route, for as long as you are still on its line
     this.airborne = false;
     this.track.length = 0;
     this.speed = 0;
@@ -172,6 +189,47 @@ export class HeightTracker {
     return 0.5 * GRAVITY * t * t;
   }
 
+  // ---- through a portal ----------------------------------------------------------------------
+  /**
+   * The furthest you have got between two readings in a row since the last look: { from: [x, y],
+   * yards, speed (yards a second) } - or null where there has been none, or no reading before it.
+   * @param since  the time of the newest reading the last look had
+   */
+  #leap(since) {
+    const t = this.track;
+    let best = null;
+    for (let i = 1; i < t.length; i++) {
+      if (t[i].t <= since) continue;
+      const d = Math.hypot(t[i].x - t[i - 1].x, t[i].y - t[i - 1].y), s = Math.max(0.02, (t[i].t - t[i - 1].t) / 1000);
+      if (!best || d > best.yards) best = { from: [t[i - 1].x, t[i - 1].y], yards: d, speed: d / s };
+    }
+    return best;
+  }
+
+  /**
+   * Have you just stepped through a portal to another floor (teleports.json)? The floor it put
+   * you on: { z, loose (the map has no floor there: the height it is said to put you at) } - or null.
+   */
+  #hopped(me, since) {
+    const list = this.app.world?.teleports;
+    if (!list?.length || this.z === null || !this.at) return null;
+    const leap = this.#leap(since);
+    if (!leap || leap.speed < HOP_SPEED || leap.yards < HOP_STEP) return null;
+    for (const t of list) {
+      if (t.map !== me.map) continue;
+      // at its doorstep, on its level, a moment ago...
+      if (Math.hypot(leap.from[0] - t.from[0], leap.from[1] - t.from[1]) > (t.radius ?? 5) + DOORSTEP || Math.abs(this.z - t.from[2]) > DOOR_LEVEL) continue;
+      // ...and now where it puts you down
+      if (Math.hypot(me.x - t.to[0], me.y - t.to[1]) > HOP_REACH) continue;
+      const can = standable(this.#surfaces(me.x, me.y, me).all);
+      // (the floor you were on carries on under here: only a longer leap says you are not still on it)
+      if (leap.yards < HOP_STEP_SAME && can.some((v) => v >= this.z - SAME_DOWN && v <= this.z + SAME_UP)) continue;
+      const floor = can.reduce((b, v) => (Math.abs(v - t.to[2]) <= HOP_FLOOR && (b === null || Math.abs(v - t.to[2]) < Math.abs(b - t.to[2])) ? v : b), null);
+      return { z: floor ?? t.to[2], loose: floor === null };
+    }
+    return null;
+  }
+
   // ---- riding --------------------------------------------------------------------------------
   /** The route carrying you right now, or null. */
   #riding(me, now) {
@@ -214,6 +272,8 @@ export class HeightTracker {
     for (const s of standable(this.#surfaces(me.x, me.y, me).all)) if (Math.abs(s - expect) <= LAND_REACH && (near === null || Math.abs(s - expect) < Math.abs(near - expect))) near = s;
     this.z = near ?? expect;
     this.loose = near === null; // nothing there (yet): hold this height until a surface comes within reach
+    // (a boat or a zeppelin has not set you down at all: it has slowed for its stop, with you on its deck - see update)
+    this.aboard = this.loose && !ride.flight && !ride.lost && ride.path ? ride : null;
     this.sure = near !== null;
     this.how = near !== null ? 'landed' : 'set down';
   }
@@ -248,10 +308,16 @@ export class HeightTracker {
       // Set down where the map had no surface: take the nearest real one once it is within reach.
       let near = null;
       for (const s of can) if (Math.abs(s - from) <= LAND_REACH && (near === null || Math.abs(s - from) < Math.abs(near - from))) near = s;
-      if (near !== null) { this.loose = false; this.gap = 0; this.sure = true; this.how = 'landed'; return near; }
+      if (near !== null) { this.loose = false; this.aboard = null; this.gap = 0; this.sure = true; this.how = 'landed'; return near; }
+      // (still on the deck of what carried you: nothing has been walked on nothing yet)
+      if (this.aboard) return from;
       this.gap += moved;
       if (this.gap < HOLD_MAX) return from;
-      this.loose = false; // walked a long way on nothing: give up and take what is there
+      // Walked a long way on nothing: given up. What is nearest the height you were held at is
+      // where you are - the tower's platform a little over the deck, not the ground far under it.
+      this.loose = false;
+      const nearest = can.reduce((b, v) => (b === null || Math.abs(v - from) < Math.abs(b - from) ? v : b), null);
+      if (nearest !== null) { this.gap = 0; this.lost = 0; this.how = 'landed'; return nearest; }
     }
     let same = null, up = null, below = null, above = null;
     for (const z of can) {
@@ -303,7 +369,7 @@ export class HeightTracker {
     this.z = best ?? z;
     this.at = [x, y];
     this.gap = 0; this.lost = 0;
-    this.loose = false; this.unsure = false; this.airborne = false;
+    this.loose = false; this.aboard = null; this.unsure = false; this.airborne = false;
     this.sure = true;
     this.how = 'next to someone';
     return this.z;
@@ -378,6 +444,9 @@ export class HeightTracker {
    * @returns your height in yards
    */
   update(me, now = performance.now()) {
+    // (the readings that have come since the last look: for telling a leap through a portal - #hopped)
+    const since = this.heard;
+    if (this.track.length) this.heard = this.track[this.track.length - 1].t;
     if (me.z !== null && me.z !== undefined) { this.pending = false; this.z = me.z; this.at = [me.x, me.y]; this.how = 'game'; return me.z; }
     this.#pace(now);
 
@@ -386,6 +455,7 @@ export class HeightTracker {
       this.ride = ride;
       this.pending = false;
       this.loose = false;
+      this.aboard = null;
       this.gap = 0;
       this.unsure = false;
       this.sure = false;
@@ -395,6 +465,14 @@ export class HeightTracker {
       return this.z;
     }
     if (this.ride) { const r = this.ride; this.ride = null; this.#land(me, r); }
+    // Slowed down for its stop, a boat or zeppelin has not put you anywhere yet: for as long as
+    // you are on its line you are on its deck, at its height. (Where the map has something to
+    // stand on within reach of that - its tower, its pier - you have stepped onto it: #step.)
+    if (this.loose && this.aboard) {
+      const m = this.app.routes?.nearest(me.map, me.x, me.y, this.aboard, ABOARD) ?? null;
+      if (m && m.route === this.aboard.route) { this.aboard = m; this.z = m.z; this.gap = 0; this.how = 'aboard'; }
+      else this.aboard = null; // off its line: from here on it is as with anything the map does not have
+    }
 
     // Flying under your own control: nothing says how high. Keep the last height (never below
     // the ground) and start afresh where you land.
@@ -407,7 +485,20 @@ export class HeightTracker {
       this.how = 'flying';
       return this.z;
     }
-    if (this.airborne) { this.airborne = false; this.z = null; }
+    if (this.airborne) { this.airborne = false; this.aboard = null; this.z = null; }
+
+    // Through a portal to another floor: there is no way in between to retrace.
+    const hop = this.#hopped(me, since);
+    if (hop) {
+      this.pending = false;
+      this.z = hop.z;
+      this.at = [me.x, me.y];
+      this.gap = 0; this.lost = 0;
+      this.loose = hop.loose; this.aboard = null; this.unsure = false;
+      this.sure = !hop.loose;
+      this.how = 'through a portal';
+      return this.z;
+    }
 
     const here = this.#surfaces(me.x, me.y, me);
     this.pending = here.pending;

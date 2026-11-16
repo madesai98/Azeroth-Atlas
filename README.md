@@ -32,9 +32,10 @@ Then:
 Nothing of the game is in what you download: the map is built on your computer, from your own
 installation, read-only. Closing the window closes everything. What is yours is kept apart from
 the application, in `%LOCALAPPDATA%\Azeroth Atlas`: your settings (`config.json`), the map
-data unless you chose another place for it, and a log of what the map's server said
-(`server.log`, in place of a terminal). So a newer copy of the application can take the place
-of the old one, or be put anywhere else, and nothing is lost.
+data unless you chose another place for it, a log of what the map's server said
+(`server.log`, in place of a terminal), and its notes of what it did (`logs`: see "Reporting a
+problem"). So a newer copy of the application can take the place of the old one, or be put
+anywhere else, and nothing is lost.
 
 **Rather not install anything?** The file **Azeroth-Atlas-win-x64.zip** on the same page is the
 same application as a folder: unpack it somewhere of your own (your Documents or Desktop: not
@@ -442,6 +443,13 @@ knows, quests go by side and level as before.
 
 ### Dungeons
 
+A map that is one building - a dungeon, the Deeprun Tram's tunnel - has that building placed
+from the middle of the world, where everything on a map with ground is placed from the map's
+corner. (Until version 0.3.5 the map tool placed it from the corner too: the building stood
+17,067 yards north and west of everyone in it, and from where you stood in the tram's tunnel
+there was nothing to see but your arrow and the tram's cars. The page now puts right a map
+built so, without its being built again.)
+
 A dungeon has no zone map to give a spot on, so QuestieDB lists who is inside but not where. On
 any map where it places nothing (dungeons, raids, the Deeprun Tram, the PvP halls), the
 reference database's spawns are used outright, for the creatures and quest objects QuestieDB
@@ -616,6 +624,16 @@ section, where each also says how long it is:
   on the game's map, a click on this one. Each new one takes the place of the one before.
 - The tracked quest's route needs the NPC data of the map you are on (what a quest asks for is
   looked up there), so it reaches what is on your continent.
+- **A quest that is done inside a dungeon is led to the dungeon's door.** Nothing it asks for is
+  on the map you stand on outside, and in a dungeon new to this game nobody can be placed at
+  all; the route used to go to who takes the quest then, with nothing of it done ("Old Ironforge
+  Incursion: hand in to King Magni Bronzebeard", for a head still on its owner's shoulders in
+  the Hall of Thanes). QuestieDB files a quest under its dungeon and lists where each dungeon
+  is entered from (63 of them have a door in this game's world); the map's data has those doors
+  (`world.json`: `dungeons`), and the route goes to the nearest: "Old Ironforge Incursion: The
+  Hall of Thanes, the way in". A door is a spot on a zone's map, with no height: where there are
+  several levels there, the route ends on the one the walk reaches. Inside the dungeon the game
+  hides where you are, and there is no route.
 - **The tracked quest's route moves on as the quest does.** The addon reports how far the
   quest has got, as the game's own list of what it asks for has it: when one thing is done the
   route goes to the nearest of what is left, and when all of it is done, to who takes it. What
@@ -759,9 +777,12 @@ zones" for why going round them was taken out).
   plus the cast, and is only suggested when it saves at least a minute and a half over the next
   best way. The game tells an addon only the name of the place it is set to ("Deepwater
   Tavern"), so the inn is found from that: the zone the place is in, then the innkeeper of that
-  zone who is on your side (innkeepers come from QuestieDB). Where a zone has more than one and
-  the name does not settle it, the hearthstone is left out until you set it again, when the
-  addon notes the exact spot. **You can have it left out altogether**: the small hearthstone
+  zone who is on your side (innkeepers come from QuestieDB). Where a zone has more than one,
+  it is the one whose keeper stands in the place of that name - the game's own area under their
+  feet: of Zephras Isle's two inns, the one in Valanaar - else the one beside a flight master
+  or a landmark so called. Where that does not settle it, the hearthstone is left out until you
+  set it again, when the addon notes the exact spot, and the page says under the routes that it
+  is left out and why. **You can have it left out altogether**: the small hearthstone
   beside "Routes" in the game (a click strikes it through), `/atlas hearth`, or the addon's
   options - every route is then worked out without it, and you get the next quickest way. The
   page says so under the routes while that is on.
@@ -1487,7 +1508,19 @@ or indoors, and from what the map data knows.
 in the game data as 3D points, and the map follows the same curve through them. Where it sets
 you down you are on the ground at the flight master's height, which is also in the data, so you
 arrive on the platform and not under the city. Zeppelins and boats have no such flag, so they
-are recognised by moving along one of their routes faster than you can travel yourself.
+are recognised by moving along one of their routes faster than you can travel yourself. A
+zeppelin slows to a crawl long before its tower: once it has been carrying you, you are on its
+deck, at its route's height, for as long as you are on its line - until you step onto something
+the map has within reach of that height (the tower's platform), and not, as it was, onto the
+ground far under the ship after twenty yards of crawling.
+
+**Through a portal to another floor** of the same building (the one at the top of Stormwind's
+Mage Tower, into the Wizard's Sanctum under it, and the one back out) you move a few yards
+across the map and a long way up or down, in no time. Nothing the game reports says so, and
+retraced as a walk it would leave you on the floor you came from. The map knows those portals
+and where they put you down (`viewer/teleports.json`: where each takes hold is in the game's
+files, where it leads is not): at one's doorstep on its level, then all at once where it puts
+you down, faster than anything carries you on the ground, you have gone through.
 
 **Walking**, the map retraces the way from your previous position in quarter-yard steps over
 the surfaces you could be standing on (the terrain, the floors, stairs and bridges in the
@@ -1866,6 +1899,71 @@ The map is built from your own installed game. What else it draws on, and where 
 | Auction prices | **Blizzard Entertainment**'s game data (its API for developers) | Read hourly by a scheduled function of the database's own; in the database for 30 days, not in the download |
 | How often and how fast an item sells; a second opinion on its price | **TradeSkillMaster**'s public price files (tradeskillmaster.com) | Fetched by each copy for itself. Not included |
 | Facts in the Atlas database marked `w`: what a creature or quest is, and where QuestieDB is silent | **Wowhead** (wowhead.com/forever) | Read by the database's maintainer; in the database, not in the download |
+
+## Reporting a problem
+
+When something does not work as it should, **Report a problem** (bottom left of the map, under
+"Check for updates"; also on the page that says the map has stopped) opens a window to say what
+went wrong in. Your words go into **one zip file**, together with everything that may help
+whoever looks into it, and you are asked where to save it. **Nothing is sent anywhere**: the
+file is yours to pass on. Making it takes a few seconds; it is a few hundred kilobytes.
+
+**Is it about the game?** Type `/reload` in the game before you save the report. The addon
+keeps notes of what it did, and the game writes what an addon has saved to the disk only on a
+/reload or when you log out. The window says how long ago that last was.
+
+What goes in (`report.txt`, the first file in the zip, lists every file and whatever was left
+out, and why):
+
+| In the zip | What it is |
+| --- | --- |
+| `report.txt` | what you wrote, and a summary of all the rest |
+| `timeline.txt` | every note below as one list, in the order things happened: the server's, the page's and the addon's own, side by side |
+| `computer/` | the version of Windows, processor, memory, graphics card and its driver, drives and how full they are, the antivirus program, and the names of the programs running (an overlay or a capture program can be in the strip's way) |
+| `atlas/` | this copy of Azeroth Atlas: its version, a digest of each of its own files (a file gone wrong in an update shows), `config.json`, what the server knew at that moment (the game, the addon, your character as the game reported it, your quest log), its notes, what the page was showing (where you were, each route and how it was taken to go, what the game had been handed) with a picture of the map, and the route mailboxes as they stood |
+| `game/` | the game's build and its settings, the addons installed and which are switched on, what the Azeroth Atlas addon has saved (its own notes among it), what the addons it works with have saved (Questie, Guidelime and guide packs, TomTom, ShortestPathForever, DockWatch and the like), the game's own logs about itself and its addons, the beginning of its last three crash reports, and its cache of what the server told it about creatures, objects and quests |
+
+**What never goes in:** account names (an account's folder is called `account-1` in the zip,
+and the name is struck from every text), passwords and anything like one, e-mail addresses, your
+Windows user name and the computer's name (struck from paths and texts: a path begins at
+`%USERPROFILE%`), the game's chat and combat logs and its logs about your account, your
+macros, crash dumps, anything of the game itself. Character and realm names do go in: the game
+keeps what addons save under them. What every *other* addon has saved goes in only if you tick
+it (it may hold whatever those addons keep, chat included), and so does the game's cache of
+hotfixes (several megabytes).
+
+**Where it is saved.** In the application, its own "Save as" window; in a browser, the
+browser's (or, where it has none, your downloads). With the map's server not up at all, the
+application's starting page offers the same report once it has waited a while, made by the
+application itself; and from a terminal it is `npm run report` (`node server/report.js
+--out=report.zip --text="what went wrong"`).
+
+### The notes it keeps
+
+So that there is something to go by when a thing went wrong and nobody was looking, each part
+notes what it does - a line for every *change*, not for every yard walked:
+
+- **the server** (`events.log`): the game found or lost and how its strip is read, where the
+  game says you are (twice a minute) and what you are heading for, your quest log and the quest
+  you track as they change, how you can travel (your hearthstone as the game names it, your
+  flight points), each route the page hands over and each delivery put in the mailboxes, what
+  the game says of its mailboxes (which it opened, which delivery it read), updates, map
+  builds, errors. The application adds what only it knows: a page or a helper of its own that
+  crashed, and (`app.json`) the graphics card and the screens;
+- **the page** (`page.log`, sent on to the server as it goes, so that it outlasts the page
+  loading itself again): where each route is heading and which way it is taken to go ("lead:
+  hearth, then walk"), with what was looked for and how long it took; what the game is handed;
+  the graphics card; every warning and error;
+- **the addon** (with what it saves for the character; `/atlas log` shows the last of it):
+  each mailbox opened, which delivery was in it and what was made of it, the waypoint and what
+  else you could head for as they change, the quest you track moving on - and every mistake
+  caught in its own code. The addon does much of what it does so that a mistake cannot stop
+  the rest; such a mistake used to be seen by nobody, the route simply staying as it was.
+
+They are kept beside `config.json`, in `logs` (the installed application's:
+`%LOCALAPPDATA%\Azeroth Atlas\logs`; run from the source, `server/.build/logs`), each file
+to two megabytes with the one before it kept beside it - some days of playing. Nothing in them
+leaves the computer unless you make a report and pass it on.
 
 ## If the map does not come up
 

@@ -10,7 +10,10 @@
 //     simply shows that one;
 //   - it shows the page in a window of its own, remembers where the window was, and opens
 //     links that lead elsewhere in your browser;
-//   - closed, it takes the server with it.
+//   - closed, it takes the server with it;
+//   - it gives the page a "Save as" window of its own for "Report a problem" (preload.cjs), and
+//     notes what only it can know: which graphics card and screens there are, a page or a
+//     helper of its own that has crashed (written beside the server's notes: server/log.js).
 //
 // As an installed application (packaged), what is yours is kept outside the application's own
 // folder, in %LOCALAPPDATA%\Azeroth Atlas: config.json, the map data (unless config.json names
@@ -20,7 +23,8 @@
 // The application's own files are plain files (resources/app), and the map tool keeps them up
 // to date by itself as ever (server/appupdate.js). When this file is among the ones updated,
 // the application starts itself again.
-const { app, BrowserWindow, Menu, shell, screen } = require('electron');
+const { app, BrowserWindow, Menu, shell, screen, dialog, ipcMain } = require('electron');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
@@ -52,6 +56,20 @@ if (HOME) {
 }
 const LOG = HOME ? path.join(HOME, 'server.log') : path.join(ROOT, 'server', '.build', 'app.log');
 const STATE = path.join(app.getPath('userData'), 'window.json');
+// The notes of what happened (server/log.js says where they are kept, and this goes by the same rule).
+const LOGS = (() => {
+  const home = configArg ? path.dirname(path.resolve(configArg.slice(9))) : HOME ?? ROOT;
+  return home === ROOT ? path.join(ROOT, 'server', '.build', 'logs') : path.join(home, 'logs');
+})();
+/** Note something of the application's own, as the server notes what it does (the same file, the same shape of line). */
+function noted(text, data) {
+  try {
+    fs.mkdirSync(LOGS, { recursive: true });
+    let more = '';
+    if (data !== undefined) { try { more = ` ${JSON.stringify(data)}`.slice(0, 4000); } catch { /* said without */ } }
+    fs.appendFileSync(path.join(LOGS, 'events.log'), `${new Date().toISOString()} app      ${String(text).replace(/\r?\n/g, ' ')}${more}\n`);
+  } catch { /* nowhere to write it */ }
+}
 
 function port() {
   const file = configArg ? path.resolve(configArg.slice(9)) : path.join(HOME ?? ROOT, 'config.json');
@@ -102,10 +120,11 @@ function startServer() {
   mine.stdout.on('data', (c) => note(c.toString()));
   mine.stderr.on('data', (c) => note(c.toString()));
   mine.on('message', (m) => { if (typeof m?.busy === 'boolean') { busy = m.busy; if (!busy && renew) again(); } });
-  mine.on('exit', (code) => {
+  mine.on('exit', (code, signal) => {
     if (child !== mine) return;
     child = null;
     busy = false;
+    noted(code === AGAIN ? 'the map\'s starter asks to be started again (it has been updated)' : 'the map\'s starter has gone', { code, signal, closing: quitting });
     if (quitting) return;
     if (code === AGAIN) { startServer(); return; }
     if (code === PORT_TAKEN) note(`Port ${PORT} is in use by another program.\n`);
@@ -155,7 +174,7 @@ function open() {
   win = new BrowserWindow({
     ...b, minWidth: 720, minHeight: 480, title: NAME, backgroundColor: '#0b0e14', show: false, autoHideMenuBar: true,
     icon: path.join(__dirname, 'icon.ico'),
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, 'preload.cjs') },
   });
   if (b.maximized) win.maximize();
   // (AZEROTH_ATLAS_HIDDEN: for the tests, which run it while the game is being played on the same
@@ -174,7 +193,9 @@ function open() {
   // A link that leads somewhere else opens in your browser; the window itself stays on the map.
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(URL_) && !url.startsWith('file:')) { e.preventDefault(); if (/^https:\/\//i.test(url)) shell.openExternal(url); } });
-  win.webContents.on('did-fail-load', (e, code, text, url, main) => { if (main && showing === 'map') loading(); });
+  win.webContents.on('did-fail-load', (e, code, text, url, main) => { if (main) noted('the page could not be loaded', { code, text, url, showing }); if (main && showing === 'map') loading(); });
+  win.on('unresponsive', () => noted('the window has stopped answering'));
+  win.on('responsive', () => noted('the window answers again'));
   win.webContents.on('before-input-event', (e, input) => {
     if (input.type !== 'keyDown') return;
     if (input.key === 'F5' || (input.control && input.key.toLowerCase() === 'r')) { e.preventDefault(); if (showing === 'map') win.webContents.reload(); }
@@ -213,10 +234,86 @@ async function watch() {
   setTimeout(watch, up ? 4000 : 700);
 }
 
+// ---- "Report a problem": where to save it, asked in a window of the application's own ------------
+// The page asks (preload.cjs), is given a token for the place you chose, and hands over what is
+// to be written there. So a page can only ever write the one file you named, once.
+const places = new Map(); // token -> { file, written }
+let lastFolder = null;
+const ownPage = (e) => { const url = e.senderFrame?.url ?? ''; return !!win && e.sender === win.webContents && (url.startsWith(URL_) || url.startsWith('file:')); };
+async function chooseSave(name) {
+  const safe = String(name).replace(/[\\/:*?"<>|]+/g, '-').slice(0, 120) || 'Azeroth-Atlas-report.zip';
+  let file = null;
+  // (for the tests, which cannot press a button in a window of Windows' own)
+  if (process.env.AZEROTH_ATLAS_SAVE_TO) file = path.join(process.env.AZEROTH_ATLAS_SAVE_TO, safe);
+  else {
+    let folder = lastFolder;
+    if (!folder || !fs.existsSync(folder)) { try { folder = app.getPath('desktop'); } catch { folder = app.getPath('home'); } }
+    const r = await dialog.showSaveDialog(win, { title: 'Save the report', defaultPath: path.join(folder, safe), buttonLabel: 'Save', filters: [{ name: 'Zip file', extensions: ['zip'] }], properties: ['createDirectory', 'showOverwriteConfirmation'] });
+    if (r.canceled || !r.filePath) return null;
+    file = /\.zip$/i.test(r.filePath) ? r.filePath : `${r.filePath}.zip`;
+  }
+  lastFolder = path.dirname(file);
+  const token = crypto.randomBytes(12).toString('hex');
+  places.set(token, { file, written: false });
+  return { token, file };
+}
+ipcMain.handle('atlas:save', async (e, name) => (ownPage(e) ? chooseSave(name) : null));
+ipcMain.handle('atlas:write', async (e, token, data) => {
+  const place = places.get(token);
+  if (!ownPage(e) || !place || place.written) return { error: 'no place was chosen for it' };
+  try {
+    const bytes = Buffer.from(data instanceof ArrayBuffer ? data : data?.buffer ?? []);
+    if (bytes.length < 22 || bytes.readUInt32LE(0) !== 0x04034b50) return { error: 'what was to be saved is not a report' };
+    fs.writeFileSync(place.file, bytes);
+    place.written = true;
+    noted('a report was saved', { bytes: bytes.length });
+    return { file: place.file, bytes: bytes.length };
+  } catch (err) { noted('a report could not be saved', { error: err.message }); return { error: err.message }; }
+});
+ipcMain.handle('atlas:reveal', async (e, token) => { const place = places.get(token); if (ownPage(e) && place?.written) shell.showItemInFolder(place.file); return !!place?.written; });
+// With the map's server not up there is no page to make a report from: the application has the
+// same report made by a program of its own (server/report.js, run from a terminal as it were).
+ipcMain.handle('atlas:report', async (e, text) => {
+  if (!ownPage(e)) return null;
+  const d = new Date(), p = (v) => String(v).padStart(2, '0');
+  const place = await chooseSave(`Azeroth-Atlas-report-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.zip`);
+  if (!place) return null;
+  const words = `${String(text).slice(0, 4000)}\n\n(Made from the application's starting page: the map's server was not up. What it had said by then:)\n${said.join('\n')}`;
+  return new Promise((resolve) => {
+    let out = '';
+    const maker = fork(path.join(ROOT, 'server', 'report.js'), [`--out=${place.file}`, `--text=${words}`, ...(configArg ? [configArg] : [])], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe', 'ipc'], windowsHide: true, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
+    const late = setTimeout(() => { try { maker.kill(); } catch { /* gone */ } }, 90000);
+    maker.stdout.on('data', (c) => { out += c; });
+    maker.stderr.on('data', (c) => { out += c; });
+    maker.on('error', (err) => { clearTimeout(late); resolve({ error: err.message }); });
+    maker.on('exit', (code) => {
+      clearTimeout(late);
+      const ok = code === 0 && fs.existsSync(place.file);
+      if (ok) places.get(place.token).written = true;
+      noted(ok ? 'a report was made from the starting page' : 'a report could not be made from the starting page', { code, said: ok ? undefined : out.slice(-800) });
+      resolve(ok ? { file: place.file, token: place.token } : { error: out.trim().split('\n').pop() || `the report's maker ended with code ${code}` });
+    });
+  });
+});
+
+/** What only the application can say of the computer: written down once it is up, for a report to take (logs/app.json). */
+function describe() {
+  const out = {
+    at: new Date().toISOString(), application: app.getVersion(), installed: app.isPackaged, electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node,
+    program: process.execPath, folder: ROOT, home: HOME, port: PORT, args: args.filter((a) => a !== ROOT),
+    screens: screen.getAllDisplays().map((d) => ({ size: [d.size.width, d.size.height], at: [d.bounds.x, d.bounds.y], scale: d.scaleFactor, hz: d.displayFrequency, colourDepth: d.colorDepth, primary: d.id === screen.getPrimaryDisplay().id, rotation: d.rotation || undefined })),
+    graphics: app.getGPUFeatureStatus(),
+  };
+  const write = () => { try { fs.mkdirSync(LOGS, { recursive: true }); fs.writeFileSync(path.join(LOGS, 'app.json'), JSON.stringify(out, null, 1)); } catch { /* not written down */ } };
+  write();
+  app.getGPUInfo('basic').then((info) => { out.graphicsCards = info?.gpuDevice ?? null; out.graphicsMore = info?.auxAttributes ?? null; write(); }, () => {});
+}
+
 /** This file has been updated (the map tool updates itself): the application starts again, once nothing is being cut short. */
 function again() {
   if (quitting) return;
   quitting = true;
+  noted('the application starts itself again: its own files have been updated');
   remember();
   stopServer().then(() => { app.relaunch(); app.exit(0); });
 }
@@ -225,8 +322,13 @@ function again() {
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
+  // (a page or a helper of the application's own that has gone: what a map that "just went black" comes down to)
+  app.on('render-process-gone', (e, contents, details) => noted('the page has crashed', { reason: details.reason, code: details.exitCode }));
+  app.on('child-process-gone', (e, details) => noted(`a helper of the application has gone: ${details.type}`, { reason: details.reason, code: details.exitCode, name: details.name ?? details.serviceName }));
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
+    noted('the application has started', { version: app.getVersion(), installed: app.isPackaged, electron: process.versions.electron, port: PORT });
+    try { describe(); } catch (err) { noted('what the application knows of this computer could not be written down', { error: err.message }); }
     open();
     watch();
     try {
@@ -241,6 +343,7 @@ else {
   app.on('window-all-closed', () => {
     if (quitting) return;
     quitting = true;
+    noted('the window was closed: the application goes');
     stopServer().then(() => app.quit());
   });
   app.on('before-quit', () => { quitting = true; if (child) { try { child.send({ quit: true }); } catch { /* gone */ } } });

@@ -9,6 +9,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { decodeStrip, NameCache, MAX_BLOCKS } from './strip.js';
+import { note, changed } from './log.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SOURCE = path.join(HERE, 'strip-reader.cs');
@@ -16,6 +17,8 @@ const BUILD_DIR = path.join(HERE, '.build');
 const ROW = 2;                         // pixel row inside the 6 px tall strip
 const WIDTH = MAX_BLOCKS * 6 + 80;     // room for squares up to 1.5x their intended width
 const LOST_AFTER_MS = 700;             // nothing readable for this long = signal lost
+const WHERE_EVERY = 30000;             // how often where you are is noted (log.js), while the game is heard from
+const READS_EVERY = 60000;             // ...and how the reading of the strip has gone, where some of it could not be read
 
 /** Compile the helper with the C# compiler that is part of Windows (no downloads, no installs). */
 export function ensureReader() {
@@ -68,6 +71,8 @@ export class PlayerTracker {
     this.quests = { rev: 0, log: null, done: null }; // your quest log and the quests you have done (see /api/player/quests)
     this.questSig = '';
     this.sent = '';
+    this.reads = { ok: 0, bad: {}, since: Date.now(), first: true }; // how reading the strip has gone, for the notes (log.js)
+    this.whereAt = 0;
   }
 
   // ---- subscribers (server-sent events) ---------------------------------------------------
@@ -75,6 +80,7 @@ export class PlayerTracker {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' });
     res.write('retry: 2000\n\n');
     this.clients.add(res);
+    if (this.clients.size === 1) note('link', 'a map page is listening');
     clearTimeout(this.stopTimer);
     if (!this.child) this.#start();
     res.write(`data: ${JSON.stringify(this.state)}\n\n`);
@@ -83,7 +89,7 @@ export class PlayerTracker {
       clearInterval(ping);
       this.clients.delete(res);
       // Nobody is looking at the map any more: stop watching the screen.
-      if (!this.clients.size) this.stopTimer = setTimeout(() => this.stop(), 8000);
+      if (!this.clients.size) { note('link', 'no map page is listening any more'); this.stopTimer = setTimeout(() => this.stop(), 8000); }
     });
   }
 
@@ -101,6 +107,8 @@ export class PlayerTracker {
       this.mail.setLive(this.state.status === 'live');
       this.state.mail = this.mail.status();
     }
+    const s = this.state;
+    if (changed('link', [s.status, s.reason, s.capture])) note('link', `${s.status}${s.reason ? `: ${s.reason}` : ''}`, { capture: s.capture, window: s.window, strip: s.strip ?? null });
     this.#publish();
   }
 
@@ -112,16 +120,22 @@ export class PlayerTracker {
   // ---- helper process ----------------------------------------------------------------------
   #start() {
     let exe;
-    try { exe = ensureReader(); } catch (err) { this.#set({ status: 'error', reason: err.message.split('\n')[0] }); return; }
+    try { exe = ensureReader(); } catch (err) { note('link', 'the helper that reads the game window could not be built', { error: String(err.message).slice(0, 1500), output: String(err.stdout ?? '').slice(0, 1500) }); this.#set({ status: 'error', reason: err.message.split('\n')[0] }); return; }
     const o = this.opts;
     const args = [o.processNames.join(','), o.pathHint || '-', String(process.pid), String(WIDTH), String(ROW), String(o.intervalMs)];
     if (o.fixed) args.push(String(o.fixed[0]), String(o.fixed[1]));
     this.#set({ status: 'starting', reason: null });
     const child = spawn(exe, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     this.child = child;
+    note('link', 'watching for the game', { helper: path.basename(exe), looksFor: o.processNames, in: o.pathHint || null, every: o.intervalMs, fixed: o.fixed });
+    this.reads = { ok: 0, bad: {}, since: Date.now(), first: true };
     readline.createInterface({ input: child.stdout }).on('line', (line) => this.#line(line));
-    child.on('error', (err) => { if (this.child === child) { this.child = null; this.#set({ status: 'error', reason: err.message }); } });
-    child.on('exit', () => {
+    // (what the helper has to say for itself when something is wrong with it)
+    let grumble = '';
+    child.stderr.on('data', (c) => { grumble = (grumble + c).slice(-1500); });
+    child.on('error', (err) => { note('link', 'the helper could not be started', { error: err.message }); if (this.child === child) { this.child = null; this.#set({ status: 'error', reason: err.message }); } });
+    child.on('exit', (code, signal) => {
+      if (this.child === child || grumble) note('link', 'the helper stopped', { code, signal, said: grumble || undefined, meant: this.child !== child });
       if (this.child !== child) return;
       this.child = null;
       if (!this.clients.size) return;
@@ -134,9 +148,50 @@ export class PlayerTracker {
     const child = this.child;
     this.child = null;
     child?.kill();
+    if (child) note('link', 'the game is no longer watched (no map page is open)');
+    changed('link', 'off');
     this.state = { ...this.state, status: 'off', reason: null };
     this.mail?.setLive(false);
     this.sent = '';
+  }
+
+  /** How reading the strip goes: the first reading, and from then on whatever could not be read. */
+  #noteReads(d) {
+    const r = this.reads, now = Date.now();
+    if (d.ok) {
+      r.ok++;
+      if (r.first) { r.first = false; note('link', 'the strip is read', { addonSpeaks: d.version, squareWidth: d.blockWidth, squares: d.blocks }); }
+    } else r.bad[d.reason] = (r.bad[d.reason] ?? 0) + 1;
+    if (now - r.since < READS_EVERY) return;
+    if (Object.keys(r.bad).length) note('link', 'readings of the strip in the last minute', { read: r.ok, not: r.bad });
+    r.ok = 0; r.bad = {}; r.since = now;
+  }
+
+  /** What the game says of you, noted where it has changed (and where you are, now and then). */
+  #noteGame(d, player) {
+    const round = (v) => (Number.isFinite(v) ? Math.round(v * 10) / 10 : v);
+    const spot = (s) => (s ? [s.map, round(s.x), round(s.y)] : null);
+    const now = Date.now();
+    // (looked at four times a second, not with every reading: what has changed is still so a moment later)
+    if (now - (this.notedAt ?? 0) < 250) return;
+    this.notedAt = now;
+    const where = { map: player.map, mode: player.mode, zone: player.zone, level: player.level, dead: player.dead, taxi: player.taxi, inInstance: player.inInstance, faction: player.faction };
+    if (changed('where', where) || now - this.whereAt > WHERE_EVERY) {
+      this.whereAt = now;
+      note('game', 'you are at', { ...where, x: round(player.x), y: round(player.y), z: round(player.z), facing: round(player.facing), indoors: player.indoors, swimming: player.swimming || undefined, falling: player.falling || undefined, flying: player.flying || undefined, mounted: player.mounted || undefined });
+    }
+    const target = d.target ? { kind: d.target.kind, at: spot(d.target) } : null;
+    if (changed('target', target)) note('game', target ? `the game heads for a waypoint (kind ${target.kind}: 1 guide, 2 journey, 3 pin, 4 quick)` : 'the game has no waypoint', target ?? undefined);
+    const h = this.names.heads();
+    if (changed('heads', h)) note('game', 'what you could be heading for', h ? { guide: spot(h.guide), waypoint: spot(h.waypoint), corpse: spot(h.corpse), quest: h.quest, tracked: h.tracked } : { said: false });
+    if (changed('quests', this.quests.rev)) note('game', 'your quest log', { rev: this.quests.rev, log: this.quests.log?.map((q) => `${q.id}:${q.state}`) ?? null, done: this.quests.done?.length ?? null });
+    const t = this.names.travel();
+    const travel = t ? { hearth: { has: t.hearth.has, avoid: t.hearth.avoid, ready: t.hearth.cooldown === 0, known: t.hearth.cooldown !== null, name: t.hearth.name, spot: t.hearth.x === null ? null : [t.hearth.map, round(t.hearth.x), round(t.hearth.y)] }, flights: t.flights ? t.flights.length : null } : null;
+    if (changed('travel', travel)) note('game', 'how you can travel', travel ? { ...travel, run: t.run, swim: t.swim, cooldown: t.hearth.cooldown, flightPoints: t.flights } : { said: false });
+    const choice = this.names.choice();
+    if (changed('choice', choice) && choice) note('game', 'you chose a level in the game', choice);
+    const transit = this.names.transit();
+    if (changed('transit', transit ? Object.keys(transit.lines).filter((n) => transit.lines[n]).join(',') : null)) note('game', 'boats, zeppelins and the tram: the lines whose times are known', transit ? { clock: transit.clock, lines: Object.fromEntries(Object.entries(transit.lines).filter(([, l]) => l).map(([n, l]) => [n, `${l.src} ±${l.unsure}s`])) } : { said: false });
   }
 
   #line(line) {
@@ -158,6 +213,7 @@ export class PlayerTracker {
     if (!line.startsWith('P ')) return;
     const px = Buffer.from(line.slice(2), 'hex');
     const d = decodeStrip(px, Math.floor(px.length / 3));
+    this.#noteReads(d);
     if (!d.ok) {
       // A single unreadable frame is normal (the screen can be read mid-update). Nothing
       // readable for most of a second means the strip really is not visible.
@@ -186,7 +242,7 @@ export class PlayerTracker {
         const p = this.pending;
         const confirmed = p && p.map === player.map && p.mode === player.mode && (player.mode !== 'world' || Math.hypot(player.x - p.x, player.y - p.y) < 60);
         this.pending = player;
-        if (!confirmed) return;
+        if (!confirmed) { if (!p) note('game', 'you seem to be somewhere else all at once: believed when the next reading agrees', { from: [prev.map, Math.round(prev.x), Math.round(prev.y)], to: [player.map, Math.round(player.x), Math.round(player.y)] }); return; }
       }
     }
     this.pending = null;
@@ -198,7 +254,8 @@ export class PlayerTracker {
     }
     // who you are talking to (the addon repeats it for half a minute; a new meeting has a new number)
     const met = this.names.talk();
-    if (met && (!this.talk || this.talk.seq !== met.seq || this.talk.id !== met.id || this.talk.object !== met.object)) this.talk = { id: met.id, seq: met.seq, object: met.object, at: Date.now() - met.age * 1000 };
+    if (met && (!this.talk || this.talk.seq !== met.seq || this.talk.id !== met.id || this.talk.object !== met.object)) { this.talk = { id: met.id, seq: met.seq, object: met.object, at: Date.now() - met.age * 1000 }; note('game', `you opened the window of ${met.object ? 'object' : 'NPC'} ${met.id}`); }
+    this.#noteGame(d, player);
     this.#set({
       status: 'live', reason: null, player, talk: this.talk, heads: this.names.heads(),
       // (the lists themselves are fetched when this changes: they are long, and this goes out many times a second)

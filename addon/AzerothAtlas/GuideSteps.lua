@@ -396,7 +396,7 @@ local function AtSpot(e)
   local away = (north - e.north) ^ 2 + (west - e.west) ^ 2
   local there = nil
   if shared.There then
-    local ok, answer = pcall(shared.There, e.radius, e.map, e.north, e.west)
+    local ok, answer = shared.Try("there", shared.There, e.radius, e.map, e.north, e.west)
     if ok then there = answer end
   end
   if there == nil then return away <= e.radius * e.radius end
@@ -767,7 +767,7 @@ frame:SetScript("OnUpdate", function(_, dt)
   -- the window (GuideWindow.lua), when what it shows has changed
   if shared.GuideShow and shownRev ~= run.rev then
     shownRev = run.rev
-    pcall(shared.GuideShow)
+    shared.Try("guide window", shared.GuideShow)
   end
 end)
 

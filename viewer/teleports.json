@@ -1,0 +1,7 @@
+{
+  "about": "Places where a step takes you somewhere else on the same map: a portal between two floors of one building. The game tells an addon where you are on the map and never how high, and such a portal moves you a few yards across the map and a long way up or down - so the map has to know of it to follow you through (viewer/js/height.js). 'from' is where the game's own trigger is (its AreaTrigger table: world.json has them all, with their radius) and 'to' is where it puts you down, which the game's files do not say: the server decides. Each entry is one way; a portal that works both ways is two.",
+  "teleports": [
+    { "name": "Stormwind, the Mage Tower: the portal at the top of the ramp, into the Wizard's Sanctum", "map": 0, "trigger": 704, "from": [-9020.09, 880.502, 151.576], "radius": 7, "to": [-9019.16, 887.6, 29.62] },
+    { "name": "Stormwind, the Wizard's Sanctum: the portal back out, to the top of the Mage Tower's ramp", "map": 0, "trigger": 702, "from": [-9023.26, 892.398, 33.51], "radius": 7, "to": [-9015.97, 875.74, 148.62] }
+  ]
+}

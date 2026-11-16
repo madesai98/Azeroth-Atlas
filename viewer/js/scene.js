@@ -11,6 +11,25 @@ const KIND_INDEX = { water: 1, ocean: 2, magma: 3, slime: 4 };
 const NO_WATER = -1e8;
 const SEA_PAD = 5;    // how far beyond its land a map's open sea is drawn, in squares of its coarsest level
 
+const MAP_HALF = 32 * TILE; // yards from a map's corner to the middle of the world
+
+/**
+ * A map's record (map.json), with the one building of a map that is nothing else placed where
+ * it stands: from the middle of the world. A map built before that was known has it placed from
+ * the map's corner, 17,067 yards north and west of everyone in it - the Deeprun Tram's tunnel
+ * was nowhere to be seen from where you stood in it. Put right here, so that it is right without
+ * the map being built again (one built since says `middle`, and is left as it is).
+ */
+export function placed(map) {
+  const g = map?.globalWmo;
+  if (g && !g.middle) {
+    g.pos = [g.pos[0] - MAP_HALF, g.pos[1] - MAP_HALF, g.pos[2]];
+    g.bounds = [g.bounds[0] - MAP_HALF, g.bounds[1] - MAP_HALF, g.bounds[2], g.bounds[3] - MAP_HALF, g.bounds[4] - MAP_HALF, g.bounds[5]];
+    g.middle = true;
+  }
+  return map;
+}
+
 export class MapScene {
   /**
    * @param gpu      device wrapper

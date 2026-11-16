@@ -164,6 +164,7 @@ local function Count()
     if not IsLoaded(format(MAIL_NAME, i)) then next = i break end
   end
   mail.size, mail.next = size, next
+  shared.Log("mailboxes: " .. size .. " found, the next to open is " .. next .. " (this login or reload is number " .. mail.session .. ")")
 end
 
 -- Open the next mailbox: the delivery in it (a table), or nil and why not.
@@ -201,6 +202,22 @@ local function Drop()
     route = nil
     rev = rev + 1
   end
+end
+
+-- For the addon's notes (shared.Log): a delivery in a few words - its number and what it says,
+-- the waypoint it is about, the quest its routes were worked out for, the other routes it brings.
+local function Told(m)
+  local out = "delivery " .. tostring(m.written) .. " " .. tostring(m.state) .. " to " .. tostring(m.tk) .. ":" .. tostring(m.tm) .. ":" .. tostring(m.tx) .. ":" .. tostring(m.ty)
+  if m.plan then out = out .. " plan " .. tostring(m.plan) end
+  if type(m.tq) == "table" then out = out .. " quest " .. tostring(m.tq[1]) .. "." .. tostring(m.tq[2]) .. "." .. tostring(m.tq[3]) end
+  if m.hs ~= nil then out = out .. " hearth" .. tostring(m.hs) end
+  if type(m.rs) == "table" then
+    out = out .. " others"
+    for _, o in ipairs(m.rs) do
+      if type(o) == "table" then out = out .. " " .. tostring(o.k) .. "=" .. tostring(o.st) end
+    end
+  end
+  return out
 end
 
 -- A route, made of what a delivery says of it: the delivery itself for the one that leads, one
@@ -389,6 +406,8 @@ local function TakeOthers(m, now)
   local behind, known = Behind(m)
   local list, pending = {}, behind
   if behind then
+    local h = shared.Heads()
+    shared.Log("that delivery is behind on the quest you track: the game has " .. tostring(h.quest) .. "." .. tostring(h.qstate) .. "." .. tostring(h.qdone) .. ", its quest route is not taken")
     local was = OtherOf("quest")
     list[1] = NoRoute("quest", "pending", known and was and was.head or nil, was and was.rc or nil, nil)
   end
@@ -471,6 +490,7 @@ local function Prune(quest)
     elseif o.key == "quest" and stale and o.state == "route" then
       kept[#kept + 1] = NoRoute("quest", "pending", same and o.head or nil, o.rc, nil)
       changed = true
+      shared.Log("the quest you track has moved on: its route is put aside until the 3D map says the way now")
     else
       kept[#kept + 1] = o
     end
@@ -700,6 +720,7 @@ local function GiveUp(t, why)
   end
   want, gave = nil, { tm = t.map, tx = t.x, ty = t.y, north = p.world and p.north or nil, west = p.world and p.west or nil, again = GetTime() + again.hold }
   note = why
+  shared.Log("gave up on this waypoint for " .. again.hold .. " s: " .. tostring(why))
 end
 local saidAt = -1000
 local function Remind(now, msg, every)
@@ -766,6 +787,7 @@ end
 -- A waypoint you have reached is taken off the map.
 local function Arrive(t)
   pin.far = false
+  shared.Log("arrived: the waypoint (kind " .. tostring(t.kind) .. ") is taken off")
   if t.kind == W_QUICK then
     if shared.QuickOff then shared.QuickOff() end
   elseif t.kind == W_PIN then
@@ -796,8 +818,10 @@ local function Marker(m)
   if own and own >= at then return end
   local map, north, west = tonumber(k[2]), tonumber(k[3]), tonumber(k[4])
   if map and north and west then
+    shared.Log("the marker dropped on the 3D map is taken up as the waypoint: map " .. map .. " " .. floor(north) .. " " .. floor(west))
     if shared.Quick then shared.Quick(map, north, west, at) end
   elseif own and shared.OwnOff then
+    shared.Log("the marker was taken off the 3D map: the waypoint here is let go of")
     shared.OwnOff()
   end
 end
@@ -808,6 +832,7 @@ local function Fetch(now)
   local m, why = Open(now)
   -- (side: asked for the sake of the other routes, not of the waypoint you have)
   local side = w.why == "heads" or w.why == "wander" or w.why == "hearth"
+  shared.Log("opened mailbox " .. (mail.next - 1) .. " for " .. tostring(w.why) .. " (try " .. tostring(w.tries) .. "): " .. (m and Told(m) .. ", written " .. (time() - (tonumber(m.at) or 0)) .. " s ago" or "nothing (" .. tostring(why) .. ")"))
   if not m then
     if side then
       want, othersDue = nil, nil
@@ -837,7 +862,7 @@ local function Fetch(now)
     return
   end
   quietUntil, quietFor = -1, QUIET
-  pcall(Marker, m)
+  shared.Try("marker", Marker, m)
   -- the other routes there are, whatever else this delivery is about
   TakeOthers(m, now)
   -- (your hearthstone was switched on or off a moment ago: a route worked out before that will not do)
@@ -938,6 +963,18 @@ local function Fetch(now)
   end
 end
 
+-- For the addon's notes: how things stand - the route that leads, what is still wanted, the
+-- other routes - in a few words. Noted after each mailbox, so that what was made of it shows.
+local function Stands(now)
+  local out = route and ("route plan " .. tostring(route.plan) .. (route.bare and " (nothing to draw here)" or (" of " .. tostring(route.n) .. " points"))) or "no route"
+  if want then out = out .. "; wanted for " .. tostring(want.why) .. " in " .. format("%.1f", math.max(0, want.at - now)) .. " s" end
+  if gave then out = out .. "; given up (" .. tostring(note) .. ")" end
+  if now < quietUntil then out = out .. "; the 3D map is not heard from, left alone for " .. floor(quietUntil - now) .. " s" end
+  for _, o in ipairs(others) do out = out .. "; " .. tostring(o.key) .. " " .. tostring(o.state) .. (o.state == "route" and (" plan " .. tostring(o.plan)) or "") end
+  if othersDue then out = out .. "; the others asked for again in " .. format("%.1f", math.max(0, othersDue - now)) .. " s" end
+  return out
+end
+
 local EnsureMap, EnsureMini -- (below)
 
 -- Five times a second, after the waypoint has been read (called by AzerothAtlas.lua).
@@ -945,6 +982,12 @@ function shared.Scan(now)
   if not mail.counted then Count() end
   local t, p = shared.target, shared.player
   local moved = p.world and Trail(p) or 0
+  -- (noted when it is another waypoint: what the game heads for - kind 1 your guide's step, 3 a pin, 4 a quick one, 0 nothing)
+  local heading = t.kind .. ":" .. t.map .. ":" .. t.x .. ":" .. t.y
+  if heading ~= shared.headingSaid then
+    shared.headingSaid = heading
+    shared.Log(t.kind == 0 and "waypoint: none" or ("waypoint: kind " .. t.kind .. " map " .. t.map .. " at " .. floor(t.x / 128 - 32768) .. " " .. floor(t.y / 128 - 32768)))
+  end
 
   if t.kind == 0 then
     -- nothing to head for in the game: only a route you asked for by hand stays
@@ -973,6 +1016,7 @@ function shared.Scan(now)
   local sig, quest = HeadsSig()
   if sig ~= headsSig then
     local first = headsSig == nil
+    shared.Log("what you could head for: " .. (sig == "" and "nothing" or sig) .. (first and "" or (" (it was: " .. (headsSig == "" and "nothing" or headsSig) .. ")")))
     headsSig = sig
     Prune(quest)
     if othersSaid ~= false and (sig ~= "" or others[1]) and not (first and sig == "") then
@@ -1053,7 +1097,10 @@ function shared.Scan(now)
   end
   if route then StepNow(route) end
 
-  if want and now >= want.at and (want.why == "asked" or now >= quietUntil) then Fetch(now) end
+  if want and now >= want.at and (want.why == "asked" or now >= quietUntil) then
+    Fetch(now)
+    shared.Log("  so: " .. Stands(now))
+  end
 
   -- a pin on the game's map, or a quick waypoint, that you have reached has done its work
   if (t.kind == W_PIN or t.kind == W_QUICK) and p.world and p.map == t.map then
@@ -1085,7 +1132,7 @@ function shared.Scan(now)
     EnsureMini()
   end
   -- the arrow, the step list and the question about the level (Guide.lua)
-  if shared.GuideScan then pcall(shared.GuideScan, now) end
+  if shared.GuideScan then shared.Try("guide", shared.GuideScan, now) end
 end
 
 -- ---- the level you chose --------------------------------------------------------------------
@@ -1144,6 +1191,7 @@ function shared.HearthChanged()
   local now = GetTime()
   hearthAt = now
   if route or others[1] or shared.target.kind ~= 0 then hearthDue = now + HEADS_WAIT end
+  shared.Log("hearthstone switched: the routes are asked for anew" .. (hearthDue and "" or " (there are none just now)"))
 end
 
 -- For the server (9 bytes, on the text channel): which /reload this is, the mailbox that will
@@ -1170,6 +1218,7 @@ function shared.Clear()
   if not own and shared.ClearHeading then shared.ClearHeading() end
   Drop()
   want, gave, note = nil, nil, nil
+  shared.Log(own and "cleared: your own waypoint" or "cleared: the route")
   if own then say("waypoint cleared.")
   else say("route cleared. A new guide step, or a Shift-click or Ctrl-click on the map, starts another.") end
 end
@@ -1227,7 +1276,7 @@ function shared.Command(word, rest)
   elseif shared.GuideWord and shared.GuideWord(word, rest or "") then return
   elseif shared.TransitWord and shared.TransitWord(word, rest or "") then return
   else
-    say("/atlas (strip on or off)   /atlas clear   /atlas route   /atlas status   /atlas level   /atlas options")
+    say("/atlas (strip on or off)   /atlas clear   /atlas route   /atlas status   /atlas level   /atlas options   /atlas log (its notes of what it did)")
     say("/atlas arrow, /atlas list (each on or off)   /atlas arrow unlock (drag the arrow with the mouse; /atlas arrow lock when it is there)   /atlas move (drag both where you want them)   /atlas reset")
     say("/atlas pin (the list of routes pinned under Questie's quest list, or free: drag it with the mouse where you want it)   A click on \"Routes\", or on a route's name, folds its steps away.")
     say("/atlas hearth (your hearthstone: used in routes, or left out)   /atlas strip (where the coded strip is: /atlas strip topright 0 40)")
@@ -1588,7 +1637,7 @@ EnsureMap = function()
   local goal = Diamond(f, true)
   goal:SetFrameLevel(f:GetFrameLevel() + 1)
   goal:RegisterForClicks("RightButtonUp")
-  goal:SetScript("OnClick", function() pcall(shared.Clear) end)
+  goal:SetScript("OnClick", function() shared.Try("clear", shared.Clear) end)
   goal:SetScript("OnEnter", function(self)
     if not GameTooltip then return end
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")

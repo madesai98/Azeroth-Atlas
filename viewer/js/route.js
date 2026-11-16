@@ -1,5 +1,6 @@
 // The route to where you are heading: asks the route worker (navworker.js) for the way over
 // the map's walkable ground, keeps it current as you move, and draws it in the world.
+import { note, changed } from './log.js';
 import { GLOBALS_WGSL, targets, depthState, ALPHA_BLEND } from './gpu.js';
 import { wayOf, nearestOn } from './transit.js';
 
@@ -29,6 +30,7 @@ const FAIL_CELL = 32;       // yards: a long search that found no way is not rep
 const FAIL_FOR = 60000;     // ms: ...for this long
 const FAIL_COST = 200000;   // floors a failed search looked at before it counts as a long one
 const SPEED_KEY = 'wfmap.flightSpeed';
+const whole = (v) => (Number.isFinite(v) ? Math.round(v) : null);
 
 export class RoutePlanner {
   /**
@@ -52,6 +54,7 @@ export class RoutePlanner {
       } catch { /* use the default */ }
     }
     this.own = !shared;      // (the one that times your flights: the others go by what it finds)
+    this.label = shared ? 'another' : 'lead'; // which route this is, in the page's notes (log.js): the one that leads, or - trips.js - quest, waypoint, death, ally1...
     this.walkOnly = false;   // on foot all the way (the run back to your body: a ghost takes no flight)
     this.fixed = false;      // from a place, not from you (a quest's route, plotted): nothing is carrying it, and it uses no hearthstone
     this.enabled = true;
@@ -84,8 +87,20 @@ export class RoutePlanner {
   }
 
   #clear(status) {
-    if (this.route || this.status !== status) { this.route = null; this.status = status; this.rev++; this.onChange(); }
+    if (this.route || this.status !== status) { this.route = null; this.status = status; this.rev++; this.onChange(); this.asked = null; changed(`to.${this.label}`, null); this.#said(); }
     this.asked = null;
+  }
+
+  /** Noted (log.js) when the way is another than the one before: not for every yard walked along the same one. */
+  #said() {
+    const r = this.route, a = this.asked;
+    const legs = (r?.legs ?? []).map((l) => `${l.mode}${l.from && l.mode !== 'walk' ? ` ${l.from} >` : ''}${l.to ? ` ${l.to}` : ''}${l.name ? ` ${l.name}` : ''}`);
+    // (someone in your party is somewhere new with every look: the way to them is noted when its kind changes)
+    const to = a && !/^ally/.test(this.label) ? [a.toMap, whole(a.to[0]), whole(a.to[1]), whole(a.to[2])] : null;
+    if (!changed(`way.${this.label}`, { to, way: r ? legs : null, none: r ? null : this.status || '-', first: !!r?.provisional })) return;
+    const more = { to, from: a ? a.from.map(whole) : null, onMap: a?.map, hearthstoneLeadsNobodyKnowsWhere: this.noBind || undefined };
+    if (r) note('route', `${this.label}: ${r.provisional ? 'a first answer, on foot (quicker ways are still looked for)' : legs.length > 1 ? legs.join(', then ') : 'on foot'}`, { ...more, seconds: whole(r.seconds), yards: whole(r.length), onFootAllTheWay: whole(r.walking) ?? undefined, detached: r.detached || undefined, tookMs: a ? whole(performance.now() - a.time) : null });
+    else note('route', `${this.label}: ${a ? `no way${this.status ? ` (${this.status})` : ''}` : `heading nowhere${this.status ? ` (${this.status})` : ''}`}`, more);
   }
 
   /** One search, for callers that want the answer itself (tests, the travel planner). */
@@ -163,6 +178,7 @@ export class RoutePlanner {
     }
     this.rev++;
     this.onChange();
+    this.#said();
     (this.walkOnly ? Promise.resolve(false) : this.#journey(asked, m)).catch((err) => { console.warn('travel planning failed', err); return false; }).then((adopted) => {
       asked.settled = true;
       // (looked into now - unless a newer question took over before that was done)
@@ -176,7 +192,7 @@ export class RoutePlanner {
       }
       this.rev++;
       this.onChange();
-    });
+    }).then(() => { if (this.asked === asked) this.#said(); });
   }
 
   /**
@@ -223,7 +239,7 @@ export class RoutePlanner {
       this.status = 'no way found from where your flight lands';
       this.rev++;
       this.onChange();
-    });
+    }).then(() => { if (this.asked === asked) this.#said(); });
   }
 
   /** Seconds from the start to each point of a route (walking, swimming and flying at their speeds). */
@@ -256,15 +272,25 @@ export class RoutePlanner {
   #bind(hearth) {
     if (hearth.x !== null && hearth.map !== null) return { map: hearth.map, pos: [hearth.x, hearth.y, null] };
     if (!hearth.name) return null;
-    // The game only gives the name of the place ("Deepwater Tavern", "Darkshire"): the zone that
-    // place is in, then the inn of that zone whose keeper is not on the other side. With more than
-    // one such inn, the one beside the place of that name; if that does not settle it, it is not
-    // known (until you set your hearthstone again, when the addon notes the very spot).
+    // The game only gives the name of the place ("Deepwater Tavern", "Darkshire", "Valanaar"): the
+    // zone that place is in, then the inn of that zone whose keeper is not on the other side. With
+    // more than one such inn, the one whose keeper stands in the place of that name (the game's own
+    // area under their feet), else the one beside a flight master or a landmark of that name; if
+    // that does not settle it, it is not known (until you set your hearthstone again, when the
+    // addon notes the very spot).
     const W = this.app.world, areas = W.areas, side = this.app.danger?.settings.faction === 'horde' ? 'h' : 'a';
     const key = `${hearth.name}|${side}`;
     if (this.bound?.key === key) return this.bound.at;
     const want = hearth.name.toLowerCase();
-    let at = null, found = 0;
+    // The area an innkeeper stands in: said by the map data (inns built since it was), else looked
+    // up on the map itself where that map is open here. undefined: not to be had just now.
+    const areaOf = (i) => {
+      if (i.area > 0) return i.area;
+      const scene = this.app.open?.get(i.map)?.scene;
+      return scene?.areas ? scene.areaAt(i.pos[0], i.pos[1]) : undefined;
+    };
+    const within = (area, id) => { for (let n = 0; n < 6 && area; n++) { if (area === id) return true; area = areas[area]?.p; } return false; };
+    let at = null, found = 0, unsure = false;
     for (const id of Object.keys(areas)) {
       if ((areas[id].n ?? '').toLowerCase() !== want) continue;
       let zone = +id;
@@ -277,14 +303,21 @@ export class RoutePlanner {
       }
       let inn = inns.length === 1 ? inns[0] : null;
       if (inns.length > 1) {
-        const spot = [...(W.pois ?? []), ...W.taxiNodes].find((p) => p.map === areas[id].m && (p.name ?? '').split(',')[0].toLowerCase() === want);
-        const near = spot && inns.map((i) => [Math.hypot(i.pos[0] - spot.pos[0], i.pos[1] - spot.pos[1]), i]).sort((p, q) => p[0] - q[0])[0];
-        if (near && near[0] < 400) inn = near[1];
+        const stood = inns.map(areaOf);
+        const inside = inns.filter((i, k) => stood[k] !== undefined && within(stood[k], +id));
+        if (inside.length === 1) inn = inside[0];
+        else {
+          if (stood.includes(undefined)) unsure = true;
+          const spot = [...(W.pois ?? []), ...W.taxiNodes].find((p) => p.map === areas[id].m && (p.name ?? '').split(',')[0].toLowerCase() === want);
+          const near = spot && inns.map((i) => [Math.hypot(i.pos[0] - spot.pos[0], i.pos[1] - spot.pos[1]), i]).sort((p, q) => p[0] - q[0])[0];
+          if (near && near[0] < 400) inn = near[1];
+        }
       }
       if (inn) { found++; at = { map: inn.map, pos: [inn.pos[0], inn.pos[1], null] }; }
     }
     if (found !== 1) at = null; // (the same name on two maps, each with an inn: not known which)
-    this.bound = { key, at };
+    // (not known only for want of a map that is not open here: asked again next time, when it may be)
+    this.bound = at || !unsure ? { key, at } : null;
     return at;
   }
 
@@ -427,6 +460,8 @@ export class RoutePlanner {
     // (avoid: you have said in the game that routes are to leave your hearthstone out)
     if (!fl && !this.fixed && T?.hearth?.has && !T.hearth.avoid && T.hearth.cooldown !== null) {
       const bind = this.#bind(T.hearth);
+      // (said on the page while it is so: main.js)
+      this.noBind = bind ? null : T.hearth.name ?? '';
       if (bind) link(S, add({ kind: 'inn', map: bind.map, pos: bind.pos, name: T.hearth.name }), { seconds: T.hearth.cooldown + HEARTH_CAST, mode: 'hearth', wait: T.hearth.cooldown });
     }
     // On foot between any two of them on the same map: by estimate until worked out exactly.
@@ -753,6 +788,8 @@ export class RoutePlanner {
       const id = ++this.hub.seq;
       // (avoid: whether your hearthstone was left out when this was asked - a route worked out before you changed that is not the answer any more)
       const asked = (this.asked = { id, map: this.mapId, toMap: target.map, from: [me[0], me[1], me[2]], to: [to[0], to[1], to[2] ?? null], time: now, done: false, flight, avoid: !!this.app.player?.travel?.hearth?.avoid });
+      // (noted when it is another place than before - log.js; someone in your party is one with every look)
+      if (!/^ally/.test(this.label) && changed(`to.${this.label}`, [target.map, whole(to[0]), whole(to[1]), whole(to[2])])) note('route', `${this.label}: heading for ${target.name ?? `a spot on map ${target.map}`}`, { to: [target.map, whole(to[0]), whole(to[1]), whole(to[2])], said: target.source, from: [whole(me[0]), whole(me[1]), whole(me[2])], onMap: this.mapId, onAFlight: !!flight || undefined, carried: (!!ride && !flight) || undefined, hearthstoneLeftOut: asked.avoid || undefined });
       if (flight) { this.#aloft(asked); return; }
       // (on another map there is no walking it: straight to the journey by other means; and
       // while something carries you there is no walking from where you are, either)

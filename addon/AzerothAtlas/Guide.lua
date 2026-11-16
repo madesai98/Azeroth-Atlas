@@ -1110,7 +1110,7 @@ local function EnsureAsk()
     b:RegisterForClicks("LeftButtonUp")
     b:SetScript("OnClick", function()
       f:Hide()
-      if shared.Choose then pcall(shared.Choose, i) end
+      if shared.Choose then shared.Try("choose level", shared.Choose, i) end
       list.sig = ""
     end)
     b:Hide()

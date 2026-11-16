@@ -1,5 +1,6 @@
 // WebGPU device / swap-chain setup and the per-frame global uniform block.
 
+import { note } from './log.js';
 export const GLOBALS_SIZE = 352;
 
 // The hole the cutaway opens along the line of sight is drawn in close to you: this wide at you
@@ -99,6 +100,12 @@ const TRIES = [0, 500, 1000, 2000, 3000, 4000];
  * @param waiting  called before each further try: (which try, of how many)
  * Throws what the last try said; `.none` on it means there is no WebGPU here at all.
  */
+/** What a graphics card says of itself, for the page's notes. */
+function about(adapter, powerPreference) {
+  const i = adapter.info ?? {};
+  return { vendor: i.vendor ?? null, architecture: i.architecture ?? null, device: i.device ?? null, description: i.description ?? null, asked: powerPreference, software: adapter.isFallbackAdapter ?? i.isFallbackAdapter ?? null, features: [...adapter.features].sort(), limits: { texture: adapter.limits?.maxTextureDimension2D, buffer: adapter.limits?.maxBufferSize, layers: adapter.limits?.maxTextureArrayLayers } };
+}
+
 async function getDevice(waiting) {
   if (!navigator.gpu) throw Object.assign(new Error('WebGPU is not available in this browser. Use a current version of Chrome or Edge.'), { none: true });
   let last = null, found = false;
@@ -111,15 +118,18 @@ async function getDevice(waiting) {
         if (!adapter) { last = last ?? new Error('No WebGPU adapter found (is hardware acceleration enabled?).'); continue; }
         found = true;
         const requiredFeatures = adapter.features.has('texture-compression-bc') ? ['texture-compression-bc'] : [];
-        return { device: await adapter.requestDevice({ requiredFeatures }), requiredFeatures };
-      } catch (err) { last = err; }
+        const device = await adapter.requestDevice({ requiredFeatures });
+        const info = about(adapter, powerPreference);
+        note('gpu', `the graphics card has started${i ? `, at try ${i + 1}` : ''}`, info);
+        return { device, requiredFeatures, info };
+      } catch (err) { last = err; note('gpu', `the graphics card would not start (try ${i + 1}, ${powerPreference})`, { error: String(err?.message ?? err) }); }
     }
   }
   throw Object.assign(last ?? new Error('The graphics card could not be started.'), { none: !found });
 }
 
 export async function initGPU(canvas, waiting = () => {}) {
-  const { device, requiredFeatures } = await getDevice(waiting);
+  const { device, requiredFeatures, info } = await getDevice(waiting);
   const context = canvas.getContext('webgpu');
   const format = navigator.gpu.getPreferredCanvasFormat();
   // Render through an sRGB view so lighting math happens in linear space.
@@ -134,8 +144,12 @@ export async function initGPU(canvas, waiting = () => {}) {
     scale: 1,       // fraction of full resolution the picture is drawn at (lowered while the card is busy)
     pixelRatio: 1,  // picture pixels per CSS pixel
     lost: false,
+    info,           // what the card says of itself (for "Report a problem")
   };
-  device.lost.then((info) => { gpu.lost = true; gpu.onLost?.(info); });
+  device.lost.then((info) => { gpu.lost = true; note('gpu', `the graphics card was lost: ${info.reason ?? ''}`, { message: info.message }); gpu.onLost?.(info); });
+  // (what the card refuses while drawing - a texture too large, memory gone - would otherwise only be said on the console)
+  let refused = 0;
+  device.addEventListener?.('uncapturederror', (e) => { if (++refused <= 20) note('gpu', `the graphics card refused something${refused === 20 ? ' (no more of these are noted)' : ''}`, { kind: e.error?.constructor?.name, message: String(e.error?.message ?? '').slice(0, 600) }); });
 
   gpu.globalsBuffer = device.createBuffer({ label: 'globals', size: GLOBALS_SIZE, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   gpu.globalsLayout = device.createBindGroupLayout({

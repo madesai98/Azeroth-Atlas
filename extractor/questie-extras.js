@@ -15,6 +15,11 @@
 //                               wowheadData (every creature Wowhead lists for an item some quest
 //                               asks for) and cmangosData (items that only drop while on their
 //                               quest, from the cmangos database of the original game).
+//   Zones/dungeons.lua         the dungeons, and where each is entered from: [areaId] = { name,
+//                               other area ids its quests are filed under, the zone its door is in,
+//                               { { zone, x, y }, ... } } - a door as per cent across and down the
+//                               zone's map. (What the file changes in that table for later
+//                               versions of the game is not this game's, and is not read.)
 //   DropTables/itemDropCorrections.lua
 //                               rates put right by hand, a table per expansion (Era, Tbc, ...). A
 //                               value below zero is not a rate: it says which of the two tables
@@ -23,6 +28,7 @@
 //
 // Asked about one item from one creature, the addon believes, in this order: a rate put right by
 // hand, the cmangos table, the Wowhead table. `drops` is that answer for every pair there is.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -86,6 +92,28 @@ const pairsIn = (table) => { let n = 0; for (const row of table.values()) n += r
  *   dropStats: { items, pairs, wowhead, cmangos, questie (how many rates came from each), tables: { wowhead, cmangos, corrections: { items, pairs } },
  *                pointers (corrections that only name a table), pointersUnmet (...which had nothing for them), above100 } }}
  */
+/**
+ * The dungeons QuestieDB knows, and where each is entered from (Zones/dungeons.lua):
+ * { list: [{ area, name, also: [area ids its quests are filed under as well], doors: [{ zone, x, y }]
+ * (per cent across and down that zone's map) }], hash (of the file: '' where there is none) }.
+ * A dungeon whose door depends on your side (the battlegrounds) is left out.
+ */
+export function readQuestieDungeons(tocFile) {
+  const src = typeof tocFile === 'string' && tocFile ? read(path.join(path.dirname(tocFile), 'support', FLAVOUR, 'Zones', 'dungeons.lua')) : '';
+  const list = [];
+  // (the table itself: from its opening to the brace that closes it at the start of a line)
+  const begin = src.indexOf('local dungeons = {');
+  const end = begin < 0 ? -1 : src.slice(begin).search(/^\}/m);
+  if (begin >= 0 && end > 0) {
+    const body = uncommented(src.slice(begin, begin + end));
+    for (const m of body.matchAll(/\[(\d+)\]\s*=\s*\{\s*"((?:[^"\\]|\\.)*)"\s*,\s*(nil|\{[^{}]*\})\s*,\s*\d+\s*,\s*\{((?:\s*\{[^{}()]*\}\s*,?)+)\s*\}\s*\}/g)) {
+      const doors = [...m[4].matchAll(/\{\s*(\d+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\}/g)].map((d) => ({ zone: +d[1], x: +d[2], y: +d[3] })).filter((d) => d.x >= 0 && d.x <= 100 && d.y >= 0 && d.y <= 100);
+      if (doors.length) list.push({ area: +m[1], name: m[2].replace(/\\(.)/g, '$1'), also: m[3] === 'nil' ? [] : [...m[3].matchAll(/\d+/g)].map((n) => +n[0]), doors });
+    }
+  }
+  return { list, hash: src ? crypto.createHash('sha1').update(src).digest('hex').slice(0, 16) : '' };
+}
+
 export function readQuestieExtras(tocFile) {
   const folder = typeof tocFile === 'string' && tocFile ? path.join(path.dirname(tocFile), 'support', FLAVOUR) : null;
   const source = (...parts) => (folder ? read(path.join(folder, ...parts)) : '');
