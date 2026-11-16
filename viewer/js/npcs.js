@@ -314,46 +314,95 @@ export class NpcLayer {
     return this.wanted(id) ? 2 : 0; // (not known what is in your log: every quest of your side and level)
   }
 
-  /** What a quest has you kill, use or collect: the entries of this map, as a Set. */
-  #targets(questId, into = new Set()) {
+  /**
+   * Which of the things a quest asks for are still to do, going by what the game says of it:
+   * { oc: [for each creature to kill], ok (the kills that count as another's), oo: [each object],
+   *   oi: [each item], tr (the place to go to) } - true: still to do. null: the game does not say.
+   *
+   * The game lists what a quest asks for in its own order, and says of each what kind of thing
+   * it is and whether it is done - but not which creature or item it is. The quest data has
+   * them kind by kind, in the game's order within a kind (QuestieDB matches the two up that
+   * way). So: a kind that is all done, or not begun, is plain. A kind that is partly done is
+   * matched up one for one where the game lists as many of it as the data has; where it does
+   * not, nothing of that kind is taken for done - better a way to something finished than no
+   * way to something that is not.
+   * @param progress  { n, done (a bit for each thing, the first the lowest), kinds: [1 a creature, 2 an item, 3 an object, 0 anything else] }
+   */
+  #left(q, progress) {
+    if (!progress || !Array.isArray(progress.kinds)) return null;
+    const said = [[], [], [], []]; // for each kind: is each thing of it, in the game's order, still to do?
+    progress.kinds.forEach((kind, k) => said[kind]?.push(!((progress.done >> k) & 1)));
+    const match = (kind, count, inOrder = true) => {
+      const g = said[kind];
+      if (!g.length || g.every((v) => v)) return new Array(count).fill(true);
+      if (g.every((v) => !v)) return new Array(count).fill(false);
+      return inOrder && g.length === count ? g : new Array(count).fill(true);
+    };
+    // (creatures: each one to kill, and the kills that count as another's - together one more
+    // thing, which the game may list before or after the others: with both, a part done is not matched up)
+    const oc = q.oc ?? [], credit = q.ok?.length ? 1 : 0;
+    const kills = match(1, oc.length + credit, !(credit && oc.length));
+    // (a place to go to is among "anything else"; where the game lists things and none of that kind, it does not ask for it)
+    const place = said[0].length ? said[0].some((v) => v) : progress.kinds.length === 0;
+    return { oc: kills.slice(0, oc.length), ok: credit ? kills[oc.length] : false, oo: match(3, (q.oo ?? []).length), oi: match(2, (q.oi ?? []).length), tr: place };
+  }
+
+  /**
+   * What a quest has you kill, use or collect: the entries of this map, as a Set.
+   * @param left  which of them are still to do (see #left); null: all of them
+   */
+  #targets(questId, into = new Set(), left = null) {
     const d = this.data, Q = this.quests, q = Q?.quests?.[questId];
     if (!q) return into;
     const add = (key) => { const e = d.index.get(key); if (e !== undefined) into.add(e); };
-    for (const id of q.oc ?? []) add('n' + id);
-    for (const id of q.ok ?? []) add('n' + id);
-    for (const id of q.oo ?? []) add('o' + id);
-    for (const item of q.oi ?? []) {
+    (q.oc ?? []).forEach((id, k) => { if (!left || left.oc[k]) add('n' + id); });
+    if (!left || left.ok) for (const id of q.ok ?? []) add('n' + id);
+    (q.oo ?? []).forEach((id, k) => { if (!left || left.oo[k]) add('o' + id); });
+    (q.oi ?? []).forEach((item, k) => {
+      if (left && !left.oi[k]) return;
       const it = Q.items?.[item];
       for (const id of it?.d ?? []) add('n' + id);
       for (const id of it?.o ?? []) add('o' + id);
-    }
+    });
     return into;
   }
 
   /**
    * Where a quest of yours is to be got on with, on this map: the nearest to `from` of what it
-   * has you kill, use or collect - or, once it is ready to hand in (or asks for nothing that is
-   * on this map), of who takes it.
+   * still has you kill, use, collect or go to - or, once it is ready to hand in (or asks for
+   * nothing that is on this map), of who takes it.
+   * @param progress  how far the quest has got, as the game says of the one you track (the
+   *                  server's strip.js: heads().tracked): what is done is not led to any more.
+   *                  null: not said - then every thing it asks for counts, and whether it is
+   *                  ready to hand in is taken from your quest log.
    * @returns { x, y, z (null where the height is not known), name, done (it is to be handed in) } or null
    */
-  questGoal(id, from) {
+  questGoal(id, from, progress = null) {
     const d = this.data, q = this.quests?.quests?.[id];
     if (!d || !q || !from) return null;
-    const done = this.mine?.log.get(id) === 1;
+    const done = progress ? progress.state === 1 : this.mine?.log.get(id) === 1;
     const takers = () => {
       const out = new Set();
       for (const n of q.e ?? []) { const e = d.index.get('n' + n); if (e !== undefined) out.add(e); }
       for (const n of q.eo ?? []) { const e = d.index.get('o' + n); if (e !== undefined) out.add(e); }
       return out;
     };
-    let who = done ? takers() : this.#targets(id), handIn = done;
-    if (!who.size && !done) { who = takers(); handIn = true; }
-    let best = -1, bestD = Infinity;
+    const left = done ? null : this.#left(q, progress);
+    let who = done ? takers() : this.#targets(id, new Set(), left), handIn = done;
+    // (a place it has you go to and look at: no one stands there, it is a spot of its own)
+    const spots = !done && (!left || left.tr) ? (q.tr?.at ?? []).filter((s) => s[0] === d.map) : [];
+    if (!who.size && !spots.length && !done) { who = takers(); handIn = true; }
+    let best = -1, bestD = Infinity, spot = null;
     for (let i = 0; i < d.n; i++) {
       if (!who.has(d.owner[i])) continue;
       const dist = Math.hypot(d.x[i] - from[0], d.y[i] - from[1]);
       if (dist < bestD) { bestD = dist; best = i; }
     }
+    if (!handIn) for (const s of spots) {
+      const dist = Math.hypot(s[1] - from[0], s[2] - from[1]);
+      if (dist < bestD) { bestD = dist; spot = s; }
+    }
+    if (spot) return { x: spot[1], y: spot[2], z: null, name: q.tr.t || 'the place it names', done: false };
     if (best < 0) return null;
     return { x: d.x[best], y: d.y[best], z: Number.isFinite(d.z[best]) ? d.z[best] : null, name: d.entries[d.owner[best]].n, done: handIn };
   }

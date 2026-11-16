@@ -292,6 +292,10 @@ end
 local heads = {
   guide = { on = false, map = 0, north = 0, west = 0 }, way = { on = false, map = 0, north = 0, west = 0 },
   corpse = { on = false, map = 0, north = 0, west = 0 }, quest = 0,
+  -- how far that quest has got (see QuestProgress): qsaid, the game says so; qstate: 0 under way,
+  -- 1 ready to hand in, 2 failed; qn: how many things it asks for; qdone: which of them are done
+  -- (a bit each, the first the lowest); qkinds: what each is (two bits each)
+  qsaid = false, qstate = 0, qn = 0, qdone = 0, qkinds = 0,
 }
 local corpseSpot = Spot()
 local function Corpse()
@@ -310,6 +314,49 @@ local function TrackedQuest()
   if (not id or id == 0) and GetSuperTrackedQuestID then id = plain(GetSuperTrackedQuestID()) end
   if id and id > 0 and id < 16777216 then return id end
   return 0
+end
+-- How far a quest in your log has got, as the game's own list of what it asks for has it:
+-- whether it is ready to hand in (1) or failed (2), how many things it asks for, which of them
+-- are done (a bit each, the first the lowest) and what kind each is (two bits each: 1 a
+-- creature, 2 an item, 3 an object, 0 anything else). The 3D map leads you to what is still to
+-- do, not to what is done. Nothing is returned where the game does not say (or the quest asks
+-- for more than eight things): the 3D map then goes by the quest log alone, as it did.
+local GOAL_KIND = { monster = 1, item = 2, object = 3 }
+local GOALS_MAX = 8
+local function QuestProgress(id)
+  local state, n, done, kinds = 0, 0, 0, 0
+  local function goal(kind, finished)
+    if yes(finished) then done = done + 2 ^ n end
+    kinds = kinds + (GOAL_KIND[text(kind) or ""] or 0) * 4 ^ n
+    n = n + 1
+  end
+  if C_QuestLog and C_QuestLog.GetQuestObjectives then
+    if C_QuestLog.IsFailed and yes(C_QuestLog.IsFailed(id)) then state = 2
+    elseif C_QuestLog.IsComplete and yes(C_QuestLog.IsComplete(id)) then state = 1 end
+    local goals = C_QuestLog.GetQuestObjectives(id)
+    if type(goals) ~= "table" then return nil end
+    if #goals > GOALS_MAX then return nil end
+    for k = 1, #goals do
+      local o = goals[k]
+      if type(o) ~= "table" then return nil end
+      goal(o.type, o.finished)
+    end
+  elseif GetQuestLogIndexByID and GetNumQuestLeaderBoards and GetQuestLogLeaderBoard and GetQuestLogTitle then
+    local index = plain(GetQuestLogIndexByID(id))
+    if not index or index < 1 then return nil end
+    local _, _, _, _, _, complete = GetQuestLogTitle(index)
+    complete = plain(complete)
+    state = complete == 1 and 1 or complete == -1 and 2 or 0
+    local count = plain(GetNumQuestLeaderBoards(index)) or 0
+    if count > GOALS_MAX then return nil end
+    for k = 1, count do
+      local _, kind, finished = GetQuestLogLeaderBoard(k, index)
+      goal(kind, finished)
+    end
+  else
+    return nil
+  end
+  return state, n, done, kinds
 end
 
 -- The guide's step: where it is, and the three numbers that name the place. This addon's own
@@ -501,6 +548,10 @@ local function ReadTarget()
   if hd.corpse.on then hd.corpse.map, hd.corpse.north, hd.corpse.west = cMap, cNorth, cWest end
   local okq, quest = pcall(TrackedQuest)
   hd.quest = okq and quest or 0
+  local okp, state, n, done, kinds = false, nil, nil, nil, nil
+  if hd.quest > 0 then okp, state, n, done, kinds = pcall(QuestProgress, hd.quest) end
+  hd.qsaid = okp and state ~= nil
+  if hd.qsaid then hd.qstate, hd.qn, hd.qdone, hd.qkinds = state, n, done, kinds else hd.qstate, hd.qn, hd.qdone, hd.qkinds = 0, 0, 0, 0 end
 
   if wait then return end
   -- A waypoint of your own leads while it is there: the newest of them (a journey of your own
@@ -769,7 +820,12 @@ local function BuildMessages()
   list[#list + 1] = { T_TALK, 3, HeadBytes(heads.guide) }
   list[#list + 1] = { T_TALK, 4, HeadBytes(heads.way) }
   list[#list + 1] = { T_TALK, 5, HeadBytes(heads.corpse) }
-  list[#list + 1] = { T_TALK, 6, strchar(heads.quest > 0 and 129 or 128) .. Byte3(heads.quest) .. strchar(0, 0, 0, 0, 1) }
+  -- (the quest: said 128, there is one 1, how far it has got is said as well 2; its number; then
+  -- how it stands and how many things it asks for, which of them are done, and what kind each is)
+  local q = heads
+  local progress = q.quest > 0 and q.qsaid
+  list[#list + 1] = { T_TALK, 6, strchar(128 + (q.quest > 0 and 1 or 0) + (progress and 2 or 0)) .. Byte3(q.quest)
+    .. (progress and strchar(q.qstate + q.qn * 4, q.qdone, floor(q.qkinds / 256), q.qkinds % 256, 1) or strchar(0, 0, 0, 0, 1)) }
   -- when the boats, zeppelins and tram run, as far as known (Transit.lua): a few lines a round, in turn
   if shared.TransitReport then
     local ok, reports = pcall(shared.TransitReport)
@@ -926,9 +982,13 @@ local function put(pos, value, count)
 end
 
 -- Text channel: one 9-byte piece of one message per frame, cycling through them all.
-local textCursor, textPart = 0, 0
+-- (textFresh: something the 3D map is waiting for has changed - the quest you track has got
+-- further - so the round begins again from its first message, where such things are said,
+-- as soon as the message being sent is through)
+local textCursor, textPart, textFresh = 0, 0, false
 local function NextText()
   local now = GetTime()
+  if textPart == 0 and textFresh then textFresh, textCursor, messagesAt = false, #messages, -100 end
   if textPart == 0 and (now - messagesAt > 1 or textCursor >= #messages) then
     -- a fresh round once the last one is through (and at most once a second)
     if textCursor >= #messages then textCursor = 0 end
@@ -948,11 +1008,15 @@ local function NextText()
   return m[1], m[2], part + (last and 4 or 0), bytes, part * 9
 end
 local seq, lastSum, lastCount, usedBlocks = 0, -1, -1, 0
+local questSaid = "" -- the quest you track and how far it has got, as last said to the 3D map
 local function Update(scan)
   ReadPlayer()
   if scan then
     ReadParty()
     ReadTarget()
+    -- (the 3D map works the quest's route out anew from this, and the game waits for that route: said at once)
+    local quest = heads.quest .. "." .. heads.qstate .. "." .. heads.qdone
+    if quest ~= questSaid then questSaid, textFresh = quest, true end
     -- the route in the game (Route.lua); whatever goes wrong there must not stop the strip
     if shared.Scan then pcall(shared.Scan, GetTime()) end
   end

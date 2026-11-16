@@ -598,7 +598,7 @@ section, where each also says how long it is:
 | Route | Colour | Where it goes |
 | --- | --- | --- |
 | **Guide objective** | green | your guide's current step |
-| **Tracked quest** | yellow | the quest you are tracking in the game (the one its objective tracker has picked out): the nearest of what it has you kill, use or collect, or, once it is ready to hand in, who takes it |
+| **Tracked quest** | yellow | the quest you are tracking in the game (the one its objective tracker has picked out): the nearest of what it still has you kill, use, collect or go and look at, or, once it is ready to hand in, who takes it |
 | **Waypoint** | blue | the last waypoint you placed yourself: a Ctrl-click or Shift-click on the game's map, or a click on this one |
 | **Corpse run** | red | your body, while you are a ghost. On foot all the way: a ghost takes no flight |
 | **Party members** | purple | each member of your party who is on your map |
@@ -615,6 +615,15 @@ section, where each also says how long it is:
   on the game's map, a click on this one. Each new one takes the place of the one before.
 - The tracked quest's route needs the NPC data of the map you are on (what a quest asks for is
   looked up there), so it reaches what is on your continent.
+- **The tracked quest's route moves on as the quest does.** The addon reports how far the
+  quest has got, as the game's own list of what it asks for has it: when one thing is done the
+  route goes to the nearest of what is left, and when all of it is done, to who takes it. What
+  is done is no longer led to. (Before, the route went to the nearest of everything the quest
+  asks for until the whole quest was ready - so with the kills done and the collecting still
+  to do, it could go on pointing at the creatures.) A quest that has you go and look at a
+  place is led to that place (it used to be led to who takes the quest). Which of the things
+  the game lists is which creature or item is matched up by kind, as described under "The same
+  route in the game"; where that cannot be told, nothing is taken for done.
 - The tick on the **Routes** heading switches all of them off and on at once.
 - They need the addon as it is now: press **Check for updates** (or **Update addon**) and
   `/reload` once. With an addon from before, the page is only told the one that leads, and the
@@ -956,9 +965,11 @@ A mailbox can be opened once per login or `/reload`, so they are opened sparingl
   150 yards. A long journey the 3D map was still working out when the game asked, or a waypoint
   set while a boat was carrying you, then stayed without a route in the game until you typed
   `/atlas route`, although the 3D map had long since found it.);
-- when what else you could be heading for changes - the quest you track, your quest log while
-  you track one, your body, who is in your party, your guide's step while a waypoint of your own
-  leads: the routes to those, a couple of seconds later;
+- when what else you could be heading for changes - the quest you track, how far that quest
+  has got (something it asks for is done, or all of it), your body, who is in your party, your
+  guide's step while a waypoint of your own leads: the routes to those, a couple of seconds
+  later - and, if the 3D map had not caught up by then, again up to five times, further and
+  further apart (see "The quest you track, as it gets on" below);
 - when you switch your hearthstone on or off: the routes worked out since;
 - when you choose another level for your waypoint: the route to that level;
 - when you have been more than 25 yards off the route for a few seconds (the 3D map has planned
@@ -969,6 +980,39 @@ A mailbox can be opened once per login or `/reload`, so they are opened sparingl
 - when you say so: `/atlas route`, or a key bound to *Fetch the route from the 3D map*. That is
   how a marker you dropped on the 3D map itself gets into the game, since the game cannot know
   you did that.
+
+**The quest you track, as it gets on.** When you get something of the quest done - or all of
+it, or track another quest - the way to go is another way, and the game knows that before
+anyone: the 3D map hears of it through the strip a moment later, and needs another moment to
+work the new way out. The game used to open one mailbox a couple of seconds after the change
+and take what was in it. That was nearly always still the way from before, which it then kept:
+the route stayed as it was until something else made the game ask again (tracking another
+quest and then this one once more did it). Now:
+
+- the addon says how far the tracked quest has got at the head of the strip's next round of
+  messages, not when its turn comes (well under a second, where it could be two);
+- every delivery says which quest its routes were worked out for and how far that quest had got
+  (`tq`: its number, whether it is ready or failed, which of the things it asks for are done).
+  The game compares that with what it knows itself. Older word than its own, and the quest's
+  route in that delivery is the way from before: it is not shown, and the game looks again
+  after 2.5 seconds, then 5, 10, 20 and 40, until the 3D map has caught up;
+- the way from before goes from the map, the minimap and the arrow the moment the quest moves
+  on, before anything is fetched: the list says "Working out the route..." under the quest's
+  name until the new way is there. A route to where there is nothing left to do is worse than
+  none;
+- the 3D map does not hand over a route it knows to be the way to the last place either: while
+  the way to a new place is being worked out, the game is told just that. This goes for every
+  route beside the one that leads (your guide's step moving on while a waypoint of your own
+  leads, for one), not only the quest's.
+
+What the game lists for a quest says of each thing what kind it is (a creature, an item, an
+object, anything else) and whether it is done - not which creature or item. The quest data
+has the things kind by kind, in the game's order within a kind, which is how Questie matches
+them up too. So a kind that is all done or not begun is plain; a kind partly done is matched
+one for one where the game lists as many of it as the data has; and where it does not, nothing
+of that kind is taken for done (better a way to something finished than none to something
+that is not). A quest that asks for more than eight things is not said in this detail: for
+that one the 3D map goes by the quest log alone, as before.
 
 Walking along the route costs nothing; where you are on it is worked out in the game. A normal
 hour of questing uses a few dozen. `/atlas status` says how many are left, and the map page
@@ -1300,7 +1344,9 @@ What you get:
 - **Party members**: green dots with names (grey when dead), while they are on your map.
 - **Spawn zones**, the NPC filters and the quest explorer use your real level and faction.
 - **Where you could be heading**: your guide's step, your own waypoint, your body while you
-  are a ghost, and the quest you are tracking are each reported, for the routes.
+  are a ghost, and the quest you are tracking are each reported, for the routes - the quest
+  with how far it has got: whether it is ready to hand in, and which of the things it asks for
+  are done.
 
 ### The camera that follows you
 
@@ -1588,6 +1634,24 @@ Where two sources say different things the record keeps both: the one believed, 
 other said (the server calls a creature "Searing Lava Spider" where QuestieDB has "Greater Lava
 Spider"). Nothing is lost by merging, and a disagreement can be looked into.
 
+**Where copies disagree about the game's cache**, a vote settles it, fact by fact (a name, a
+level, what a quest gives). Each copy has one voice about a thing: the last it sent.
+
+| Copies that have sent the thing | Believed |
+| --- | --- |
+| one | what it says |
+| two | what the later one says |
+| three or more | what most say; where that is a tie, the side whose latest voice is the later |
+
+A copy that has the thing but not a fact the others give (no money for the quest, say) counts
+as saying "there is none", so one copy cannot add a fact of its own to what several agree on.
+"Later" is when the database took the delivery, which a copy cannot set ahead. A delivery is
+believed only for what a game cache holds (the facts in the table above, each in its own
+shape): anything else sent with it, such as where a creature stands, is left out. What the vote
+does not do: a thing only one copy has ever sent is believed as it stands, and a voice is an
+anonymous account, of which one person can make several. `votes` (below) lists every fact the
+copies disagree about, who said what, and what was believed.
+
 **What a copy sends.** While the map runs it reads the game's cache and its own sightings, and
 sends what it has not sent before: a little after it starts, whenever the game has written its
 cache again (it does when you log out or leave the game), after you have met an NPC, and every
@@ -1621,6 +1685,7 @@ line is only there in a version that names a database.
 | `show npc 263380` | one record (`quest`, `object` likewise; `--local`: as last fetched) |
 | `publish` | make the database again from the sources on this disk and everything every copy has sent, and write what changed. For the copy that keeps the database: `"database": { "maintain": true }` has the map do this by itself. The database lets only a maintainer do it |
 | `whoami` | the made-up name this copy is signed in under |
+| `votes` | every fact on which the copies' game caches disagree, and how the vote went (`votes quest 95534`: one thing). For a maintainer: it reads what was sent |
 
 The pieces: `atlasdb/records.js` (a record, and how sources are merged into one), `collect.js`
 (what a copy gathers and sends), `publish.js` (making, publishing and fetching the database),
@@ -1634,24 +1699,6 @@ The map is built from your own installed game. What else it draws on, and where 
 
 | What | From | How it gets here |
 | --- | --- | --- |
-**Where copies disagree about the game's cache**, a vote settles it, fact by fact (a name, a
-level, what a quest gives). Each copy has one voice about a thing: the last it sent.
-
-| Copies that have sent the thing | Believed |
-| --- | --- |
-| one | what it says |
-| two | what the later one says |
-| three or more | what most say; where that is a tie, the side whose latest voice is the later |
-
-A copy that has the thing but not a fact the others give (no money for the quest, say) counts
-as saying "there is none", so one copy cannot add a fact of its own to what several agree on.
-"Later" is when the database took the delivery, which a copy cannot set ahead. A delivery is
-believed only for what a game cache holds (the facts in the table above, each in its own
-shape): anything else sent with it, such as where a creature stands, is left out. What the vote
-does not do: a thing only one copy has ever sent is believed as it stands, and a voice is an
-anonymous account, of which one person can make several. `votes` (below) lists every fact the
-copies disagree about, who said what, and what was believed.
-
 | Creatures, NPCs, quests, where they stand | **QuestieDB** (the addon) | Read from your game's AddOns folder when the map is built. Not included |
 | NPC heights, what quests ask for, drop rates, creature health and respawn times | **cmangos classic-db** | Downloaded when the map is built, kept in the map data. Not included |
 | The layout of the game's data tables | **WoWDBDefs** (wowdev) | Each definition is fetched the first time it is needed, kept in `extractor/dbd/`. Not included |
@@ -1685,7 +1732,6 @@ The 3D map shows them, the game does not. In the order worth looking:
 3. **Type `/atlas status`** in the game. It says how many deliveries are left (when they are
    used up: `/reload`), whether a route is showing, and whether Azeroth Atlas is answering at
    all. The list of routes says the same in a line where a waypoint has no route.
-| `votes` | every fact on which the copies' game caches disagree, and how the vote went (`votes quest 95534`: one thing). For a maintainer: it reads what was sent |
 4. **Azeroth Atlas has to be running**, but its window need not be in view: behind the game or
    minimized is fine (before version 0.3.0 it was not: with one screen, routes then reached the
    game only now and then).

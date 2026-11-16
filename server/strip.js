@@ -237,7 +237,12 @@ export class NameCache {
    * Every place you could be heading for, each said on its own (addon version 6), or null from
    * an addon that names only the one that leads: { guide, waypoint, corpse: { map, x, y } | null
    * (your guide's step; the newest waypoint you placed yourself; your body while you are a ghost),
-   * quest: the number of the quest you are tracking (0: none) }
+   * quest: the number of the quest you are tracking (0: none),
+   * tracked: how far that quest has got, as the game's own list of what it asks for has it -
+   *   { id, state (0 under way, 1 ready to hand in, 2 failed), n (how many things it asks for),
+   *     done (which of them are done: a bit each, the first the lowest), kinds: [of each: 1 a
+   *     creature, 2 an item, 3 an object, 0 anything else] } - or null where the game (or an
+   *     addon from before) does not say }
    */
   heads() {
     const spot = (key) => {
@@ -249,7 +254,12 @@ export class NameCache {
     const q = this.raw.get(`${TEXT_KIND.TALK}:6`);
     const quest = q && q.length >= 9 && q[0] & 128 && q[8] === 1 ? (q[0] & 1 ? q[1] * 65536 + q[2] * 256 + q[3] : 0) : undefined;
     if (guide === undefined && waypoint === undefined && corpse === undefined && quest === undefined) return null;
-    return { guide: guide ?? null, waypoint: waypoint ?? null, corpse: corpse ?? null, quest: quest ?? 0 };
+    let tracked = null;
+    if (quest && q[0] & 2) {
+      const n = Math.min(8, q[4] >> 2), kinds = q[6] * 256 + q[7];
+      tracked = { id: quest, state: q[4] & 3, n, done: q[5] & (2 ** n - 1), kinds: Array.from({ length: n }, (_, k) => (kinds >> (k * 2)) & 3) };
+    }
+    return { guide: guide ?? null, waypoint: waypoint ?? null, corpse: corpse ?? null, quest: quest ?? 0, tracked };
   }
 
   /**

@@ -637,7 +637,8 @@ local function GroupView(r, lead, limit)
   local db = Settings()
   local g = { key = r.key or (lead and (KIND_KEY[r.tk] or "waypoint")) or "route", colour = r.rc, rows = {}, route = r }
   g.shut = type(db.shut) == "table" and db.shut[g.key] == true
-  g.head = r.head or r.title or (r.name and ("Journey to " .. r.name)) or "Journey"
+  -- (the quest you track, before the 3D map has said what it is called)
+  g.head = r.head or r.title or (r.name and ("Journey to " .. r.name)) or (g.key == "quest" and "Tracked quest") or "Journey"
   if r.state ~= "route" then
     -- (one of the others, with no route: still being worked out, or there is no way)
     g.clock = ""

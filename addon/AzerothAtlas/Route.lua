@@ -352,6 +352,26 @@ local function Lone()
   return nil
 end
 
+-- A route that is not there to be shown (yet): still being worked out ("pending"), or none.
+local function NoRoute(key, state, head, colour, words)
+  return { key = key, state = state, head = head, rc = colour, text = words, steps = {}, also = {}, more = {}, n = 0, bare = true, cur = 0, secs = 0, off = 0, along = 0 }
+end
+
+-- The quest you track changes under the 3D map's feet: you track another, or get something of
+-- it done, and the way to it is then another way - to the next thing it asks for, or to who
+-- takes it. The game knows at once; the 3D map hears of it through the strip, a moment later,
+-- and needs another moment to work the new way out. So every delivery says which quest its
+-- routes were worked out for and how far that had got (tq: its number, how it stands, which of
+-- what it asks for is done). true: that is older word than the game's own.
+-- (and whether it is at least the same quest: then what the delivery calls it is its name)
+local function Behind(m)
+  if type(m.tq) ~= "table" or not shared.Heads then return false, true end
+  local h = shared.Heads()
+  if not (h.quest and h.quest > 0) then return false, true end
+  if tonumber(m.tq[1]) ~= h.quest then return true, false end
+  return h.qsaid == true and (tonumber(m.tq[2]) ~= h.qstate or tonumber(m.tq[3]) ~= h.qdone), true
+end
+
 -- Take the other routes from a delivery. true if any of them is still being worked out.
 local function TakeOthers(m, now)
   if type(m.rs) ~= "table" then
@@ -364,9 +384,20 @@ local function TakeOthers(m, now)
     return false
   end
   othersSaid = true
-  local list, pending = {}, false
+  -- (the 3D map has not heard yet how the quest you track stands now: its route here is the one
+  -- from before - not shown, and looked for again a little later, like one still being worked out)
+  local behind, known = Behind(m)
+  local list, pending = {}, behind
+  if behind then
+    local was = OtherOf("quest")
+    list[1] = NoRoute("quest", "pending", known and was and was.head or nil, was and was.rc or nil, nil)
+  end
   for _, o in ipairs(m.rs) do
-    if type(o) == "table" and type(o.k) == "string" and #list < OTHERS_MAX then
+    if type(o) == "table" and o.k == "quest" and behind then
+      -- (said above; what it is called and its colour are as the delivery has them, where it is this quest)
+      if known and type(o.hd) == "string" then list[1].head = o.hd end
+      list[1].rc = tonumber(o.c) or list[1].rc
+    elseif type(o) == "table" and type(o.k) == "string" and #list < OTHERS_MAX then
       local made = nil
       if o.st == "route" then
         made = Build(o, true)
@@ -378,8 +409,7 @@ local function TakeOthers(m, now)
         end
       end
       if not made then
-        made = { key = o.k, state = o.st == "pending" and "pending" or "none", head = type(o.hd) == "string" and o.hd or nil, rc = tonumber(o.c),
-          text = type(o.text) == "string" and o.text or nil, steps = {}, also = {}, more = {}, n = 0, bare = true, cur = 0, secs = 0, off = 0, along = 0 }
+        made = NoRoute(o.k, o.st == "pending" and "pending" or "none", type(o.hd) == "string" and o.hd or nil, tonumber(o.c), type(o.text) == "string" and o.text or nil)
       end
       if made.state == "pending" then pending = true end
       list[#list + 1] = made
@@ -398,24 +428,37 @@ local function TakeOthers(m, now)
 end
 
 -- What else you could be heading for, as the game itself knows it: a few words that change when
--- it does. (The quest you track - and your quest log, since a quest that is ready has another
--- place to go to; your body; your guide's step; who is in your party.)
+-- it does. (The quest you track, and how far it has got - once something it asks for is done,
+-- or all of it, there is another place to go to; your body; your guide's step; who is in your
+-- party.) And the words about the quest on their own.
 local function HeadsSig()
-  if not shared.Heads then return "" end
+  if not shared.Heads then return "", "" end
   local h, party, log = shared.Heads()
-  local out = {}
-  if h.quest and h.quest > 0 then out[#out + 1] = "q" .. h.quest .. "." .. tostring(log or 0) end
+  local out, quest = {}, ""
+  if h.quest and h.quest > 0 then
+    -- (a game that does not say how far a quest has got: your quest log as a whole, as it was before)
+    quest = "q" .. h.quest .. "." .. (h.qsaid and (h.qstate .. "." .. h.qdone) or ("log" .. tostring(log or 0)))
+    out[1] = quest
+  end
   if h.corpse.on then out[#out + 1] = "c" end
   if h.guide.on then out[#out + 1] = "g" .. h.guide.map .. "," .. floor(h.guide.north + 0.5) .. "," .. floor(h.guide.west + 0.5) end
   for i = 1, #party do
     if party[i].flags ~= 0 then out[#out + 1] = "p" .. i end
   end
-  return table.concat(out, " ")
+  return table.concat(out, " "), quest
 end
 
 -- What the game knows to be over is taken off at once: the route to a quest you no longer
--- track, to your body once you live, to someone who has left your party.
-local function Prune()
+-- track, to your body once you live, to someone who has left your party. And the route to the
+-- quest you track, once you track another or have got further with it: that way may lead to
+-- where there is nothing left for you to do. It is not shown again until the 3D map has said
+-- which way it is now (asked for in a moment: see Scan).
+-- @param quest  the words about the quest you track, as they are now (see HeadsSig)
+local questWas = nil
+local function Prune(quest)
+  local stale = questWas ~= nil and quest ~= questWas
+  local same = stale and string.match(quest, "^q%d+") == string.match(questWas, "^q%d+")
+  questWas = quest
   if not shared.Heads or not others[1] then return end
   local h, party = shared.Heads()
   local kept, changed = {}, false
@@ -423,7 +466,14 @@ local function Prune()
     local gone = (o.key == "quest" and not (h.quest and h.quest > 0)) or (o.key == "death" and not h.corpse.on) or (o.key == "guide" and not h.guide.on)
     local slot = tonumber(string.match(o.key, "^ally(%d)$") or "")
     if slot and party[slot] and party[slot].flags == 0 then gone = true end
-    if gone then changed = true else kept[#kept + 1] = o end
+    if gone then
+      changed = true
+    elseif o.key == "quest" and stale and o.state == "route" then
+      kept[#kept + 1] = NoRoute("quest", "pending", same and o.head or nil, o.rc, nil)
+      changed = true
+    else
+      kept[#kept + 1] = o
+    end
   end
   if changed then
     others = kept
@@ -920,11 +970,11 @@ function shared.Scan(now)
 
   -- What else you could be heading for has changed: the routes there are asked for, once the 3D
   -- map has had a moment to work them out. (Not from an older 3D map, which sends no such routes.)
-  local sig = HeadsSig()
+  local sig, quest = HeadsSig()
   if sig ~= headsSig then
     local first = headsSig == nil
     headsSig = sig
-    Prune()
+    Prune(quest)
     if othersSaid ~= false and (sig ~= "" or others[1]) and not (first and sig == "") then
       othersDue, othersTries = now + HEADS_WAIT, 0
     end

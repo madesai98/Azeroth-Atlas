@@ -71,6 +71,7 @@ export class RouteMail {
     this.marker = null;   // the marker dropped on the 3D map, for the game to take up as its waypoint: { stamp, map, x, y, placed } or { stamp, off, placed }
     this.whole = null;    // the other routes there are, each whole (see setRoute: routes); null from a page that does not say them
     this.hearth = null;   // true: the routes were worked out with your hearthstone left out; false: with it; null: not said
+    this.tracked = null;  // the quest the routes were worked out for, and how far it had got: { id, state, done } (see setRoute: quest); null: not said
     this.written = (Math.floor(Date.now() / 1000) % 60000) + 1; // number of the delivery now in the mailboxes
     this.text = '';
     this.filled = '';     // which mailboxes hold it
@@ -157,6 +158,8 @@ export class RouteMail {
    *   levels: { id, at, ask, list: [text] },                          (when the spot has more than one level)
    *   slot, head,                                                     (which route this is - 'guide', 'waypoint' - and what the game's list of routes calls it)
    *   hearth,                                                         (true: every route here was worked out with your hearthstone left out, as you asked in the game; false: with it)
+   *   quest: { id, state, done },                                     (the quest you track as the page had heard of it when it worked these routes out: its number - 0: none -, how it stands,
+   *                                                                    which of what it asks for is done. The game knows that at first hand, and so can tell a route from before from the one it waits for)
    *   routes: [{ slot, head, color, state, plan, map, text, seconds, stretches, steps, also }] }
    *                                                                   (the other routes there are, each whole: the game lists and follows them beside the one that leads - and with no waypoint in the game at all)
    */
@@ -220,6 +223,8 @@ export class RouteMail {
     }
     this.whole = Array.isArray(r.routes) ? whole : null; // (null: a page that does not say them - an older one)
     this.hearth = typeof r.hearth === 'boolean' ? r.hearth : null;
+    const tq = r.quest, upTo = (v, most) => Number.isInteger(v) && v >= 0 && v <= most;
+    this.tracked = tq && upTo(tq.id, 16777215) && upTo(tq.state, 3) && upTo(tq.done, 255) ? { id: tq.id, state: tq.state, done: tq.done } : null;
     // the levels there are at the waypoint's spot, when there is a choice (ask: the game is to put the question)
     const lv = r.levels;
     const levels = lv && Array.isArray(lv.list) && lv.list.length > 1 && lv.list.length <= LEVEL_LIMIT && lv.list.every((s) => typeof s === 'string')
@@ -319,10 +324,12 @@ export class RouteMail {
    * rs: { k (which route), st ("route", "pending": still being worked out, "none"), hd (what it
    * is called), c (its colour), plan, map, secs, steps, track, also - as for the one that leads }
    * hs: 1 where the routes were worked out with your hearthstone left out, 0 with it.
+   * tq: the quest they were worked out for - its number, how it stands, which of what it asks for is done.
    */
   #restLua() {
     let lua = '';
     if (this.hearth !== null) lua += ` hs = ${this.hearth ? 1 : 0},`;
+    if (this.tracked) lua += ` tq = { ${this.tracked.id}, ${this.tracked.state}, ${this.tracked.done} },`;
     if (!this.whole) return lua;
     const steps = (list) => list.map((s) => `{ ${luaString(s.text)}, ${s.seconds}, ${s.stretch}${s.note || s.line ? `, ${luaString(s.note)}` : ''}${s.line ? `, ${s.line}, ${s.stop}, ${s.ride}` : ''} }`).join(', ');
     lua += `\n rs = {${this.whole.map((o) => {

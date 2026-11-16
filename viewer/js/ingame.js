@@ -184,6 +184,21 @@ let planCount = 0;
 const planOf = (route) => { if (!plans.has(route)) plans.set(route, (planCount = (planCount % 60000) + 1)); return plans.get(route); };
 
 /**
+ * Is the route a planner shows the way to where it is heading now? A place to head for can
+ * change in a moment - your guide moves on, the quest you track has got further - and until
+ * the way to the new place is worked out, the planner still holds the way to the old one. On
+ * this page that is a line drawn a second too long; the game fetches a route once and keeps it,
+ * and must not be handed that one as the route. (Someone in your party is always on the move:
+ * the way to where they were a moment ago is the way to them.)
+ */
+function answers(x) {
+  const r = x.planner.route, t = x.target;
+  if (!r || !t || x.kind === 'ally') return !!r;
+  const to = r.target, want = t.go ?? [t.x, t.y, t.z ?? null];
+  return !!to && Math.hypot(to[0] - want[0], to[1] - want[1]) <= 2 && Math.abs((to[2] ?? -1e6) - (want[2] ?? -1e6)) <= 1;
+}
+
+/**
  * The other routes there are just now, each whole - its line, its steps, what it is called -
  * for the game to list and follow beside the one that leads, and with no waypoint in the game
  * at all: [{ slot, head, color, state ('route', 'pending': still being worked out, 'none'),
@@ -196,7 +211,9 @@ export function routesOf(app) {
     const out = list.map((x) => {
       const p = x.planner, r = p.route, a = p.asked;
       const base = { slot: x.slot, head: headOf(x.kind, x.target, app), color: x.color };
-      // (a first answer, shown while quicker ways are still being looked for, is not yet the route: see #payload)
+      // (a first answer, shown while quicker ways are still being looked for, is not yet the route: see #payload;
+      // nor is the way to where it was heading a moment ago: see answers)
+      if (r && !answers(x)) return { ...base, state: 'pending', text: '' };
       if (!r || r.provisional) return { ...base, state: !a || (a.done && a.settled && !r) ? 'none' : 'pending', text: !a || !r ? p.status || '' : '' };
       const track = trackOf(r, tol), also = alsoOf(r);
       points += track.stretches.reduce((n, s) => n + s.points.length / 2, 0) + also.reduce((n, s) => n + s.points.length / 2, 0);
@@ -258,6 +275,8 @@ export class InGameRoute {
       routes: routesOf(app),
       // how your hearthstone was counted in all of them (see #hearth)
       hearth: this.#hearth(),
+      // which quest they were worked out for, and how far it had got (main.js: questFor)
+      quest: app.questFor ?? null,
     };
     if (!r.enabled) return { ...base, text: 'Routes are switched off on the 3D map.' };
     if (!t) return { ...base, text: 'No waypoint.' };
@@ -305,10 +324,10 @@ export class InGameRoute {
     const now = performance.now();
     const others = (app.trips?.active() ?? []).filter((x) => !x.lead).map((x) => `${x.slot}${x.color}${x.planner.route ? x.planner.rev : '-'}`).join(',');
     // (which there are, and whether each has a route, is worked out or has none: said at once when that changes; how each stands as you walk, now and then)
-    const which = `${others.replace(/\d+(,|$)/g, '$1')}|${(app.trips?.active() ?? []).filter((x) => !x.lead).map((x) => { const q = x.planner, qa = q.asked; return q.route && !q.route.provisional ? `r${planOf(q.route)}` : !qa || (qa.done && qa.settled) ? 'n' : 'p'; }).join('')}`;
+    const which = `${others.replace(/\d+(,|$)/g, '$1')}|${(app.trips?.active() ?? []).filter((x) => !x.lead).map((x) => { const q = x.planner, qa = q.asked; return q.route && !answers(x) ? 'p' : q.route && !q.route.provisional ? `r${planOf(q.route)}` : !qa || (qa.done && qa.settled) ? 'n' : 'p'; }).join('')}`;
     if (which !== this.othersWhich || now - this.othersAt > OTHER_EVERY) { this.others = others; this.othersWhich = which; this.othersAt = now; }
     const m = app.markerForGame;
-    const sig = `${this.plan}|${r.enabled}|${t ? `${t.map},${t.x},${t.y},${t.z ?? ''},${t.source},${t.name ?? ''}` : '-'}|${a ? `${a.id},${+!!a.done},${+!!a.settled}` : '-'}|${r.status}|${app.levels?.rev ?? 0}|${+!!w.there}${+!!w.sure}|${this.others}|${this.othersWhich}|${app.trips?.color(app.trips.leadKind) ?? ''}|${m ? `${m.stamp}${m.off ? 'x' : ''}` : ''}|${+this.#hearth()}`;
+    const sig = `${this.plan}|${r.enabled}|${t ? `${t.map},${t.x},${t.y},${t.z ?? ''},${t.source},${t.name ?? ''}` : '-'}|${a ? `${a.id},${+!!a.done},${+!!a.settled}` : '-'}|${r.status}|${app.levels?.rev ?? 0}|${+!!w.there}${+!!w.sure}|${this.others}|${this.othersWhich}|${app.trips?.color(app.trips.leadKind) ?? ''}|${m ? `${m.stamp}${m.off ? 'x' : ''}` : ''}|${+this.#hearth()}|${app.questFor ? `${app.questFor.id}.${app.questFor.state}.${app.questFor.done}` : ''}`;
     if (sig === this.sig) return;
     this.sig = sig;
     clearTimeout(this.timer);

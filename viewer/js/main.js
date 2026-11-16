@@ -630,11 +630,16 @@ function step(now, seen) {
       if (heads.guide) want.guide = { ...heads.guide, source: 'guide' };
       if (gw && !taken && !newer && !gone) want.waypoint = { ...gw, source: 'pin' };
       if (heads.quest) {
-        const g = app.npcs.questGoal(heads.quest, me);
+        // (how far it has got, as the game says: what is done is not led to any more)
+        const g = app.npcs.questGoal(heads.quest, me, heads.tracked?.id === heads.quest ? heads.tracked : null);
         if (g) want.quest = { map: here, x: g.x, y: g.y, z: g.z ?? undefined, name: `${app.npcs.quests?.quests?.[heads.quest]?.n ?? 'Quest'}: ${g.done ? 'hand in to ' : ''}${g.name}`, source: 'quest' };
       }
       if (heads.corpse && P.state.player?.dead) want.death = { ...heads.corpse, name: 'Your body', source: 'corpse' };
     }
+    // Which quest the routes of this moment were worked out for, and how far it had got: said to
+    // the game with them (ingame.js). The game knows that at first hand - it hears of a thing
+    // done before this page does - and so can tell the route from before from the one it waits for.
+    app.questFor = heads ? { id: heads.quest ?? 0, state: heads.tracked?.id === heads.quest ? heads.tracked.state : 0, done: heads.tracked?.id === heads.quest ? heads.tracked.done : 0 } : null;
     // (a marker dropped here is a waypoint of your own too, where the game has none)
     if (!want.waypoint && marker && leadKind !== 'waypoint') want.waypoint = marker;
     if (P?.live && me) for (const m of P.state.party ?? []) if (m.x !== null && m.x !== undefined) want[`ally${m.slot}`] = { map: here, x: m.x, y: m.y, name: m.name ?? `Party ${m.slot}`, source: 'ally' };
