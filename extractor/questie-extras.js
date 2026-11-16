@@ -15,6 +15,9 @@
 //                               wowheadData (every creature Wowhead lists for an item some quest
 //                               asks for) and cmangosData (items that only drop while on their
 //                               quest, from the cmangos database of the original game).
+//   Zones/instanceIdToAreaId.lua
+//                               which of the game's maps each dungeon is: [map id] = area id, a number
+//                               or the name the addon has for that area (src/corrections/enum/zones.lua).
 //   Zones/dungeons.lua         the dungeons, and where each is entered from: [areaId] = { name,
 //                               other area ids its quests are filed under, the zone its door is in,
 //                               { { zone, x, y }, ... } } - a door as per cent across and down the
@@ -95,7 +98,8 @@ const pairsIn = (table) => { let n = 0; for (const row of table.values()) n += r
 /**
  * The dungeons QuestieDB knows, and where each is entered from (Zones/dungeons.lua):
  * { list: [{ area, name, also: [area ids its quests are filed under as well], doors: [{ zone, x, y }]
- * (per cent across and down that zone's map) }], hash (of the file: '' where there is none) }.
+ * (per cent across and down that zone's map) }], instances: { [the game's map id]: area id } (which
+ * map each dungeon is: Zones/instanceIdToAreaId.lua), hash (of the files: '' where there are none) }.
  * A dungeon whose door depends on your side (the battlegrounds) is left out.
  */
 export function readQuestieDungeons(tocFile) {
@@ -111,7 +115,17 @@ export function readQuestieDungeons(tocFile) {
       if (doors.length) list.push({ area: +m[1], name: m[2].replace(/\\(.)/g, '$1'), also: m[3] === 'nil' ? [] : [...m[3].matchAll(/\d+/g)].map((n) => +n[0]), doors });
     }
   }
-  return { list, hash: src ? crypto.createHash('sha1').update(src).digest('hex').slice(0, 16) : '' };
+  // which map is which dungeon: the area by its number, or by the name the addon has for it
+  const dir = typeof tocFile === 'string' && tocFile ? path.dirname(tocFile) : null;
+  const which = dir ? read(path.join(dir, 'support', FLAVOUR, 'Zones', 'instanceIdToAreaId.lua')) : '';
+  const named = new Map();
+  if (which) for (const m of uncommented(read(path.join(dir, 'src', 'corrections', 'enum', 'zones.lua'))).matchAll(/^[ \t]*([A-Z][A-Z0-9_]*)[ \t]*=[ \t]*(\d+)[ \t]*,/gm)) named.set(m[1], +m[2]);
+  const instances = {};
+  for (const m of uncommented(which).matchAll(/\[(\d+)\]\s*=\s*(?:(\d+)|ZoneDB\.zoneIDs\.([A-Z][A-Z0-9_]*))\s*,/g)) {
+    const area = m[2] ? +m[2] : named.get(m[3]);
+    if (area) instances[+m[1]] = area;
+  }
+  return { list, instances, hash: src || which ? crypto.createHash('sha1').update(src).update(which).digest('hex').slice(0, 16) : '' };
 }
 
 export function readQuestieExtras(tocFile) {

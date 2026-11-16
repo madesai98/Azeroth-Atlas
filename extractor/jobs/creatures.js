@@ -24,7 +24,7 @@ export const CREATURES_VERSION = 9;
 // What extract.js adds to world.json from QuestieDB and the map's own area grids: the area each
 // innkeeper stands in, the dungeons' doors. Raise it when that changes: the page then offers
 // "Update map", which writes world.json anew and builds nothing else again.
-export const PLACES_VERSION = 2;
+export const PLACES_VERSION = 3;
 export const CSEC = { META: 1, SPAWNS: 2, SPAWN_CREATURE: 3, PATH_POINTS: 4, PATHS: 5 };
 
 // Faction group bits: 1 = any player, 2 = Alliance, 4 = Horde.
@@ -253,16 +253,26 @@ const INNKEEPER = 128; // QuestieDB npc flag
  * The dungeons, each with where its doors are in the world: for leading a quest that is done
  * inside one to the way in (nobody in a dungeon new to this game can be placed, and nothing in
  * any dungeon is on the map you stand on outside it).
- * @param list   from QuestieDB (questie-extras.js: readQuestieDungeons): doors as per cent of a zone's map
- * @param areas  the game's areas (world.js): the map a dungeon's own area is on is the dungeon's map
- * @returns [{ area, name, also (area ids its quests are filed under as well), map (the dungeon's own, or null), doors: [{ map, pos: [x, y] }] }]
+ * @param list       from QuestieDB (questie-extras.js: readQuestieDungeons): doors as per cent of a zone's map
+ * @param areas      the game's areas (world.js)
+ * @param instances  { [map id]: area id } from QuestieDB: which of the game's maps each dungeon is
+ * @param maps       the game's own Map table (world.js): for a dungeon of the original game it says
+ *                   where a ghost goes back in (CorpseMapID, Corpse) - for one new to this game, nothing
+ * @returns [{ area, name, also (area ids its quests are filed under as well), map (the dungeon's own, or null),
+ *            doors: [{ map, pos: [x, y] }] (QuestieDB's), ghost: { map, pos: [x, y] } (the game's own, where it says) }]
  */
-export function placeDungeons(list, zones, areas) {
+export function placeDungeons(list, zones, areas, instances = {}, maps = []) {
   const zoneByArea = new Map();
   for (const z of [...zones].sort((a, b) => (a.type === 3 ? 0 : 1) - (b.type === 3 ? 0 : 1) || a.order - b.order)) {
     if (z.area && !zoneByArea.has(z.area)) zoneByArea.set(z.area, z);
   }
-  const out = [];
+  const mapOf = new Map(); // area -> the dungeon's own map
+  for (const [map, area] of Object.entries(instances)) if (!mapOf.has(area)) mapOf.set(area, +map);
+  const ghostOf = new Map(); // the dungeon's map -> where the game has a ghost go back in
+  for (const r of maps) {
+    if (r.CorpseMapID >= 0 && Array.isArray(r.Corpse) && (r.Corpse[0] || r.Corpse[1])) ghostOf.set(r.ID, { map: r.CorpseMapID, pos: [Math.round(r.Corpse[0] * 10) / 10, Math.round(r.Corpse[1] * 10) / 10] });
+  }
+  const out = [], told = new Set();
   for (const d of list) {
     const doors = [];
     for (const q of d.doors) {
@@ -271,7 +281,17 @@ export function placeDungeons(list, zones, areas) {
       const x = z.region[2] - (q.y / 100) * (z.region[2] - z.region[0]), y = z.region[3] - (q.x / 100) * (z.region[3] - z.region[1]);
       doors.push({ map: z.map, pos: [Math.round(x * 10) / 10, Math.round(y * 10) / 10] });
     }
-    if (doors.length) out.push({ area: d.area, name: d.name, also: d.also, map: areas[d.area]?.m ?? null, doors });
+    // (the dungeon's own map: as QuestieDB says; else the map its area is on, where that is not the map its doors are on)
+    let map = mapOf.get(d.area) ?? d.also.map((a) => mapOf.get(a)).find((m) => m !== undefined) ?? null;
+    if (map === null && areas[d.area] && !doors.some((q) => q.map === areas[d.area].m)) map = areas[d.area].m;
+    const ghost = map !== null ? ghostOf.get(map) : undefined;
+    if (map !== null) told.add(map);
+    if (doors.length || ghost) out.push({ area: d.area, name: d.name, also: d.also, map, doors, ...(ghost ? { ghost } : {}) });
+  }
+  // (a dungeon QuestieDB does not list, of which the game says where a ghost goes back in)
+  for (const r of maps) {
+    const ghost = ghostOf.get(r.ID);
+    if (ghost && !told.has(r.ID) && r.InstanceType > 0) out.push({ area: r.AreaTableID || 0, name: r.MapName_lang, also: [], map: r.ID, doors: [], ghost });
   }
   return out;
 }

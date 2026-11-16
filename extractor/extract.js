@@ -333,8 +333,8 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
       innsSig = sig('inns3', db.hash, ft?.hash ?? null);
       // the dungeons' doors, for leading a quest that is done inside one to the way in
       const dungeons = readQuestieDungeons(file);
-      world.data.dungeons = placeDungeons(dungeons.list, world.data.zones, world.data.areas);
-      dungeonsSig = sig('dungeons1', dungeons.hash, sig(world.data.zones));
+      world.data.dungeons = placeDungeons(dungeons.list, world.data.zones, world.data.areas, dungeons.instances, world.maps);
+      dungeonsSig = sig('dungeons2', dungeons.hash, sig(world.data.zones), sig(world.maps.map((r) => [r.ID, r.CorpseMapID, r.Corpse])));
       if (dungeons.list.length) log(`${world.data.dungeons.length} dungeons with their doors, from QuestieDB`);
       // the game's area under a spot, on any map (from the area grids built above)
       const grids = new Map();

@@ -435,6 +435,27 @@ export class NpcLayer {
     return { x: best.pos[0], y: best.pos[1], z: null, name: `${dungeon.name}, the way in`, done: false, ...(best.map === this.data.map ? {} : { map: best.map }) };
   }
 
+  /**
+   * Where a ghost goes back in to the dungeon its body is in: the spot the game's own tables
+   * name for that dungeon, else its door as QuestieDB has it (the nearest on the map in hand,
+   * else one on another map). { map, x, y, name } - or null: the map knows no way in to it.
+   * @param map   the dungeon's own map (as the game numbers it)
+   * @param from  [x, y] where you are, on the map in hand
+   */
+  bodyDoor(map, from) {
+    const dungeon = (this.app.world?.dungeons ?? []).find((x) => x.map === map);
+    if (!dungeon) return null;
+    const name = `Your body, in ${dungeon.name}: the way in`;
+    if (dungeon.ghost) return { map: dungeon.ghost.map, x: dungeon.ghost.pos[0], y: dungeon.ghost.pos[1], name };
+    const here = this.data?.map ?? this.app.scene?.map.id;
+    let best = null, bestD = Infinity;
+    for (const door of dungeon.doors) {
+      const dist = door.map === here && from ? Math.hypot(door.pos[0] - from[0], door.pos[1] - from[1]) : 1e9;
+      if (dist < bestD) { bestD = dist; best = door; }
+    }
+    return best ? { map: best.map, x: best.pos[0], y: best.pos[1], name } : null;
+  }
+
   /** What each NPC is to you: the kinds it counts as, for your side and level. */
   #classify() {
     const d = this.data;

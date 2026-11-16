@@ -359,6 +359,9 @@ end
 local heads = {
   guide = { on = false, map = 0, north = 0, west = 0 }, way = { on = false, map = 0, north = 0, west = 0 },
   corpse = { on = false, map = 0, north = 0, west = 0 }, quest = 0,
+  -- ghost: you are one, whether or not the game says where your body is (in a dungeon new to
+  -- this game it does not: the 3D map then leads to the dungeon's door all the same)
+  ghost = false,
   -- how far that quest has got (see QuestProgress): qsaid, the game says so; qstate: 0 under way,
   -- 1 ready to hand in, 2 failed; qn: how many things it asks for; qdone: which of them are done
   -- (a bit each, the first the lowest); qkinds: what each is (two bits each)
@@ -612,6 +615,7 @@ local function ReadTarget()
   if own then hd.way.map, hd.way.north, hd.way.west = own.map, own.north, own.west end
   local okc, cMap, cNorth, cWest = pcall(Corpse)
   hd.corpse.on = okc and cMap ~= nil and cNorth ~= nil and cWest ~= nil
+  hd.ghost = UnitIsGhost ~= nil and yes(UnitIsGhost("player"))
   if hd.corpse.on then hd.corpse.map, hd.corpse.north, hd.corpse.west = cMap, cNorth, cWest end
   local okq, quest = pcall(TrackedQuest)
   hd.quest = okq and quest or 0

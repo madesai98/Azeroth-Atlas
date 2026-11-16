@@ -634,6 +634,17 @@ section, where each also says how long it is:
   Hall of Thanes, the way in". A door is a spot on a zone's map, with no height: where there are
   several levels there, the route ends on the one the walk reaches. Inside the dungeon the game
   hides where you are, and there is no route.
+- **Dead in a dungeon, the run back leads to the dungeon's door.** Released, you are a ghost at
+  a graveyard outside and your body is inside. For a dungeon of the original game the game says
+  where a ghost goes back in (its own table of maps: 27 dungeons), and names that spot as your
+  body's place. For one new to this game it says nothing: the addon was told of no body, and
+  there was no corpse run at all. The page now knows which dungeon you were in when you were
+  last heard from in one, alive or dead (the game says which map you are on there, though not
+  where on it): a ghost outside it, your body is in it, and the run back goes to where the game
+  has a ghost go back in, else to the dungeon's door as QuestieDB has it ("Your body, in The
+  Hall of Thanes: the way in"). It is kept across the page loading itself again, and forgotten
+  once you are alive outside. In the game, a ghost's run back is shown whether or not the game
+  names a place for the body (addon version 20: it used to be taken away at once without one).
 - **The tracked quest's route moves on as the quest does.** The addon reports how far the
   quest has got, as the game's own list of what it asks for has it: when one thing is done the
   route goes to the nearest of what is left, and when all of it is done, to who takes it. What

@@ -19,6 +19,9 @@ const SETTLE_MS = 1200;      // a new kind of place has to last this long before
 const LOOK_MS = 250;         // how often the kind of place is looked at
 export const ZOOM_DEFAULT = { in: 35, town: 110, out: 300 }; // yards from you, by the kind of place
 
+const INSIDE_KEY = 'wfmap.inside';     // the dungeon you were last in, kept across reloads of the page
+const INSIDE_FOR = 3 * 3600 * 1000;    // ...for this long: a ghost does not wait longer than that
+
 export class PlayerLink {
   constructor(app) {
     this.app = app;
@@ -38,6 +41,10 @@ export class PlayerLink {
     this.onFollow = () => {}; // following was switched on or off (by you, or by moving the map from under yourself)
     this.switching = false;
     this.height = new HeightTracker(app);
+    // the dungeon you were last in while alive or dead in it ({ map, at }), and - dead outside it - the dungeon your body is in (see receive)
+    this.inside = null;
+    this.bodyIn = null;
+    try { const s = JSON.parse(localStorage.getItem(INSIDE_KEY)); if (s && Number.isInteger(s.map) && Date.now() - s.at < INSIDE_FOR) this.inside = s; } catch { /* nothing kept */ }
   }
 
   connect() {
@@ -51,6 +58,13 @@ export class PlayerLink {
       else this.receive({ status: 'off', reason: 'server' });
       if (es.readyState === EventSource.CLOSED) { es.close(); setTimeout(() => this.connect(), 2000); }
     };
+  }
+
+  /** The dungeon you are in (its map), or null: you are alive outside. Kept, so that it outlasts the page loading itself again. */
+  #wasIn(map) {
+    if ((this.inside?.map ?? null) === map) return;
+    this.inside = map === null ? null : { map, at: Date.now() };
+    try { if (this.inside) localStorage.setItem(INSIDE_KEY, JSON.stringify(this.inside)); else localStorage.removeItem(INSIDE_KEY); } catch { /* not kept */ }
   }
 
   get live() { return this.state.status === 'live'; }
@@ -80,6 +94,15 @@ export class PlayerLink {
         this.me.flying = p.flying ?? null;
         this.height.reading(this.me);
       }
+    }
+    // In a dungeon the game says which one, and nothing of where. Dead outside, having been in one
+    // when you were last heard from alive - or dead - in there, your body is in it: the run back
+    // is to its door (main.js). Mostly the game has no word of where that is: its own tables say
+    // it for the dungeons of the original game, and not for one new to this game.
+    if (p && state.status === 'live') {
+      if (p.inInstance) this.#wasIn(p.map);
+      else if (!p.dead) this.#wasIn(null);
+      this.bodyIn = p.dead && !p.inInstance && this.inside ? this.inside.map : null;
     }
     // Where you are heading (your guide's current step, or a pin on the game's map) and how you
     // can travel: run and swim speed, hearthstone, the flight points you know.

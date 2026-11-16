@@ -646,6 +646,12 @@ function step(now, seen) {
         if (g) want.quest = { map: g.map ?? here, x: g.x, y: g.y, z: g.z ?? undefined, name: `${app.npcs.quests?.quests?.[heads.quest]?.n ?? 'Quest'}: ${g.done ? 'hand in to ' : ''}${g.name}`, source: 'quest' };
       }
       if (heads.corpse && P.state.player?.dead) want.death = { ...heads.corpse, name: 'Your body', source: 'corpse' };
+      else if (P.state.player?.dead && Number.isInteger(P.bodyIn)) {
+        // (dead outside the dungeon your body is in, and the game has no word of where that is: the run back is to the dungeon's door)
+        const door = app.npcs.bodyDoor(P.bodyIn, me);
+        if (door) want.death = { map: door.map, x: door.x, y: door.y, name: door.name, source: 'corpse' };
+        if (changed('body', [P.bodyIn, !!door])) note('route', door ? `your body is in a dungeon (map ${P.bodyIn}): the run back leads to its door` : `your body is in a dungeon (map ${P.bodyIn}) the map knows no way in to: no run back to show`, door ?? undefined);
+      }
     }
     // Which quest the routes of this moment were worked out for, and how far it had got: said to
     // the game with them (ingame.js). The game knows that at first hand - it hears of a thing

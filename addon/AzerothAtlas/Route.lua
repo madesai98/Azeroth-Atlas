@@ -459,7 +459,8 @@ local function HeadsSig()
     quest = "q" .. h.quest .. "." .. (h.qsaid and (h.qstate .. "." .. h.qdone) or ("log" .. tostring(log or 0)))
     out[1] = quest
   end
-  if h.corpse.on then out[#out + 1] = "c" end
+  -- (a ghost: with your body's place as the game gives it - or without, where it gives none)
+  if h.corpse.on then out[#out + 1] = "c" elseif h.ghost then out[#out + 1] = "ghost" end
   if h.guide.on then out[#out + 1] = "g" .. h.guide.map .. "," .. floor(h.guide.north + 0.5) .. "," .. floor(h.guide.west + 0.5) end
   for i = 1, #party do
     if party[i].flags ~= 0 then out[#out + 1] = "p" .. i end
@@ -482,7 +483,7 @@ local function Prune(quest)
   local h, party = shared.Heads()
   local kept, changed = {}, false
   for _, o in ipairs(others) do
-    local gone = (o.key == "quest" and not (h.quest and h.quest > 0)) or (o.key == "death" and not h.corpse.on) or (o.key == "guide" and not h.guide.on)
+    local gone = (o.key == "quest" and not (h.quest and h.quest > 0)) or (o.key == "death" and not h.corpse.on and not h.ghost) or (o.key == "guide" and not h.guide.on)
     local slot = tonumber(string.match(o.key, "^ally(%d)$") or "")
     if slot and party[slot] and party[slot].flags == 0 then gone = true end
     if gone then
