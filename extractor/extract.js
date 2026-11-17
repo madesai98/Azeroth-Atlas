@@ -24,7 +24,8 @@ import { MODEL_VERSION } from './jobs/model.js';
 import { TREES_VERSION, isTree } from './trees.js';
 import { CREATURES_VERSION, placeCreatures, placeInns, placeDungeons, writeCreatures } from './jobs/creatures.js';
 import { readQuestieDungeons } from './questie-extras.js';
-import { findQuestieDb, readQuestie, questieStamp } from './questie.js';
+import { findQuestieDb, readQuestie, questieStamp, questieFrom } from './questie.js';
+import { fetchQuestie } from '../atlasdb/questiedb.js';
 import { NPCS_VERSION, placeNpcs, resolveHeights, writeNpcs, buildQuests } from './jobs/npcs.js';
 import { fetchReference, readReference } from './reference.js';
 import { NavReader } from './navread.js';
@@ -309,8 +310,14 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
   }
 
   // ---- creatures (source of the danger zones) --------------------------------------------
-  // Optional: needs the community QuestieDB addon in the game's AddOns folder. Anything wrong
-  // with it only disables danger zones; it never fails the map update.
+  // From QuestieDB, the community's database of this game. The Atlas database has it as it is
+  // published (a scheduled function puts every new version there): it is fetched from there
+  // first, so the game needs no addon for it. Without a connection the copy fetched earlier is
+  // used, and without one of those the QuestieDB addon in the game's AddOns folder, where it is
+  // installed. Optional all the same: anything wrong with it only leaves the danger zones, the
+  // NPCs and the quests out; it never fails the map update.
+  report({ type: 'phase', name: 'Looking for newer creature data' });
+  await fetchQuestie(cfg, log);
   report({ type: 'phase', name: 'Placing creatures' });
   let danger = null;
   let questie = null; // which QuestieDB file this map was built from (even if it was unusable)
@@ -319,9 +326,11 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
   try {
     const file = findQuestieDb(cfg);
     if (file) questie = { stamp: questieStamp(file) };
-    if (!file) log('QuestieDB addon not found in the game folder: danger zones are unavailable');
+    if (!file) log('QuestieDB could not be fetched from the Atlas database and is not an addon in the game folder either: spawn zones, NPCs and quests are unavailable');
     else {
       const db = readQuestie(file);
+      questie.hash = db.hash; // (what is in it: the same data in another place is the same data - see builtFromQuestie)
+      log(`QuestieDB ${db.version ?? '?'}, from ${questieFrom(cfg, file)}`);
       const ft = await loadTable(casc, 'FactionTemplate', log);
       const templates = ft ? new Map(ft.rows.map((r) => [r.ID, { friend: r.FriendGroup, enemy: r.EnemyGroup }])) : null;
       questieDb = db; factionTemplates = templates; factionHash = ft?.hash ?? null;

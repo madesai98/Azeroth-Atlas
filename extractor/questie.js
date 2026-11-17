@@ -1,7 +1,12 @@
-// Reads the QuestieDB addon installed in the game's AddOns folder: every creature (name, level,
-// what it does, where it stands, its patrol paths), every quest (who gives and takes it, what it
-// asks for), the objects quests use, and the items they ask for. QuestieDB is
-// community-maintained public data; it is only read, never modified.
+// Reads QuestieDB: every creature (name, level, what it does, where it stands, its patrol
+// paths), every quest (who gives and takes it, what it asks for), the objects quests use, and
+// the items they ask for. QuestieDB is community-maintained public data, published as an addon
+// for the game; it is only read, never modified.
+//
+// Where it is read from (findQuestieDb): the copy the map fetched from the Atlas database
+// (atlasdb/questiedb.js: a scheduled function puts every new version of QuestieDB there, so
+// nobody needs the addon for the map's sake), or the addon in the game's own AddOns folder where
+// that is installed and is the newer of the two. Both are the same files, laid out the same way.
 //
 // Layout (see QuestieDB/src/read/baked.lua and src/meta/*.lua): one line per stored value,
 //
@@ -19,7 +24,11 @@ import crypto from 'node:crypto';
 import { decodeCBOR } from './formats/cbor.js';
 import { flavourFolder } from './config.js';
 
-const SUPPORTED_CONTRACTS = new Set(['4']);
+/** The layouts of the data file this version of the map can read (its "X-Contract-Version"), written in "baked" mode. */
+export const SUPPORTED_CONTRACTS = new Set(['4']);
+export const FLAVOUR = 'Forever';
+/** The data file's name for this game, as the addon has it. */
+export const TOC_NAME = `QuestieDB_${FLAVOUR}.toc`;
 // (fields 2 and 3 of a creature, its health, are placeholders: no creature has them)
 const NPC = { name: 1, minLevel: 4, maxLevel: 5, rank: 6, spawns: 7, paths: 8, zone: 9, questStarts: 10, questEnds: 11, faction: 12, friendly: 13, subName: 14, flags: 15 };
 const QUEST = { name: 1, startedBy: 2, finishedBy: 3, requiredLevel: 4, questLevel: 5, requiredRaces: 6, requiredClasses: 7, objectivesText: 8, triggerEnd: 9, objectives: 10, sourceItem: 11, preGroup: 12, preSingle: 13, exclusiveTo: 16, zoneOrSort: 17, next: 22, questFlags: 23, specialFlags: 24, parent: 25, maxLevel: 32 };
@@ -30,8 +39,68 @@ const OBJECT = { name: 1, questStarts: 2, questEnds: 3, spawns: 4, zone: 5, fact
 // (fields 8 and 16 of an item, its food type and the spell it teaches, are in no item of this data)
 const ITEM = { name: 1, npcDrops: 2, objectDrops: 3, itemDrops: 4, startQuest: 5, questRewards: 6, flags: 7, itemLevel: 9, requiredLevel: 10, ammoType: 11, class: 12, subClass: 13, vendors: 14, relatedQuests: 15 };
 
-/** Path of the QuestieDB data file for this game flavour, or null if the addon is not installed. */
+/** Where the copy fetched from the Atlas database is kept (atlasdb/questiedb.js writes it). */
+export const fetchedQuestieDir = (dataDir) => path.join(dataDir, 'sources', 'questiedb');
+
+/**
+ * Path of the data file in the copy fetched from the Atlas database, or null where there is
+ * none. source.json there names the folder that is in use (a newer one is written beside it and
+ * only then named, so a copy half fetched is never read).
+ */
+export function fetchedQuestieDb(cfg) {
+  try {
+    const dir = fetchedQuestieDir(cfg.dataDir);
+    const note = JSON.parse(fs.readFileSync(path.join(dir, 'source.json'), 'utf8'));
+    if (typeof note?.folder !== 'string' || !/^[A-Za-z0-9_][\w.-]*$/.test(note.folder)) return null;
+    const file = path.join(dir, note.folder, 'QuestieDB', TOC_NAME);
+    return fs.existsSync(file) ? file : null;
+  } catch { return null; }
+}
+
+// What a data file says its version is (the first lines of it), remembered for as long as the file stays as it is.
+const versions = new Map();
+function versionOf(file) {
+  try {
+    const st = fs.statSync(file);
+    const key = `${st.size}:${Math.round(st.mtimeMs)}`;
+    const had = versions.get(file);
+    if (had?.key === key) return had.version;
+    const fd = fs.openSync(file, 'r');
+    let head;
+    try { const buf = Buffer.alloc(8192); head = buf.toString('utf8', 0, fs.readSync(fd, buf, 0, buf.length, 0)); } finally { fs.closeSync(fd); }
+    const version = /^## Version:\s*(\S+)/m.exec(head)?.[1] ?? null;
+    versions.set(file, { key, version });
+    return version;
+  } catch { return null; }
+}
+/** Is version a later than b? By their numbers ("1.10.0" is later than "1.9.3"); what cannot be told is not later. */
+export function laterVersion(a, b) {
+  const nums = (v) => (/^v?(\d+(?:\.\d+)*)/.exec(String(v ?? ''))?.[1] ?? '').split('.').filter(Boolean).map(Number);
+  const x = nums(a), y = nums(b);
+  if (!x.length || !y.length) return false;
+  for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] ?? 0) - (y[i] ?? 0); if (d) return d > 0; }
+  return false;
+}
+
+/**
+ * Path of the QuestieDB data file the map is to be built from, or null if there is none: the
+ * copy fetched from the Atlas database, or the addon in the game's folder where that is the
+ * newer version (a database that has fallen behind does not hold back someone who keeps the
+ * addon up to date), or the only one there is.
+ */
 export function findQuestieDb(cfg) {
+  const fetched = fetchedQuestieDb(cfg), own = installedQuestieDb(cfg);
+  if (!fetched || !own) return fetched ?? own;
+  return laterVersion(versionOf(own), versionOf(fetched)) ? own : fetched;
+}
+
+/** Where a data file is from, in words: 'the Atlas database' or 'the addon in the game'. */
+export function questieFrom(cfg, file) {
+  return file && path.resolve(file).toLowerCase().startsWith(path.resolve(fetchedQuestieDir(cfg.dataDir)).toLowerCase() + path.sep) ? 'the Atlas database' : 'the addon in the game';
+}
+
+/** Path of the data file of the QuestieDB addon in the game's own AddOns folder, or null if the addon is not installed. */
+export function installedQuestieDb(cfg) {
   const folder = flavourFolder(cfg);
   if (!folder) return null;
   const dir = path.join(cfg.installRoot, folder, 'Interface', 'AddOns', 'QuestieDB');
@@ -51,6 +120,40 @@ export function findQuestieDb(cfg) {
 export function questieStamp(file) {
   if (!file) return null;
   try { const st = fs.statSync(file); return `${st.size}:${Math.round(st.mtimeMs)}`; } catch { return null; }
+}
+
+// A fingerprint of what is in a data file: the same for the same file wherever it lies. Worked
+// out once, and again only when the file has changed (it is 18 MB: a fiftieth of a second).
+const hashes = new Map();
+export function questieHash(file) {
+  const stamp = questieStamp(file);
+  if (!stamp) return null;
+  const had = hashes.get(file);
+  if (had?.stamp === stamp) return had.hash;
+  let hash = null;
+  try { hash = crypto.createHash('sha1').update(fs.readFileSync(file)).digest('hex'); } catch { return null; }
+  hashes.set(file, { stamp, hash });
+  return hash;
+}
+
+/**
+ * Was the map made from the data file that is in use now? `built` is what the map's manifest
+ * noted of the file it was built from: { stamp, hash } (hash: since the data can come from the
+ * Atlas database; a map built before that has the stamp alone).
+ *
+ * The same data in another place counts as the same: the copy fetched from the database where
+ * the map was built from the addon in the game, or the other way round. Otherwise everyone who
+ * has the addon would be told to update a map that has nothing to gain, the day the fetched
+ * copy takes the addon's place.
+ */
+export function builtFromQuestie(cfg, file, built) {
+  if (!file || !built) return false;
+  if (built.stamp === questieStamp(file)) return true; // the very file, as it was
+  const hash = questieHash(file);
+  if (built.hash) return built.hash === hash;
+  // (built before the fingerprint was noted: from the addon in the game, if that still is as it was then)
+  const own = installedQuestieDb(cfg);
+  return !!own && own !== file && built.stamp === questieStamp(own) && questieHash(own) === hash;
 }
 
 const text = (v) => (Buffer.isBuffer(v) ? v.toString('utf8') : typeof v === 'string' ? v : null);

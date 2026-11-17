@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-// The scheduled function that reads the auction houses (functions/), put in the cloud and
-// looked after. For whoever keeps the Atlas database: it needs a sign-in that owns the
-// database's Firebase project (https://console.firebase.google.com), which must be on the
-// pay-as-you-go plan (Firebase runs no functions without it).
+// The scheduled functions (functions/) - the one that reads the auction houses, and the one
+// that takes each new version of QuestieDB into the database - put in the cloud and looked
+// after. For whoever keeps the Atlas database: it needs a sign-in that owns the database's
+// Firebase project (https://console.firebase.google.com), which must be on the pay-as-you-go
+// plan (Firebase runs no functions without it).
 //
-// This is no part of what a copy of the map does: a copy only reads the prices the function
-// puts into the database.
+// This is no part of what a copy of the map does: a copy only reads what the functions put into
+// the database.
 //
 //   node tools/cloud.mjs login      sign in to Firebase (once; a browser window opens)
 //   node tools/cloud.mjs key --id-file=<file> --secret-file=<file>
@@ -13,8 +14,8 @@
 //                                   https://develop.battle.net): its two values, each from a file
 //                                   holding nothing else, go into the project's Secret Manager.
 //                                   Nothing of it is kept on this computer; delete the two files after
-//   node tools/cloud.mjs deploy     put the function in the cloud, or the newer version of it
-//   node tools/cloud.mjs logs       what its last runs said
+//   node tools/cloud.mjs deploy     put the functions in the cloud, or the newer version of them
+//   node tools/cloud.mjs logs       what their last runs said (--only=auctions or --only=questie: one of them)
 //   node tools/cloud.mjs rules      publish atlasdb/rules.json as the database's rules
 //                                   (the same as pasting it into the console)
 //
@@ -64,7 +65,8 @@ if (command === 'login') {
   }
   process.exitCode = firebase(['deploy', '--only', 'functions', '--force']);
 } else if (command === 'logs') {
-  process.exitCode = firebase(['functions:log', '--only', 'auctions', '--lines', value('lines') ?? '40']);
+  const only = ['auctions', 'questie'].includes(value('only')) ? value('only') : 'auctions,questie';
+  process.exitCode = firebase(['functions:log', '--only', only, '--lines', value('lines') ?? '40']);
 } else if (command === 'rules') {
   process.exitCode = firebase(['deploy', '--only', 'database']);
 } else {

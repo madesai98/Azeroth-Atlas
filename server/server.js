@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import { loadConfig, readConfigFile, PROJECT_ROOT, CONFIG_FILE } from '../extractor/config.js';
 import { DATA_STAMP } from '../extractor/stamp.js';
 import { installedBuild } from '../extractor/casc/casc.js';
-import { findQuestieDb, questieStamp } from '../extractor/questie.js';
+import { findQuestieDb, builtFromQuestie } from '../extractor/questie.js';
 import { PlayerTracker } from './tracker.js';
 import { addonStatus, installAddon, convertGuides, flavourFolder, addonsDir } from './addon.js';
 import { SeenStore } from './seen.js';
@@ -116,12 +116,14 @@ function status() {
   let installed = null, installError = null, manifest = null;
   try { installed = installedBuild(cfg.installRoot, cfg.product); } catch (err) { installError = err.message; }
   try { manifest = JSON.parse(fs.readFileSync(path.join(cfg.dataDir, 'manifest.json'), 'utf8')); } catch { /* not extracted yet */ }
-  // Creature data (spawn zones, NPCs, quests) comes from the QuestieDB addon, which updates on its own
-  // schedule: flag it when the installed copy differs from the one the map was built from.
-  let creatureStamp = null;
-  try { creatureStamp = questieStamp(findQuestieDb(cfg)); } catch { /* treated as not installed */ }
+  // Creature data (spawn zones, NPCs, quests) comes from QuestieDB, which has new versions on its own
+  // schedule (fetched from the Atlas database by atlasdb.js as they come out; or the addon in the game's
+  // folder): flag it when the copy on this disk differs from the one the map was built from.
+  let creatureFile = null;
+  try { creatureFile = findQuestieDb(cfg); } catch { /* treated as not there */ }
   const newBuild = !!installed && (!manifest || manifest.build.buildKey !== installed.buildKey);
-  const newCreatureData = !!installed && !!manifest && !!creatureStamp && manifest.questie?.stamp !== creatureStamp;
+  let newCreatureData = false;
+  try { newCreatureData = !!installed && !!manifest && !!creatureFile && !builtFromQuestie(cfg, creatureFile, manifest.questie); } catch { /* as it was */ }
   // The map tool itself has been updated since the map was built, and builds some of it differently
   // now (extractor/stamp.js): the page goes on working with the map as it is, and offers to build it again.
   const newTool = !!installed && !!manifest && manifest.tool !== DATA_STAMP;

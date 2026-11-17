@@ -1008,7 +1008,7 @@ function showSetup(st) {
 // ---- "Check for updates": everything, in turn ----------------------------------------------
 // One button that brings up to date whatever is not, and leaves alone what is:
 //   1. Azeroth Atlas itself (server/appupdate.js: a newer version is fetched and put in);
-//   2. the map's data (built again where the game, the QuestieDB addon or the map tool has moved on);
+//   2. the map's data (built again where the game, QuestieDB or the map tool has moved on);
 //   3. the addon in the game (installed or updated - it is the one that came with this version);
 //   4. guide packs made for Guidelime (converted, so that the addon runs them).
 // An update of the map tool, and a new build of the map, load the page again: where the run has
@@ -1129,7 +1129,7 @@ function showStatus(st) {
   const inst = st.installed?.version, ext = st.extracted?.build.version;
   if (st.installError) $('build').textContent = `Game not found: ${st.installError}`;
   else if (!ext) $('build').textContent = `Game build ${inst} — map not built yet`;
-  else if (st.updateAvailable && st.updateReason === 'creatures') $('build').textContent = `Game build ${inst} — the QuestieDB addon has changed since the map's creature data was built`;
+  else if (st.updateAvailable && st.updateReason === 'creatures') $('build').textContent = `Game build ${inst} — there is a newer QuestieDB than the one the map's creatures, NPCs and quests were built from: press Update map`;
   else if (st.updateAvailable && st.updateReason === 'tool') $('build').textContent = `Game build ${inst} — the map tool has been updated since the map was built: press Update map`;
   else if (st.updateAvailable) $('build').textContent = `Map is from build ${ext}; game is now ${inst}`;
   else $('build').textContent = `Game build ${inst} — map up to date`;
@@ -1414,7 +1414,7 @@ function applyDanger() {
 function showDangerSource() {
   const map = app.scene?.map;
   let note = '';
-  if (!app.manifest.danger) note = 'No creature data: install the QuestieDB addon, then press Update map.';
+  if (!app.manifest.danger) note = 'No creature data yet: press Update map, which fetches it.';
   else if (!map?.creatures) note = 'No creature data for this map.';
   else {
     const loose = app.danger.unconfirmed;

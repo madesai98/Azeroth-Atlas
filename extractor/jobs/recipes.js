@@ -21,10 +21,11 @@
 // teaches. "learnt at" is the skill the table gives, which for most trainer-taught recipes is 1:
 // the skill a trainer asks for is the trainer's to say, and is not in the game's files.)
 //
-// `sold` lists the reagents some vendor sells, as far as QuestieDB knows (the addon's item data
-// names the vendors of each item): thread, vials, flux and the like, which cost what the vendor
-// asks however dear the auction house makes them. Where the addon is not installed the list is
-// empty, and such a reagent is priced by the auction house alone.
+// `sold` lists the reagents some vendor sells, as far as QuestieDB knows (its item data names
+// the vendors of each item): thread, vials, flux and the like, which cost what the vendor asks
+// however dear the auction house makes them. Where QuestieDB is not to be had (neither fetched
+// from the Atlas database nor an addon in the game: extractor/questie.js) the list is empty, and
+// such a reagent is priced by the auction house alone.
 //
 // That the game's tables hold all this, and where, was laid out by the forever-ref project
 // (github.com/alcaras/forever-ref); the code here is this project's own, and its results were
@@ -116,7 +117,7 @@ export async function ensureRecipes(casc, cfg, log = () => {}) {
       const db = readQuestie(file);
       const wanted = new Set(recipes.flatMap((r) => r[8].map((x) => x[0])));
       for (const id of [...wanted].sort((a, b) => a - b)) if (db.item(id)?.vendors?.length) sold.push(id);
-    } else log('recipes: QuestieDB is not installed: which reagents a vendor sells is not known');
+    } else log('recipes: QuestieDB is not on this computer yet (Update map fetches it): which reagents a vendor sells is not known');
   } catch (err) { log(`recipes: QuestieDB could not be read (${err.message}): which reagents a vendor sells is not known`); }
   const used = new Set(recipes.map((r) => r[2]));
   for (const id of Object.keys(skills)) if (!used.has(Number(id))) delete skills[id];

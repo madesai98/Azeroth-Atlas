@@ -11,6 +11,9 @@
     "market": {
       ".read": "auth != null"
     },
+    "questie": {
+      ".read": "auth != null"
+    },
     "inbox": {
       "$copy": {
         "$delivery": {

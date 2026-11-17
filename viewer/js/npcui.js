@@ -97,7 +97,7 @@ export function bindNpcs(app, sheet) {
     // (what kind of thing a creature is: only where this map's data says so)
     $('npcTypes').style.display = !layer.data || layer.data.typed ? '' : 'none';
     let text = '';
-    if (!app.manifest?.npcs) text = 'No NPC data: install the QuestieDB addon, then press Update map.';
+    if (!app.manifest?.npcs) text = 'No NPC data yet: press Update map, which fetches it.';
     else if (!layer.data) text = app.scene?.map.npcs ? 'Loading…' : 'No NPCs recorded for this map.';
     else {
       const h = layer.heights(), total = layer.data.n, pct = (c) => `${Math.round((c / Math.max(1, total)) * 100)}%`;

@@ -11,7 +11,9 @@ Azeroth Atlas is an application for Windows that runs beside the game. You need:
 
 - **WoW Forever** installed through Battle.net;
 - about **4 GB** of disk space for the map data;
-- for NPCs, spawn zones and quests: the **QuestieDB** addon in the game (the map works without).
+- a connection to the internet while the map is built. NPCs, spawn zones and quests come from
+  QuestieDB, which the map fetches for itself: you do not need that addon in the game, or to
+  keep it up to date, for the map's sake (see "Where QuestieDB comes from").
 
 Then:
 
@@ -162,8 +164,10 @@ build is newer than the map. An update:
 - removes map files whose source no longer exists in the game;
 - fetches updated public table-column definitions (WoWDBDefs) automatically if a patch changed a
   table layout;
-- re-reads the creature, NPC and quest data from the QuestieDB addon and the reference database. The button also
-  turns orange ("new creature data") when that addon has been updated since the last build;
+- fetches QuestieDB from the Atlas database where a newer version of it is there, and re-reads
+  the creature, NPC and quest data from it and the reference database. The button also turns
+  orange when a newer QuestieDB has come in since the last build (the map looks for one a little
+  after it starts and every six hours while it runs);
 - reloads the page when finished, keeping your current view.
 
 You can also run it from a terminal: `npm run extract` (add `--force` to rebuild everything,
@@ -300,7 +304,8 @@ extractor/   reads the game archives and writes map data        (node extractor/
   casc/        local archive reader: index, encoding and root manifest, BLTE decoding
   formats/     game file parsers: DB2 tables, WDT/ADT terrain, WMO buildings, M2 objects, BLP
   jobs/        builders run on worker threads: tiles, detail pyramid, area grids, models
-  questie.js   reads the QuestieDB addon: creatures, quests, quest objects (spawn zones, NPCs, quests)
+  questie.js   reads QuestieDB (as fetched from the Atlas database, or the addon in the game's
+               folder): creatures, quests, quest objects (spawn zones, NPCs, quests)
   reference.js fetches and reads the public cmangos classic-db, a second source: NPC heights, what
                kind of thing a creature is, and for the quest explorer how many of each thing a
                quest asks for, drop rates, creature health and respawn times
@@ -360,10 +365,11 @@ part of a zone is which level.
 - Point at a zone to see what spawns there (the read-out at the bottom left). `~` after a
   level means the level was estimated.
 
-Where the data comes from: positions, levels and patrol routes are read from the community
-**QuestieDB** addon in your game's AddOns folder (the same database quest helpers use) when you
-press **Update map**; which side a creature attacks comes from the game's own faction table.
-Without QuestieDB installed the rest of the map works and this section says so.
+Where the data comes from: positions, levels and patrol routes are the community's
+**QuestieDB** (the same database quest helpers use), fetched and read when you press **Update
+map** (see "Where QuestieDB comes from": no addon is needed for it); which side a creature
+attacks comes from the game's own faction table. Where QuestieDB could not be fetched and is
+not an addon in the game either, the rest of the map works and this section says so.
 
 **Routes pay the zones no heed.** They used to be "danger zones", which a route could be told
 to go round. That is gone: a zone says where something is stationed, not where it is at this
@@ -582,7 +588,7 @@ with the time of each quest and of the whole, what else it opens, and:
 
 | Source | What it gives |
 | --- | --- |
-| **QuestieDB** (the addon in your game's folder: this game's own data) | Every quest: its name, level, side, words, who gives and takes it, what it has you kill, use or collect, what comes before and after it; where everyone and everything stands |
+| **QuestieDB** (this game's own data; fetched from the Atlas database: see "Where QuestieDB comes from") | Every quest: its name, level, side, words, who gives and takes it, what it has you kill, use or collect, what comes before and after it; where everyone and everything stands |
 | **cmangos classic-db** (the public database of the original game, downloaded once by Update map) | How many of each thing a quest asks for; how often each creature or chest gives an item (drop rates gathered from players of the original game over years, where QuestieDB only says who can drop it); each creature's health; how soon it is back once killed |
 
 A quest or creature that is new to this game is in the first and not the second. Of the 5,910
@@ -1417,7 +1423,10 @@ out. A quest whose earlier quests you have not done, or which you do not have an
 you take, is out of reach: its steps are shown greyed with what they wait for, and passed over.
 A step that names no spot sends you where it is done: the quest's giver or taker, the thick of
 what the quest asks for, the NPC it names. Those places, quest names, and which quest needs
-which come from the **QuestieDB** addon, the same data the 3D map is built from.
+which come from the **QuestieDB** addon, the same data the 3D map is built from. **In the game
+that addon has to be installed and switched on** (every guide pack names it as an addon it
+needs): the game loads only what is in its own AddOns folder, so the copy of QuestieDB the map
+fetches for itself is of no use there.
 
 **Done for you**, as set in the list of guides (taken over from Guidelime's settings the first
 time the addon sees Guidelime switched on): quests accepted and handed in at the NPC - none,
@@ -1761,6 +1770,7 @@ The extractor keeps what a pathfinder needs, in `dataDir`:
 | `quests.json` | Every quest: name `n`, level `l`, from level `m`, side (1 Alliance, 2 Horde, 3 either), who starts (`s` NPCs, `so` objects, `si` items) and ends it (`e`, `eo`), its text `t`, what it asks for (`oc` creatures, `ok` kill credit, `oo` objects, `oi` items), what comes before and after; from the reference database, where it has the quest: `nd` how many of each (`[kind n / o / i, id, count]`), `ty` its type (elite, dungeon, raid...), `tl` its time limit. Plus `items`: those quests ask for, with what drops them (`d` creatures, `o` objects, `v` vendors) and how often (`dc`, `oc`: per source `[per cent, how many at a time]`); `mobs`: every creature a quest has you kill or that drops something wanted (`sp` spawn points, `lv` levels, `rk` rank, `hp` health, `ct` kind, `rs` seconds to come back); and the name and first position of every NPC and object mentioned. `source` and `reference` name the two databases |
 | `user/npcs-seen.json` | Where you have seen NPCs stand for yourself (see "Seen in game"). Never touched by a map update |
 | `sources/classic-db/` | The reference database as downloaded, with a note of where it came from |
+| `sources/questiedb/` | QuestieDB as fetched from the Atlas database (see "Where QuestieDB comes from"): `source.json` says which version is in use, and the files are in a folder of that version's own, laid out as in the addon, with QuestieDB's licence. The version before it is kept until the next one comes |
 | `world.json` | Area names/hierarchy, zones with world rectangles, points of interest, liquid types (water / ocean / magma / slime), **flight masters and flight paths with their full 3D route points** (boat and zeppelin routes too; `pointMaps` says which map each point is on when a route crosses continents), `transports` (each boat / zeppelin line: its stops with map and position, seconds to the next stop, seconds for a full round), `portals` (doorways between maps, from `extractor/doorways.json`, or ShortestPathForever's `Data/Portals.lua` where that addon is installed), `inns` (every innkeeper: map, zone, position, reaction to each side; from QuestieDB), area triggers (dungeon entrances and other transitions) |
 
 World coordinates are the game's: +X north, +Y west, +Z up, in yards. A tile is 533.33 yd and
@@ -1849,7 +1859,8 @@ database for an anonymous account: a made-up name and a key to come back as the 
 the copy is a new nobody the next time. What a copy sends is filed under that name.
 
 **What a copy may do there** is settled by the database's own rules (`atlasdb/rules.json`), not
-by the copy: any copy that has signed in may read what is published; each may add to its own
+by the copy: any copy that has signed in may read what is published (the records, the auction
+prices, QuestieDB); each may add to its own
 corner of what was sent, and may neither change nor take back what it has sent, nor see anybody
 else's; and only the copies the database lists as maintainers may publish (the records, and the
 auction prices: see "Auction prices"). The address and the
@@ -1867,6 +1878,7 @@ line is only there in a version that names a database.
 | `status` | what is published, how many copies have sent something, what this copy has |
 | `collect` | send what this copy has learned, now (`--dry`: only say what would be sent) |
 | `pull` | fetch the database as published (only the parts that changed) into `<dataDir>/atlasdb` |
+| `questie` | fetch QuestieDB as the database has it, if this disk has another version (below) |
 | `show npc 263380` | one record (`quest`, `object` likewise; `--local`: as last fetched) |
 | `publish` | make the database again from the sources on this disk and everything every copy has sent, and write what changed. For the copy that keeps the database: `"database": { "maintain": true }` has the map do this by itself. The database lets only a maintainer do it |
 | `whoami` | the made-up name this copy is signed in under |
@@ -1877,6 +1889,65 @@ The pieces: `atlasdb/records.js` (a record, and how sources are merged into one)
 `rtdb.js` (talking to the database: plain web requests, nothing to install), `signin.js` (the
 anonymous account), `rules.json` (the database's rules, as pasted into the Firebase console),
 `extractor/wdb.js` (reading the game's cache), `server/atlasdb.js` (the map doing it by itself).
+
+### Where QuestieDB comes from
+
+The map's creatures, NPCs, spawn zones and quests are built from **QuestieDB**, the community's
+database of this game (github.com/Questie/QuestieDB), which is published as an addon. The map
+used to read it from the addon in your own game folder, so everybody had to install it and keep
+it up to date for the map's sake. Now it is fetched for you:
+
+1. **A scheduled function in the cloud** (`functions/questie.js`, part of the Atlas database's
+   own Firebase project, beside the one that reads the auction houses) asks once an hour where
+   QuestieDB is published which version is the latest. That is one small question. Only when
+   the answer is another version than the database holds does it fetch that release (16 MB) and
+   write the files the map reads into the database, under `/questie`, **as QuestieDB publishes
+   them**: the data file for this game, what the addon keeps beside it (quest experience, drop
+   rates, the dungeons and their doors), and QuestieDB's licence. Nothing is changed in them.
+2. **Every copy of the map fetches them from the database** into
+   `<dataDir>/sources/questiedb`: when **Update map** runs, a little after the map starts, and
+   every six hours while it runs. A look that finds nothing newer is one small request. A
+   newer version is about 10 MB to fetch, less where only some of the files changed; it is
+   checked file by file against the fingerprints the database gives, read once to see that it
+   can be read, and only then put to use. **Update map** then turns orange.
+
+So the map needs no QuestieDB addon, and a newer QuestieDB reaches every copy within hours of
+its release, whoever has what installed.
+
+**The addon in your game folder still counts** where it is there: of the fetched copy and the
+addon, the map is built from the newer version (the fetched one where they are the same). So
+somebody who keeps the addon up to date is not held back should the database ever fall behind,
+and without a connection, or with `"database": false`, the addon is what is read, as before.
+The same data in either place is the same data: a map built from the addon is not asked to be
+built again the day the fetched copy of that version arrives.
+
+**In the game, nothing changes.** Addons that use QuestieDB there - Questie, guide packs, this
+addon's own guide window for steps that name no spot - need the addon in the game's AddOns
+folder: the game loads nothing from anywhere else.
+
+**What is refused.** A release whose data file is laid out in a way this version of the map
+cannot read stays in the database and is not fetched (the copy in use goes on being used, and
+`status` says so); a release with less than half the creatures, objects or quests of the last
+is taken for broken by the function and not put in at all. `/questie/check` in the database
+says when the function last looked, and what went wrong if something did.
+
+| In the database | |
+| --- | --- |
+| `/questie/meta` | which version is there: its tag and version, the layout of its data file, where it came from, how many creatures, objects, quests and items it holds, and the list of its files with the fingerprint of each |
+| `/questie/data/<fingerprint>` | one file, gzipped and written as text in pieces of 4 MB (the database takes no larger, and compresses nothing itself) |
+| `/questie/check` | the function's last look: when, and whether it found the same version, took a new one in, or failed |
+
+For whoever keeps the database: the function goes into the cloud with the other one
+(`node tools/cloud.mjs deploy`), needs no key (QuestieDB's releases are public), and the
+database's rules must let copies read `/questie` (`atlasdb/rules.json` does:
+`node tools/cloud.mjs rules`). `node tools/cloud.mjs logs` shows what both functions' last runs
+said. The copy that makes the database (`publish`) reads QuestieDB the same way as any other,
+so the records are made from the newest version there is.
+
+QuestieDB is the work of the Questie team and its many contributors, who let it be copied under
+the GNU General Public License, version 3 (their `LICENSE.md` and the licence itself travel
+with the files, and lie beside them on your disk). Azeroth Atlas is not affiliated with or
+endorsed by the Questie team.
 
 ## Auction prices
 
@@ -1998,8 +2069,8 @@ API client, made for free at https://develop.battle.net:
 | --- | --- |
 | `node tools/cloud.mjs login` | sign in to Firebase, once |
 | `node tools/cloud.mjs key --id-file=<file> --secret-file=<file>` | hand the client to the function: its two values, each from a file holding nothing else, go into the project's Secret Manager. Never into the repository or the database, and nothing of it is kept on the computer |
-| `node tools/cloud.mjs deploy` | put the function in the cloud (and again whenever anything in `functions/`, or `houses.js`, `days.js` or `pack.js` in `auctions/`, has changed) |
-| `node tools/cloud.mjs logs` | what its last runs said |
+| `node tools/cloud.mjs deploy` | put the function in the cloud, and the one that takes in QuestieDB with it (and again whenever anything in `functions/`, or `houses.js`, `days.js` or `pack.js` in `auctions/`, has changed) |
+| `node tools/cloud.mjs logs` | what the last runs said (`--only=auctions`: of this function alone) |
 | `node tools/cloud.mjs rules` | publish `atlasdb/rules.json` as the database's rules (the same as pasting it into the console) |
 
 Which regions it reads is `AUCTION_REGIONS` in `functions/.env` (`us`; `us,eu,kr,tw` for all
@@ -2039,7 +2110,7 @@ The map is built from your own installed game. What else it draws on, and where 
 
 | What | From | How it gets here |
 | --- | --- | --- |
-| Creatures, NPCs, quests, where they stand | **QuestieDB** (the addon) | Read from your game's AddOns folder when the map is built. Not included |
+| Creatures, NPCs, quests, where they stand | **QuestieDB** by the Questie team and its contributors (github.com/Questie/QuestieDB; GPL-3.0) | Each release is fetched by a scheduled function of the database's own and kept in the database as published, with its licence; every copy fetches it from there when the map is built (or reads the addon in your game's folder, where that is the newer). Not in the download |
 | NPC heights, what quests ask for, drop rates, creature health and respawn times | **cmangos classic-db** | Downloaded when the map is built, kept in the map data. Not included |
 | The layout of the game's data tables | **WoWDBDefs** (wowdev) | Each definition is fetched the first time it is needed, kept in `extractor/dbd/`. Not included |
 | The doorways between maps (`extractor/doorways.json`) | **ShortestPathForever** by cjber, `Data/Portals.lua` (GPL-3.0-or-later) | Included; the addon's own, newer list is read instead where it is installed |

@@ -13,6 +13,11 @@
 //                              (vote).
 //   /installs/<copy>           when a copy last sent something, and which version it runs
 //
+//   /questie                   QuestieDB itself, as it is published: the files the map is built
+//                              from, put there by a scheduled function whenever a new version is
+//                              out (functions/questie.js) and fetched by every copy (questiedb.js).
+//                              No part of what is made or published here.
+//
 // Making it (buildTruth) reads QuestieDB and the reference database from the maker's own disk
 // and every delivery in the inbox, and merges them record by record. Publishing writes only the
 // shards whose records changed. A copy that fetches it (pull) asks for the fingerprints first
@@ -192,7 +197,7 @@ export async function buildTruth(cfg, dataDir, inbox, log = () => {}) {
   const toc = findQuestieDb(cfg);
   // (QuestieDB is what says which creatures and quests this game has at all: without it the
   // reference database's whole original game would be taken for this one)
-  if (!toc) throw new Error('QuestieDB is not installed in the game on this computer: the database is made on a computer that has it');
+  if (!toc) throw new Error('QuestieDB is not on this computer (neither fetched from the database - "questie" does that - nor an addon in the game): the database is made on a computer that has it');
   let known = null;
   {
     const qdb = readQuestie(toc);
