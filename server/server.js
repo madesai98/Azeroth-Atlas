@@ -18,6 +18,7 @@ import { Changes } from './changes.js';
 import { AppUpdate } from './appupdate.js';
 import { MIME, sendFile, safeJoin } from './http.js';
 import { AtlasDb } from './atlasdb.js';
+import { clockFigures, writeClockAddon } from './boats.js';
 import { Auctions } from './auctions.js';
 import { openLogs, logDir, note, noteCrashes } from './log.js';
 import { Reports } from './report.js';
@@ -61,8 +62,16 @@ const tracker = new PlayerTracker({ pathHint: flavourFolder(cfg) ?? '', ...(cfg.
 // Where NPCs really stand, as you have seen for yourself in the game (see seen.js).
 const seen = new SeenStore(cfg.dataDir);
 // What every copy of the map learns about the game world, put together in one database (see atlasdb.js).
-const atlas = new AtlasDb(cfg, configFile, { hold: () => job.running });
+// (after each time it has sent and fetched: the boats' figures, where they have changed, are written for the addon to read - boats.js)
+const handBoats = () => {
+  try {
+    const r = writeClockAddon(cfg, cfg.dataDir);
+    if (r?.written) note('database', 'the boats: where each line stands on the server\'s clock, as the Atlas database has measured it, written for the addon', { lines: r.lines, fresh: r.fresh || undefined });
+  } catch (err) { note('database', 'the boats\' figures could not be written for the addon', { error: err.message }); }
+};
+const atlas = new AtlasDb(cfg, configFile, { hold: () => job.running, after: handBoats });
 atlas.start();
+handBoats();
 // What things cost at the auction house, and how that has moved (see auctions.js).
 const auctions = new Auctions(cfg, configFile, { hold: () => job.running });
 auctions.start();
@@ -208,6 +217,12 @@ const server = http.createServer((req, res) => {
         else json(200, { ok: true, forgotten: seen.forget(d.map, d.id, d.object), count: seen.list.length });
       } catch (err) { json(400, { error: err.message }); }
     });
+    return;
+  }
+  if (p === '/api/transit/clock') {
+    // where each boat line stands on the server's clock, as the Atlas database has measured it (none fetched yet: no lines)
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify(clockFigures(cfg.dataDir) ?? { v: 1, lines: {} }));
     return;
   }
   if (p === '/api/database') {

@@ -10,6 +10,7 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const data = JSON.parse(fs.readFileSync(path.join(root, 'viewer/transit.json'), 'utf8'));
 const str = (s) => '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
 const num = (v) => String(Math.round(v * 1000) / 1000);
+const fine = (v) => String(Math.round(v * 1e5) / 1e5);   // a period: a ten-thousandth of a second counts, ten thousand loops on
 const track = (t) => '{ ' + t.map((p) => '{ ' + p.map(num).join(', ') + ' }').join(', ') + ' }';
 
 const out = [
@@ -20,8 +21,10 @@ const out = [
   '--',
   '-- A line: n (its number between the addon and the map), id (the game\'s own number for its',
   '-- path; none for the tram), period (seconds for one craft\'s whole round), periodUnsure (seconds',
-  '-- that round may be off, given for a line whose round is less well measured than the others;',
-  '-- for the rest the addon has a figure of its own), stops (in the order the craft calls at them:',
+  '-- that round may be off), left (server time: a moment at which a craft was measured to leave',
+  '-- the first stop; the tram: the car on its first track) and leftUnsure (seconds that may be',
+  '-- off): where the line stands on the server\'s clock (tools/clock-transit.mjs measures them),',
+  '-- stops (in the order the craft calls at them:',
   '-- name, map, x and y as the game counts them, wait in seconds), legs',
   '-- (leg i runs from stop i to the stop after it: trip in seconds, and track, where the craft is',
   '-- so many seconds after leaving: { seconds, map, x, y }; track2 is the tram\'s other track),',
@@ -33,7 +36,7 @@ const out = [
   'shared.TransitData = {',
 ];
 for (const l of data.lines) {
-  out.push(`  { n = ${l.n}, ${l.id ? `id = ${l.id}, ` : ''}key = ${str(l.key)}, kind = ${str(l.kind)}, period = ${num(l.period)},${l.periodUnsure ? ` periodUnsure = ${num(l.periodUnsure)},` : ''}${l.rough ? ' rough = true,' : ''}${l.cars ? ` cars = ${l.cars},` : ''}`);
+  out.push(`  { n = ${l.n}, ${l.id ? `id = ${l.id}, ` : ''}key = ${str(l.key)}, kind = ${str(l.kind)}, period = ${fine(l.period)},${l.periodUnsure ? ` periodUnsure = ${fine(l.periodUnsure)},` : ''}${l.left ? ` left = ${num(l.left)}, leftUnsure = ${num(l.leftUnsure ?? 2)},` : ''}${l.rough ? ' rough = true,' : ''}${l.cars ? ` cars = ${l.cars},` : ''}`);
   out.push(`    ft = ${l.ft.id},${l.ft.id2 ? ` ft2 = ${l.ft.id2},` : ''} ftStops = { ${l.ft.stops.map((s) => s + 1).join(', ')} },`);
   if (l.lanes) out.push(`    lanes = { ${l.lanes.map((a) => `{ name = ${str(a.name)}, x = ${num(a.x)} }`).join(', ')} },`);
   out.push('    stops = {');

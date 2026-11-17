@@ -1,10 +1,14 @@
-// Azeroth Atlas in the cloud: two scheduled functions of the Atlas database's own Firebase
-// project. Each fetches something that is published elsewhere and puts it into the database,
-// with nobody's computer on, so that a copy of the map has only the database to ask:
+// Azeroth Atlas in the cloud: three scheduled functions of the Atlas database's own Firebase
+// project. Two fetch something that is published elsewhere and put it into the database, with
+// nobody's computer on, so that a copy of the map has only the database to ask; the third puts
+// together what the copies themselves have sent:
 //
 //   auctions   the auction houses, looked at twice an hour (below, and cloud.js)
 //   questie    QuestieDB - who stands where, the quests - looked for once an hour and taken in
-//              whenever a new version of it is out (the end of this file, and questie.js)
+//              whenever a new version of it is out (further down, and questie.js)
+//   boats      the boats, zeppelins and tram: every copy's sightings taken in every ten minutes,
+//              and each line's place on the server's clock measured anew (the end of this file,
+//              and boats.js)
 //
 // The auction houses. Twice an hour the function asks Blizzard's API for every auction house
 // whose list is newer than the one in the database, boils each down to a line per item
@@ -31,6 +35,8 @@ import { getDatabase } from 'firebase-admin/database';
 import { Blizzard, REGIONS } from './blizzard.js';
 import { lookAndPublish } from './cloud.js';
 import { lookAndImport } from './questie.js';
+import { lookAndMeasure } from './boats.js';
+import fs from 'node:fs';
 
 const CLIENT_ID = defineSecret('BLIZZARD_CLIENT_ID');
 const CLIENT_SECRET = defineSecret('BLIZZARD_CLIENT_SECRET');
@@ -84,4 +90,29 @@ export const questie = onSchedule({
   };
   const r = await lookAndImport(db, { log: (line) => console.log(line) });
   console.log(r.same ? `questie: QuestieDB ${r.version} (${r.tag}) is the latest, and the database has it` : `questie: QuestieDB ${r.version} (${r.tag}) taken in: ${r.imported} files written (${(r.written / 1e6).toFixed(1)} MB), ${r.kept} as they were`);
+});
+
+// The boats, zeppelins and tram. Every copy of the map sends what its addon has seen of them
+// (your rides, other players' sightings) to /boats/seen; every ten minutes the function takes
+// that in and measures where each line stands on the server's clock from everybody's sightings
+// together (boats.js), for every copy to fetch from /transit. A run that finds nothing sent
+// asks one question and is done. It needs no key and no secret.
+const LINES = JSON.parse(fs.readFileSync(new URL('./shared/lines.json', import.meta.url), 'utf8'));
+export const boats = onSchedule({
+  schedule: '*/10 * * * *',
+  timeZone: 'Etc/UTC',
+  region: 'us-central1',
+  memory: '256MiB',
+  timeoutSeconds: 120,
+  maxInstances: 1,              // never two at once
+  retryCount: 0,                // a run that fails is made up for by the next
+}, async () => {
+  const database = getDatabase();
+  const db = {
+    get: async (path) => (await database.ref(path).get()).val(),
+    set: async (path, value) => { await database.ref(path).set(value); },
+    patch: async (path, changes) => { await database.ref(path).update(changes); },
+  };
+  const r = await lookAndMeasure(db, LINES, { log: (line) => console.log(line) });
+  console.log(r.same ? 'boats: nothing was sent' : `boats: ${r.deliveries} deliveries taken in (${r.taken} sightings new, ${r.refused} refused); ${r.lines} lines measured${r.changed ? ', published' : ', as they were'}`);
 });

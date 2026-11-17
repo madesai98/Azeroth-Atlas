@@ -265,9 +265,10 @@ export class NameCache {
   /**
    * When the boats, zeppelins and tram run, as far as the addon knows (Transit.lua), or null
    * before it has said: { clock (the game server's time minus this computer's, in ms), lines:
-   * { [the line's number in transit.json]: null (nothing known since the last restart) or
-   *   { src (what it rests on: 'own' your ride, 'dw' / 'ft' / 'nau' other players, by way of
-   *     DockWatch, ForeverTransport or Nauticus), leaves (server time, seconds: a moment a craft
+   * { [the line's number in transit.json]: null (too unsure to name a moment by) or
+   *   { src (what it rests on: 'clock' the server's clock alone, 'own' your ride, 'dw' / 'ft' /
+   *     'nau' / 'tv' other players, by way of DockWatch, ForeverTransport, Nauticus or Azeroth
+   *     Tripview), leaves (server time, seconds: a moment a craft
    *     leaves the line's first stop), gap (how far the time from one craft to the next is off
    *     the measured one, seconds), unsure (seconds), lane (the tram track of that departure: 1,
    *     2 or null), age (when it was last seen: 0 under ten minutes ago, 1 under an hour, 2 under
@@ -283,7 +284,7 @@ export class NameCache {
       if (!b || b.length < 9) continue;
       if (!(b[0] & 128)) { if (b[0] === 64) lines[n] = null; continue; }
       lines[n] = {
-        src: [null, 'own', 'dw', 'ft', 'nau'][b[0] & 7] ?? null, leaves: u40(b, 1) / 100, gap: (b[6] * 256 + b[7] - 32768) / 1000, unsure: b[8] / 10,
+        src: [null, 'own', 'dw', 'ft', 'nau', 'clock', 'tv'][b[0] & 7] ?? null, leaves: u40(b, 1) / 100, gap: (b[6] * 256 + b[7] - 32768) / 1000, unsure: b[8] / 10,
         lane: b[0] & 8 ? (b[0] & 16 ? 2 : 1) : null, age: (b[0] >> 5) & 3,
       };
     }

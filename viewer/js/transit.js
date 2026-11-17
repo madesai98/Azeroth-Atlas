@@ -2,15 +2,18 @@
 //
 // transit.json holds each line's timetable as measured in the game: how long its round takes,
 // each leg and each stop, and where the craft is every couple of seconds of a leg. A craft
-// sails that round to the second until the server restarts, so one moment at which it was seen
-// to leave a stop says where it is at any time. Those moments come from the game, by way of the
-// addon (addon/AzerothAtlas/Transit.lua): your own rides, and other players' sightings as
-// DockWatch, ForeverTransport and Nauticus pass them on, cross-checked there.
+// sails that round to the second, by the server's clock (clock.js): so the round and one moment
+// at which a craft was measured to leave a stop say where it is at any time, with the game
+// running or not. The game makes that more exact, by way of the addon
+// (addon/AzerothAtlas/Transit.lua): your own rides, and other players' sightings as DockWatch,
+// ForeverTransport, Nauticus and Azeroth Tripview pass them on, cross-checked there. What the
+// addon says of a line is what counts here; a line it says nothing of goes by the clock alone.
 //
 // Here that becomes: when a craft next leaves a stop (for the journeys route.js plans), and
 // where every craft is right now (for showing them on the map).
 
 import { curve } from './travel.js';
+import { clockOf } from './clock.js';
 
 const TRAM_Z = -4.3;   // the height of the tram's track (its map has no path to read it from)
 const STEP = 6;        // yards between the points a line's path is laid out in
@@ -106,6 +109,8 @@ export class Transit {
     this.byId = new Map();   // the game's own number for a line's path -> line
     this.retired = new Set();
     this.clock = null;       // the game server's time minus this computer's, in ms (null: not heard yet)
+    this.lastClock = 0;      // ...as the game last said it, on this computer, before today (the game not running: this computer's clock, so corrected)
+    try { const v = Number(localStorage.getItem('transit.clock')); if (Number.isFinite(v) && Math.abs(v) < 86400000) this.lastClock = v; } catch { /* not kept */ }
     this.live = {};          // line number -> what the addon says of it
     this.rev = 0;
     this.sig = '';
@@ -120,6 +125,35 @@ export class Transit {
       const res = await fetch('/transit.json');
       if (res.ok) this.use(await res.json(), world);
     } catch { /* no timetables: boats are counted at their average, as before */ }
+    // The lines' figures as the Atlas database has measured them from everybody's sightings: asked
+    // for now, and again every half hour (the map fetches them when it has sent what it has seen).
+    const ask = async () => {
+      try { const res = await fetch('/api/transit/clock', { cache: 'no-store' }); if (res.ok) this.setFigures(await res.json()); } catch { /* the map's own figures stand */ }
+    };
+    await ask();
+    if (typeof setInterval === 'function') { const t = setInterval(ask, 30 * 60 * 1000); t.unref?.(); }
+  }
+
+  /**
+   * Where the lines stand on the server's clock, as measured from everybody's sightings
+   * ({ lines: { [key]: { period, periodUnsure, left, leftUnsure } } }: atlasdb/boats.js). Taken
+   * for a line where they are of the line as it is here, and measured later than the map's own.
+   * @returns how many lines took them
+   */
+  setFigures(figures) {
+    let took = 0;
+    for (const line of this.lines) {
+      const f = figures?.lines?.[line.key];
+      if (!f || ![f.period, f.periodUnsure, f.left, f.leftUnsure].every((v) => typeof v === 'number' && Number.isFinite(v) && v > 0)) continue;
+      if (Math.abs(f.period - line.period) >= 30 || (line.left > 0 && f.left < line.left)) continue;
+      if (f.period === line.period && f.left === line.left && f.periodUnsure === line.periodUnsure && f.leftUnsure === line.leftUnsure) continue;
+      line.period = f.period; line.periodUnsure = f.periodUnsure; line.left = f.left; line.leftUnsure = f.leftUnsure;
+      line.gap = f.period / line.cars;
+      line.stay = line.dep.map((v, s) => mod(v - line.arr[s], f.period));
+      took++;
+    }
+    if (took) this.rev++;
+    return took;
   }
 
   /** @param data transit.json */
@@ -169,18 +203,37 @@ export class Transit {
     if (sig === this.sig) return;
     this.sig = sig;
     this.clock = t.clock;
+    if (Number.isFinite(t.clock) && Math.abs(t.clock - this.lastClock) > 250) { this.lastClock = t.clock; try { localStorage.setItem('transit.clock', String(Math.round(t.clock))); } catch { /* not kept */ } }
     this.live = t.lines ?? {};
     this.rev++;
+  }
+
+  /**
+   * What is known of a line at server time `t`: what the addon says of it, or else what the
+   * clock alone does - { leaves (a moment a craft leaves the line's first stop), gap (how far
+   * the time from one craft to the next is off the measured one), unsure (seconds), lane (the
+   * tram track of that departure), src, age }. null for a line without the clock's figures of
+   * which the addon says nothing.
+   */
+  known(line, t) {
+    const live = this.live[line.n];
+    if (live) return live;
+    const c = clockOf(line, t);
+    if (!c) return null;
+    return { leaves: c.leaves, gap: 0, unsure: Math.hypot(c.unsure, (Math.abs(t - c.leaves) / line.period) * c.perLoop), lane: line.cars > 1 ? 1 : null, src: 'clock', age: 3 };
   }
 
   /** The game's own model of a line's craft ({ kind, id, turn }), or null where it has one of a kind not listed. */
   model(line) { return line.craft ? null : this.models?.[line.kind] ?? null; }
 
-  /** The game server's time now, in seconds (null until the game has said how far its clock is from this computer's). */
-  now() { return this.clock === null ? null : (Date.now() + this.clock) / 1000; }
+  /**
+   * The game server's time now, in seconds: this computer's clock, put right by how far the
+   * game says the server's is from it (while the game is not running: by what it last said).
+   */
+  now() { return (Date.now() + (this.clock ?? this.lastClock)) / 1000; }
 
-  /** How many lines are timed just now. */
-  get known() { return this.lines.filter((l) => this.live[l.n]).length; }
+  /** How many lines have a timetable just now. */
+  get timed() { const t = this.now(); return this.lines.filter((l) => this.known(l, t)).length; }
 
   /**
    * When a craft next leaves stop `s` (from 0) of a line at or after server time `t`:
@@ -188,8 +241,8 @@ export class Transit {
    * or null), src, age } - or null while the line is not timed.
    */
   next(line, s, t) {
-    const rec = this.live[line.n];
-    if (!rec || t === null) return null;
+    const rec = t === null ? null : this.known(line, t);
+    if (!rec) return null;
     const gap = line.gap + rec.gap;
     const base = rec.leaves + line.dep[s];
     const k = Math.ceil((t - base) / gap);
@@ -213,7 +266,7 @@ export class Transit {
   board(line, s, t, walk = 0) {
     const ride = line.legs[s].trip;
     const n = t === null ? null : this.next(line, s, t + walk);
-    const gap = line.gap + (this.live[line.n]?.gap ?? 0);
+    const gap = line.gap + ((t === null ? null : this.known(line, t))?.gap ?? 0);
     if (!n || n.unsure >= gap / 2) return { seconds: line.gap / 2 + ride + 10 + 2 * walk, wait: line.gap / 2, known: false };
     if (n.unsure > line.gap / 6) {
       // (spare: seconds between getting there, with a moment to step aboard, and when it is due)
@@ -235,8 +288,8 @@ export class Transit {
    * in on), leaves (docked: seconds until it does) }]. Empty while the line is not timed.
    */
   crafts(line, t) {
-    const rec = this.live[line.n];
-    if (!rec || t === null) return [];
+    const rec = t === null ? null : this.known(line, t);
+    if (!rec) return [];
     const gap = line.gap + rec.gap, round = gap * line.cars, count = line.stops.length;
     const out = [];
     for (let car = 0; car < line.cars; car++) {
@@ -381,8 +434,10 @@ export class Transit {
       return null;
     };
     for (const line of this.lines) {
-      if (!this.live[line.n]) continue;
-      const about = this.live[line.n].unsure > 6 ? '~' : '';
+      const rec = this.known(line, t);
+      // (a line whose craft could be anywhere on its round is not shown as if it were somewhere)
+      if (!rec || rec.unsure >= line.gap / 2) continue;
+      const about = rec.unsure > 6 ? '~' : '';
       for (const c of this.crafts(line, t)) {
         const p = this.place(line, c);
         const off = !p ? null : p.group !== undefined ? pictureAt(p.group) : at(p.map);

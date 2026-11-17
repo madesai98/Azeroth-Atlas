@@ -14,6 +14,24 @@
     "questie": {
       ".read": "auth != null"
     },
+    "transit": {
+      ".read": "auth != null"
+    },
+    "boats": {
+      "seen": {
+        "$copy": {
+          "$delivery": {
+            ".write": "auth != null && auth.uid === $copy && !data.exists()",
+            ".validate": "newData.hasChildren(['v', 'at', 's'])",
+            "v": { ".validate": "newData.val() === 1" },
+            "at": { ".validate": "newData.isNumber() && newData.val() <= now" },
+            "app": { ".validate": "newData.isString() && newData.val().length <= 20" },
+            "s": { "$n": { ".validate": "newData.isString() && newData.val().length <= 48" } },
+            "$other": { ".validate": false }
+          }
+        }
+      }
+    },
     "inbox": {
       "$copy": {
         "$delivery": {

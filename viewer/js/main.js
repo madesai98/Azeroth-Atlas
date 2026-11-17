@@ -399,7 +399,7 @@ function render() {
     for (const o of beside) { const more = o.scene.filler.subarray(0, o.scene.fillerCount * 24); app.seaAll.set(more, n); n += more.length; }
     sea = app.seaAll.subarray(0, n);
   }
-  // The boats, zeppelins and trams that have been timed, each where it is this moment
+  // The boats, zeppelins and trams, each where it is this moment by the server's clock and what was seen
   // (transit.js). Close up: the game's own model of the craft, placed like any building. From
   // further off, where that would be a speck: a plain shape, enlarged to stay easy to find.
   if (app.transit) {
@@ -574,7 +574,7 @@ function step(now, seen) {
   if (app.player?.update(dt)) app.dirty = true;
   if (app.cutaway?.update(dt, now)) app.dirty = true;
   // (boats on this map are moving: drawn again some fifteen times a second; their countdowns alone, once a second)
-  if (app.transit?.known && now - (app.transitAt ?? 0) > (app.afloat ? 66 : 1000)) { app.transitAt = now; app.dirty = true; }
+  if (app.transit?.timed && now - (app.transitAt ?? 0) > (app.afloat ? 66 : 1000)) { app.transitAt = now; app.dirty = true; }
   if (app.npcs?.meeting) app.npcs.update(app.player?.live ? app.player.me : null, app.player.height);
   // More than one map on the picture: the one you are looking at is the one in hand (its NPCs,
   // its places and zones under the cursor, the map routes are worked out on). Not while your
@@ -1259,7 +1259,7 @@ function applyFollow() {
 
 // ---- route ---------------------------------------------------------------------------------
 const mmss = (s) => { s = Math.max(0, Math.round(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
-// (a boat or tram that has been timed: how long until it leaves, as of this moment)
+// (a boat or tram: how long until it leaves, as of this moment)
 const leavesIn = (leg) => Math.max(0, leg.leaves && app.transit?.now() ? leg.leaves - app.transit.now() : leg.wait);
 const clock = (s) => (s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min` : s >= 60 ? `${Math.floor(s / 60)} min ${String(Math.round(s % 60)).padStart(2, '0')} s` : `${Math.round(s)} s`);
 

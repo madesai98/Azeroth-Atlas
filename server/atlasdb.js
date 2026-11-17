@@ -1,9 +1,9 @@
 // The Atlas database, kept up by the map while it runs (see atlasdb/): what this copy has
 // learned about the game world is sent on, and the database as published is fetched.
 //
-// It runs a little after the map starts, again whenever the game has written its cache (it
-// does when you log out or leave the game) or you have seen an NPC for yourself, and every six
-// hours besides. The work is done by a program of its own (atlasdb/cli.js auto), so the map
+// It runs a little after the map starts, again whenever the game has written its cache or the
+// addon's saved settings (it does when you log out, leave the game or /reload: the boats the
+// addon has seen are in those) or you have seen an NPC for yourself, and every six hours besides. The work is done by a program of its own (atlasdb/cli.js auto), so the map
 // never waits for it, and nothing that goes wrong there touches the map.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,11 +18,15 @@ const ANYWAY = 6 * 3600 * 1000;   // and at least this often
 const SOON = 5 * 60 * 1000;       // after something new was seen
 
 export class AtlasDb {
-  /** @param hold () => true while the map is being built (the two are not run at once) */
-  constructor(cfg, configFile, { hold = () => false } = {}) {
+  /**
+   * @param hold  () => true while the map is being built (the two are not run at once)
+   * @param after () => called each time it has sent and fetched
+   */
+  constructor(cfg, configFile, { hold = () => false, after = null } = {}) {
     this.cfg = cfg;
     this.configFile = configFile;
     this.hold = hold;
+    this.after = after;
     this.settings = databaseSettings(cfg);
     this.state = { running: false, last: null, result: null, error: null };
     this.stamp = null;
@@ -48,6 +52,13 @@ export class AtlasDb {
         }
       }
     } catch { /* no cache yet */ }
+    // (and the addon's saved settings, of every account: what it has seen of the boats)
+    try {
+      const accounts = path.join(this.cfg.installRoot, folder, 'WTF', 'Account');
+      for (const account of fs.readdirSync(accounts)) {
+        try { const st = fs.statSync(path.join(accounts, account, 'SavedVariables', 'AzerothAtlas.lua')); out += `${account}:${st.size}:${Math.round(st.mtimeMs)};`; } catch { /* not there */ }
+      }
+    } catch { /* no saved settings yet */ }
     return out;
   }
 
@@ -90,6 +101,7 @@ export class AtlasDb {
       this.state.result = result;
       this.state.error = result?.errors?.length ? result.errors.join('; ') : code ? (err.trim().split('\n').pop() || `ended with code ${code}`) : null;
       note('database', this.state.error ? 'the Atlas database: something went wrong' : 'the Atlas database: sent and fetched', { error: this.state.error ?? undefined, result: result ?? undefined, code: code || undefined, said: this.state.error ? err.slice(-800) : undefined });
+      try { this.after?.(); } catch { /* its own affair */ }
     };
     child.on('close', done);
     child.on('error', (e) => { err += e.message; done(1); });

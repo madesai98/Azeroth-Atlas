@@ -841,14 +841,15 @@ zones" for why going round them was taken out).
   map, and ShortestPathForever's list is used as well if you have it;
 - **boats and zeppelins**: every line and where it stops comes from the game's own tables
   (they sail the same kind of route a flight path flies, with the stops marked), and how long
-  each leg and each stop takes from timetables measured in the game. A line that has been timed
-  (see "Boats, zeppelins and the tram, live") is taken at the moment its craft really leaves,
-  for when you would get to its dock: a boat you would miss by seconds is not counted on. One
-  that has not is counted at its measured trip plus half a round of waiting, on average. In
-  between (a time too loose to name the moment, as the tram's usually is from other players'
-  sightings: its cars are 72 seconds apart, and a quarter of a minute is a lot of that) the
-  wait is what it comes to on average given what is known: short when you would get there
-  well before a car is due, long just after one. Lines
+  each leg and each stop takes from timetables measured in the game. Every line runs by the
+  server's clock (see "Boats, zeppelins and the tram, live"), so it is taken at the moment its
+  craft really leaves, for when you would get to its dock, with the game running or not: a boat
+  you would miss by seconds is not counted on. A line whose time could be anywhere on its
+  round (one measured loosely, after the server's count has started again and before it is
+  seen) is counted at its measured trip plus half a round of waiting, on average. In between (a
+  time too loose to name the moment: the tram's cars are 72 seconds apart, and a quarter of a
+  minute is a lot of that) the wait is what it comes to on average given what is known: short
+  when you would get there well before a car is due, long just after one. Lines
   that stop in the other faction's towns are left out (a place counts as theirs when the flight
   masters there serve only them), and so is one the game's tables still list but which no
   longer sails;
@@ -1210,8 +1211,9 @@ What it does not do:
 - A walk that cannot be worked out step by step (a way that does not exist takes the longest to
   rule out) is given as "roughly N yd" when it is one leg of a longer journey: three times the
   straight line, and nothing is drawn for it.
-- It knows where a boat is only once the line has been timed since the server last restarted
-  (by a ride of yours, or by another player's sighting reaching you). It does not know of mage
+- It knows where a boat is by the server's clock, to a second or so on a line measured well
+  (to less after a ride of yours); for a few days after the server's count has started again
+  (every 49.7 days) a line nobody has seen since may be a few seconds out. It does not know of mage
   portals, summons, or the fatigue water far
   out at sea (it will not send you swimming between continents, which are separate maps, but it
   does not know about fatigue between an island and the coast of the same map).
@@ -1231,82 +1233,127 @@ What it does not do:
 
 ### Boats, zeppelins and the tram, live
 
-A boat sails the same round over and over, to the second, until the server restarts. So one
-moment at which it was seen to leave a dock fixes its whole timetable: when it is next at every
-stop, and where it is on its way right now. The game tells an addon nothing about a boat, so
-that moment has to be seen. Everything there is to see it by is used, cross-checked, and made
-into one answer, with nothing to set up:
+A boat sails the same round over and over, to the second, and it does so **by the server's
+clock**. So the map knows when every boat, zeppelin and tram car is at every stop, and where it
+is on its way right now, from the moment it opens: with the game running or not, with nothing
+seen, and with nothing to set up. What is seen in the game makes that more exact, and takes its
+place where it plainly differs:
 
 | What | How it is used |
 | --- | --- |
-| **The timetables** (`viewer/transit.json`; the addon's copy is written from it by `tools/make-transit-lua.mjs`) | How long each line's round takes, each leg, each stop, and where the craft is every couple of seconds of a leg: eleven boat and zeppelin lines and both tram cars as DockWatch's players recorded them in this game (MIT licence), and the Feathermoon ferry from the game's own path and the round Nauticus measured for it (its times are rough). The game's own path of each line is where the craft is drawn; all 695 recorded moments of the eleven lines lie on those paths. The round of the Dalaran - Valanaar airship is 352.49 s, as two rides 57 rounds apart had it (the recording said 353.74 s, Nauticus 353 s). Where a line's legs and stops do not add up to its round, its stay at its first stop takes up the difference: the airship's add up to 354.0 s, so it is taken to stay 59.7 s at Dalaran rather than 61.2 s. |
+| **The timetables** (`viewer/transit.json`; the addon's copy is written from it by `tools/make-transit-lua.mjs`) | How long each leg and each stop of a line takes, and where the craft is every couple of seconds of a leg: eleven boat and zeppelin lines and both tram cars as DockWatch's players recorded them in this game (MIT licence), and the Feathermoon ferry from the game's own path (its times are rough). The game's own path of each line is where the craft is drawn; all 695 recorded moments of the eleven lines lie on those paths. Where a line's legs and stops do not add up to its round, its stay at its first stop takes up the difference. |
+| **The server's clock** (`period` and `left` of each line in `transit.json`; `viewer/js/clock.js`) | How long the line's round is, to a few ten-thousandths of a second, and a moment at which a craft was measured to leave its first stop. With those two figures the clock alone says where the craft is at any time (below). `tools/clock-transit.mjs` measures them. |
 | **Your own rides** | Something is carrying you when you move without moving yourself. Carried along a line's track where the boat is under way, each spot you pass says how long ago it left; five of them over five seconds that agree to the second are when it left, wherever you boarded. |
-| **Other players' sightings** | Three addons pass sightings from player to player, each in its own way, and each is read as that addon writes it, without being installed: **DockWatch** (the moment a boat left a dock, by where the dock is; over its own hidden channel, the guild and whispers), **ForeverTransport** (when it arrived, by a line's number) and **Nauticus** (how far into its round a boat is as the message is sent). The addon **only listens**: it never sends, so it cannot put a wrong time into anyone's timers. `/atlas boats listen` turns the listening off. |
-| **The server's restarts** | A restart starts every boat afresh. The warning the server gives in chat ("restart in 15:00") is read, and a ride of your own that plainly no longer fits a well-founded timetable says one has happened (when that is plain: see "Which boat a sighting was" below). What a ride alone says is not for good: the other lines' sightings are set aside, and your next ride on another line settles it (see "A restart that only a ride said"). |
+| **Other players' sightings** | Four addons pass sightings from player to player, each in its own way, and each is read as that addon writes it, without being installed: **DockWatch** (the moment a boat left a dock, by where the dock is; over its own hidden channel, the guild and whispers), **ForeverTransport** (when it arrived, by a line's number), **Nauticus** (how far into its round a boat is as the message is sent) and **Azeroth Tripview** (when a round began, by a line's name; it speaks to guild, group and whoever stands near, so less of it is heard). The addon **only listens**: it never sends in the game, so it cannot put a wrong time into anyone's timers. `/atlas boats listen` turns the listening off. |
+| **Everybody's sightings, put together** (the Atlas database) | Every copy of the map sends what its addon has seen; the database measures each line's two figures anew from all of it, and every copy fetches them. So one player's ride makes the boats right for everybody (below). |
 
-**Voices that differ** (`addon/AzerothAtlas/Transit.lua`). Sightings that agree (give or
-take what a round's own uncertainty allows) make a timetable. Each is weighed by how exact it
-is: your own ride to under a second, a DockWatch sighting to a second and a half, a
-ForeverTransport arrival to three, a Nauticus one to four (it is counted on from the moment of
-sending, so a slow message shifts it). The same sighting handed on by several players counts
-once. A sighting that stands alone against a timetable confirmed in the last three quarters of
-an hour waits until a second player backs it; your own ride always counts. **The length of a
-round is worked out from the sightings** as they spread over hours (the sources give it a few
-tenths of a second apart, which is a minute's drift over a day): two sightings three hours
-apart give it to a few hundredths. Until they do, a round is reckoned to be unsure by 0.4 s;
-the rounds of the two airships of Zephras Isle are measured less well, and are reckoned unsure
-by a second (Dalaran - Valanaar, its round now from two rides) and a second and a half
-(Valanaar - Skywatcher Plateau, whose 347 s both sources give as a whole number). How unsure a
-departure is goes with it everywhere: under six seconds it is given plainly, over that as
-"about", and past a sixth of a round the line counts as not timed: no moment is named for it,
-and the 3D map is told it is not timed, neither showing its craft nor counting on one. (The
-tram is the exception: its cars are only a minute apart, so a journey still counts what a time
-up to 25 seconds unsure says about the wait.)
+**The server's clock.** The game's server counts real time in milliseconds, in a number of 32
+bits. Where a craft is on its round is that count, divided by how long the round takes, and
+what is left over: at the moment the count is at nought the craft is at the second point of
+its path in the game's own tables (the first only shapes the curve), and again every round
+after it. Nothing else comes into it. **A restart or a patch moves no boat.** (That every craft
+runs so was found by the Azeroth Tripview addon, by Cloverdev. The figures here are not its
+own: they are measured from our sightings and the game's paths, and agree with its to under
+half a thousandth of a second a round on the nine lines both have measured well.)
 
-**Which boat a sighting was.** Every few minutes another boat of a line leaves the same dock,
-so a sighting says something only once it is put down to the right one of them, and a
-timetable is less sure of where its boat was with every round away from what it rests on. A
-sighting is put down to a boat only while the window it may be off by (five seconds, how exact
-the sighting is, and twice how unsure the timetable is of that boat) is no more than a quarter
-of the time between two boats. The windows of the boats on either side are then at least half
-that time away, so it is the right boat even if the timetable were twice as unsure as it
-reckons. A sighting further off than that (hours before or after the others, while the round
-is not yet pinned down) is set aside: it starts no timetable of its own, so it can neither hold
-back the newest one nor be taken for a restart. It is kept, and put down to its boat once the
-timetable has firmed up enough (or forgotten after three days, like any sighting). **Your own
-ride says the server has restarted** only when it is plainly off a well-founded timetable that
-came before it (your own earlier ride, or two other players), and that timetable is sure, at
-your ride, to within an eighth of a round of where its boat was. A restart forgets every line's
-sightings, so it is not taken on less: an older timetable that is unsure of its boat by then
-says nothing either way, and your ride simply runs the line from then on. (Addon version 21.
-Before, the window was cut down to a third of a round however unsure the timetable was, which
-turned "it could be any of them" into "it is this one". On 16 November a DockWatch sighting of
-the Dalaran airship, sixteen hours older than a ride of yours, was put down to the boat 163
-rounds before it, although it could not be told which boat it was (most likely it was seen
-before a restart that morning, and was none of them); the round in the timetables was 1.25 s
-out, the two together made it 354.42 s, and 57 rounds later the map had the airship two
-minutes late, and sure of it. Your next ride did not fit that, was taken for a restart, and
-every line's sightings up to then were forgotten.)
+How the two figures were measured (`node tools/clock-transit.mjs <the game's WTF folder, report
+zips' folders>`): our recorded tracks say how long after leaving a stop the craft is at the
+point its round starts at; a sighting says when it left that stop; the rounds since the count
+started are a whole number, some eleven thousand of them, and so one sighting to the second
+gives the round to a ten-thousandth of a second. From the 209 sightings the addon had saved
+between 14 and 17 November 2026 (rides, and DockWatch players'):
 
-**A restart that only a ride said** (addon version 22). The server's own warning is for good:
-what was seen before it is forgotten. A ride of yours that is off a timetable is one voice
-against another, and the timetable may be the one that was wrong. So that line runs by your
-ride from then on, and what was known of the *other* lines is **set aside, not thrown away**:
-they count as not timed, and wait. Your next ride on another line settles it. Where that ride
-fits what was set aside for its line (as sure as it takes to say there was a restart at all: a
-well-founded timetable, sure of its boat to an eighth of a round), the boats run as they did,
-there was no restart, and everything set aside is put back at once. Where it is plainly off,
-there was one, and what was set aside is forgotten. Only a ride of yours settles it: what other
-players pass on may itself be reckoned on from before a restart (it times its own line again,
-no more). `/atlas boats` says when such a restart is in force, and `/atlas boats restore` takes
-it back by hand. What was set aside is kept for three days, like any sighting.
+| Line | Sightings | Round | Spread of the sightings about it |
+| --- | --- | --- | --- |
+| Orgrimmar - Undercity | 13 | 356.28699 s | 0.4 s |
+| Grom'gol - Orgrimmar | 8 | 303.46586 s (the recording said 303.35) | 0.5 s |
+| Grom'gol - Undercity | 8 | 335.29694 s | 0.4 s |
+| Booty Bay - Ratchet | 31 | 350.82196 s | 0.8 s |
+| Baradin Bay - Western Strand - The Long Wash | 30 | 486.20689 s | 0.5 s |
+| Baradin Bay - Theramore | 30 | 329.31498 s | 0.5 s |
+| Mist's Edge - Rut'theran | 12 | 316.10296 s (316.18) | 0.5 s |
+| Feathermoon - The Forgotten Coast | 7 | 317.04444 s | 0.2 s |
+| Deeprun Tram | 12 | 143.333 s (the game's own animation, a whole number of milliseconds) | 0.8 s |
+| Stormwind - Mist's Edge | 31 | 246.63480 s | 0.5 s |
+| Dalaran - Valanaar | 5 | 358.81575 s (352.49 before: see below) | 0.9 s |
+| Powderfuse - Steamwheedle | 19 | 271.03490 s (270.99) | 0.4 s |
+| Valanaar - Skywatcher Plateau | 2 of 3 | 346.76444 s, **or 0.032 s more or less** | 0.3 s |
 
-Before version 22 a restart was put down for good whatever said it: everything seen before it
-was thrown away, and anything from before that moment was turned away from then on. The wrong
-one of 16 November (above) left every line but the airship untimed that evening,
-and would have kept other players' older sightings out for three days.
-A restart that such a version left behind is forgotten the first time version 22 runs; what was
-thrown away then is gone, and comes back as boats are ridden and seen again.
+The last was seen too little to tell two neighbouring rounds apart (they differ by one round
+more or less since the count started; the third sighting fits neither). It is the nearest to
+what the game's path makes of it, and is reckoned unsure by that much a round: a quarter of a
+minute a day, until somebody rides it.
+
+**When the server's count starts again.** A number of 32 bits is full after 49.7 days of
+milliseconds, and starts again from nought: on 3 October 2026 at 04:22:42 UTC, next on **21
+November 2026 at 21:25:29 UTC**, then on 10 January 2027. Every craft jumps to another place on
+its round at that moment (49.7 days are no whole number of rounds), and runs on from there by
+the same rule. What was seen before says nothing of what comes after: the addon and the map
+forget it, and go by the clock alone, as long after the start as the craft was measured to
+leave before. That is as unsure as the rounds in between make it, each by what the round may be
+off: three seconds for a line measured well (eleven thousand rounds at a quarter of a
+thousandth of a second), and anywhere on its round for the Skywatcher airship, which then
+counts as not known until it is seen. The first ride or sighting in the new count makes a line
+exact again, and with the old count's sightings ten thousand rounds away, the database then has
+its round to a twenty-thousandth of a second. `/atlas boats` says so from three days before.
+
+**What is seen, against the clock** (`addon/AzerothAtlas/Transit.lua`). Each sighting is
+weighed by how exact it is: your own ride to under a second, a DockWatch sighting to a second
+and a half, a ForeverTransport arrival to three, a Nauticus or Tripview one to four. The same
+sighting handed on by several players counts once.
+
+- A sighting that **agrees with the clock** (within five seconds, what the sighting itself is
+  unsure by, and twice what the timetable is) joins it, and the timetable is the surer for it:
+  the clock counts as one more sighting, as unsure as its figures are. The round is held as near
+  its figure as that is sure, so a line measured well keeps its round and one measured loosely
+  takes it from what is seen.
+- Sightings that **plainly do not agree** make a timetable of their own. That one takes the
+  clock's place on good grounds only: a ride of yours, or two other players who agree with each
+  other. One player's word against the clock waits for a second (it is kept an hour and a half
+  for it). So a ride of yours that is off the clock runs that line from then on (the clock's
+  figures are out for it, or the game has changed the line), and only that line.
+- Of the two, **whichever was last borne out on such grounds runs**: the clock has the line
+  back once a ride of yours, or two players, agree with it again.
+- A Tripview player names when a round began, which is turned into a moment at a stop by the
+  clock's own figures. So it could not say that those figures were out, only that a line no
+  longer runs by them, and it counts for little.
+
+How unsure a departure is goes with it everywhere: under six seconds it is given plainly, over
+that as "about", and past a sixth of a round no moment is named for it: the map neither shows
+its craft as if it were somewhere nor counts on one. (The tram is the exception: its cars are
+only a minute apart, so a journey still counts what a time up to 25 seconds unsure says about
+the wait.) `/atlas boats` lists every line: when it leaves each of its stops, and whether that
+is by the server's clock alone, by the clock borne out by sightings (whose, and how long ago),
+or not as the clock has it.
+
+**Everybody's sightings, put together** (`atlasdb/boats.js`, `functions/boats.js`). The two
+figures of a line get better the more is seen, and have to be measured again when the count has
+started anew or the game has changed a line. No copy sees enough by itself; together they do.
+
+| | |
+| --- | --- |
+| **A copy sends** | every sighting its addon has taken: your rides, and what other players' addons passed on. The addon keeps them for this in its saved settings (the newest 40 of each line), which the game writes when you log out or `/reload`; the map reads that file and sends what it has not sent before, with the rest of what it sends to the Atlas database and under the same switch (**Share what this copy learns**). A sighting goes as one short line: the line, the stop, left or got in, the moment, and which way it came (`4,1,d,1794925600.32,own,0`). **No names**, yours or the other players'. The moment is the whole of what a sighting says, so it goes as it is: of a ride of your own, that does say that this copy's player was on that boat then. |
+| **The database measures** | A function in the cloud takes in what was sent, every ten minutes, and measures each line again from everybody's sightings: the newest 400 of the count that runs, and 80 of the one before. With the figures there are, each sighting is so many whole rounds and a bit after the count started. Sightings that agree on the bit to within a few seconds, and come to a ride or two players' word, are believed; anything else leaves the figures as they are. Through the believed ones goes a straight line, the moment against the number of rounds: its slope is the round, and where it starts is where the craft stands as the count begins. The round is held near the map's own figure, as firmly as that is sure. Where rides and an addon's sightings of a line differ by a steady amount (each addon has its own idea of the moment a boat "leaves"), the rides are right and the others are shifted to them. A line of which too little was seen is left out. |
+| **Every copy fetches** | the figures (`/transit` in the database) when it has sent, a little after the map starts and every six hours besides, and goes by them where they were measured later than its own. The map's page takes them at once. The addon is handed them the only way the game allows: as a small addon of its own beside it, `AzerothAtlas_Clock`, one file that the game loads before Azeroth Atlas the next time it starts or you `/reload` (the folder itself is found when the game next starts). Written only where Azeroth Atlas is installed, and nothing else is touched. |
+
+For whoever keeps the database: the function goes into the cloud with the other two (`node
+tools/cloud.mjs deploy`) and needs no key; the database's rules must let a copy add to
+`/boats/seen/<its own name>` and read `/transit` (`atlasdb/rules.json` does: `node
+tools/cloud.mjs rules`). Until both are done, a copy's boats are turned away (it says so in its
+notes and sends them the next time), and every copy goes by the figures it came with. The
+figures the map comes with can be measured again at any time from saved settings
+(`tools/clock-transit.mjs --write`, then `tools/make-transit-lua.mjs`).
+
+**What the addon took a restart for** (up to version 22). Before the clock was known, a boat
+was taken to start its round afresh whenever the server restarted. The server's warning in chat
+was read; a ride of yours that did not fit what was known was taken for a restart, and what had
+been seen before one was thrown away (version 22: set aside until your next ride settled it).
+None of it was so. On 16 November a ride on the Dalaran airship did not fit a DockWatch
+sighting sixteen hours older, was taken for a restart, and every line's sightings were
+forgotten; the airship's round was 6.3 seconds out in the timetables (352.49 s for 358.82 s),
+which over 163 rounds is seventeen minutes. With the round as it is, that sighting, that ride
+and three since lie within a second of one timetable: the clock's. Version 23 forgets what an
+older version put down about restarts, once, and puts back what it had set aside.
 
 **What it is used for:**
 
@@ -1846,12 +1893,17 @@ does not do: a thing only one copy has ever sent is believed as it stands, and a
 anonymous account, of which one person can make several. `votes` (below) lists every fact the
 copies disagree about, who said what, and what was believed.
 
-**What a copy sends.** While the map runs it reads the game's cache and its own sightings, and
+**What a copy sends.** While the map runs it reads the game's cache, its own sightings and what
+the addon has seen of the boats (see "Boats, zeppelins and the tram, live": a boat sighting
+is a line, a stop and a moment, with no names; of a ride of your own, that does say this copy's
+player was aboard then), and
 sends what it has not sent before: a little after it starts, whenever the game has written its
-cache again (it does when you log out or leave the game), after you have met an NPC, and every
-six hours besides. **Facts about the game world and nothing else**: not your account, your
-characters, your realm or your computer's name, and not where you were or when. A sighting goes
-as "this NPC stands here". The game's files are only ever read.
+cache or the addon's saved settings again (it does when you log out, leave the game or
+`/reload`), after you have met an NPC, and every six hours besides. **Facts about the game
+world and nothing else**: not your account, your characters, your realm or your computer's
+name. Of what you have seen of the world, not where you were or when: a sighting of an NPC goes
+as "this NPC stands here". A boat's moment is the one thing sent that has a time in it. The
+game's files are only ever read.
 
 **Who a copy is to the database.** Nobody in particular. The first time it runs, a copy asks the
 database for an anonymous account: a made-up name and a key to come back as the same one, kept in
@@ -1885,7 +1937,8 @@ line is only there in a version that names a database.
 | `votes` | every fact on which the copies' game caches disagree, and how the vote went (`votes quest 95534`: one thing). For a maintainer: it reads what was sent |
 
 The pieces: `atlasdb/records.js` (a record, and how sources are merged into one), `collect.js`
-(what a copy gathers and sends), `publish.js` (making, publishing and fetching the database),
+(what a copy gathers and sends), `boats.js` (the boats: a sighting as it is sent, and how a
+line is measured from everybody's), `publish.js` (making, publishing and fetching the database),
 `rtdb.js` (talking to the database: plain web requests, nothing to install), `signin.js` (the
 anonymous account), `rules.json` (the database's rules, as pasted into the Firebase console),
 `extractor/wdb.js` (reading the game's cache), `server/atlasdb.js` (the map doing it by itself).
@@ -1937,10 +1990,10 @@ says when the function last looked, and what went wrong if something did.
 | `/questie/data/<fingerprint>` | one file, gzipped and written as text in pieces of 4 MB (the database takes no larger, and compresses nothing itself) |
 | `/questie/check` | the function's last look: when, and whether it found the same version, took a new one in, or failed |
 
-For whoever keeps the database: the function goes into the cloud with the other one
+For whoever keeps the database: the function goes into the cloud with the others
 (`node tools/cloud.mjs deploy`), needs no key (QuestieDB's releases are public), and the
 database's rules must let copies read `/questie` (`atlasdb/rules.json` does:
-`node tools/cloud.mjs rules`). `node tools/cloud.mjs logs` shows what both functions' last runs
+`node tools/cloud.mjs rules`). `node tools/cloud.mjs logs` shows what the functions' last runs
 said. The copy that makes the database (`publish`) reads QuestieDB the same way as any other,
 so the records are made from the newest version there is.
 
@@ -2183,10 +2236,13 @@ notes what it does - a line for every *change*, not for every yard walked:
   else you could head for as they change, the quest you track moving on - and every mistake
   caught in its own code. The addon does much of what it does so that a mistake cannot stop
   the rest; such a mistake used to be seen by nobody, the route simply staying as it was. Of
-  the boats (lines beginning "boats:"): what is timed when you log in, each ride of yours,
-  whether DockWatch's channel could be joined, what other players passed on in every ten
-  minutes in which there was any (by which way it came, and whether it was taken, known
-  already, or from before a restart), and a restart taken, settled or taken back. (A report
+  the boats (lines beginning "boats:"): what each line goes by when you log in (the server's
+  clock alone, the clock borne out by sightings, or not as the clock has it), each ride of
+  yours and how far it was off what was known, a line that stops running by the clock or runs
+  by it again, whether DockWatch's channel could be joined, what other players passed on in
+  every ten minutes in which there was any (by which way it came, and whether it was taken,
+  known already, or from before the server's count started again), and the count starting
+  again. (A report
   reads these notes out of what the game saved; up to version 0.3.7 it looked for them written
   one way only, and this game writes them another: a report had none of them.)
 

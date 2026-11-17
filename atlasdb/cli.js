@@ -26,7 +26,7 @@ import path from 'node:path';
 import { loadConfig, CONFIG_FILE, PROJECT_ROOT } from '../extractor/config.js';
 import { Rtdb, entries } from './rtdb.js';
 import { LocalStore } from './local.js';
-import { gather, share } from './collect.js';
+import { gather, share, fetchBoats } from './collect.js';
 import { buildTruth, publish, pull, lookup, fold } from './publish.js';
 import { databaseSettings } from './settings.js';
 import { signIn } from './signin.js';
@@ -81,9 +81,10 @@ try {
     for (const n of found.notes) log(n);
     if (value('only') === 'seen') { found.npc.clear(); found.object.clear(); found.quest.clear(); }
     if (value('only') === 'cache') found.seen.length = 0;
-    log(`found: ${found.npc.size} creatures, ${found.object.size} objects and ${found.quest.size} quests in the game's cache (game build ${found.build || '?'}), ${found.seen.length} sightings`);
+    log(`found: ${found.npc.size} creatures, ${found.object.size} objects and ${found.quest.size} quests in the game's cache (game build ${found.build || '?'}), ${found.seen.length} sightings, ${found.boats.length} sightings of boats, zeppelins and the tram`);
     const r = await share(db, store, found, { app, dry: flag('dry'), copy });
-    log(`${r.dry ? 'would send' : 'sent'}: ${r.sent.npc} creatures, ${r.sent.object} objects, ${r.sent.quest} quests, ${r.sent.seen} sightings in ${r.deliveries} ${r.deliveries === 1 ? 'delivery' : 'deliveries'} (${kb(r.bytes)}); the rest was sent before`);
+    log(`${r.dry ? 'would send' : 'sent'}: ${r.sent.npc} creatures, ${r.sent.object} objects, ${r.sent.quest} quests, ${r.sent.seen} sightings in ${r.deliveries} ${r.deliveries === 1 ? 'delivery' : 'deliveries'} (${kb(r.bytes)}), ${r.sent.boats} sightings of boats; the rest was sent before`);
+    if (r.boatsError) log(`the boats could not be sent: ${r.boatsError}`);
     if (json) console.log(JSON.stringify({ collect: r }));
   } else if (command === 'publish') {
     const truth = await buildTruth(cfg, cfg.dataDir, await db.get('inbox'), log);
@@ -145,6 +146,8 @@ try {
     await step('questie', async () => pullQuestie(slow, cfg.dataDir, { log }));
     if (settings.maintain) await step('publish', async () => publish(db, await buildTruth(cfg, cfg.dataDir, await db.get('inbox'), log), { log }));
     await step('pull', async () => pull(db, store, log));
+    // (where each boat line stands on the server's clock, as measured from everybody's sightings)
+    await step('boats', async () => fetchBoats(db, store));
     console.log(json ? JSON.stringify(out) : JSON.stringify(out, null, 1));
   } else {
     fail(`unknown command "${command}": collect, publish, pull, show, status, whoami, votes, auto`, 2);

@@ -76,7 +76,7 @@ export function snapshot(app) {
         tracked, trackedGoal: tracked && me ? part(() => lean(N.questGoal(tracked, me, P.heads?.tracked?.id === tracked ? P.heads.tracked : null))) : null,
       };
     }),
-    boats: part(() => (app.transit ? { known: !!app.transit.known, clock: app.transit.now?.() ?? null, live: lean(app.transit.live ?? null) } : null)),
+    boats: part(() => (app.transit ? { known: !!app.transit.timed, clock: app.transit.now?.() ?? null, heard: app.transit.clock !== null, live: lean(app.transit.live ?? null) } : null)),
     remembered: part(() => { const out = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k?.startsWith('wfmap.')) { try { out[k] = JSON.parse(localStorage.getItem(k)); } catch { out[k] = localStorage.getItem(k); } } } return out; }),
   };
 }
