@@ -10,8 +10,9 @@ const MIN_UP = 0.4;    // surfaces steeper than ~66 degrees are walls, not floor
  * Build a lookup grid of one placed building's upward-facing collision triangles (world space).
  * @param rooms  the building's rooms as the game divides it (the model's `groups`: each owns a run
  *               of the vertices), so that a floor can say which room it is the floor of
+ * @param wmoId  the building's own number in the game's files (its rooms' names are filed under it)
  */
-function build(placement, collision, rooms = []) {
+function build(placement, collision, rooms = [], wmoId = 0) {
   const { verts, indices } = collision; // verts: 9 floats per vertex (position, normal, uv, colour)
   const M = placement.mat, b = placement.bounds;
   const nV = Math.floor(verts.length / 9), nT = Math.floor(indices.length / 3);
@@ -84,10 +85,17 @@ function build(placement, collision, rooms = []) {
     const b = r.bbox.flat();
     return {
       index, of: placement, building,
+      // which room this is to the game: the building's number, the set of names this placement
+      // of it uses, and the room's own number - what the game's table of room names goes by
+      wmo: wmoId, set: placement.nameSet ?? 0, id: Number.isInteger(r.area) ? r.area : -1,
       // Indoors, by the game's own flags for the room: an indoor room, and not one lit by the sky.
       // (The streets and squares of Stormwind are "indoor" rooms to the game as well - it is how
       // the city is put together - but lit as the outdoors is: that is what tells them apart.)
       inside: !!(r.flags & 0x2000) && !(r.flags & 0x48),
+      // (Held against what the game itself said, in the app's own notes of 409 spots played at: on the
+      // streets of Stormwind - indoor rooms lit by the sky - it said "outdoors" every time, as this does.
+      // The other way round it does not hold: a shop's floor can be a piece of the street's.)
+      flags: r.flags,
       area: Math.abs(b[3] - b[0]) * Math.abs(b[4] - b[1]) * scale * scale, height: Math.abs(b[5] - b[2]) * scale,
       box: boxOf(b),
     };
@@ -148,6 +156,20 @@ export class FloorFinder {
   }
 
   /**
+   * Every walkable building surface on the vertical line through (x, y), lowest first, each with
+   * the room it is the floor of: [{ z, room }] (room as room() gives it; null where a floor does
+   * not say). pending as at().
+   */
+  levels(wmos, x, y) {
+    const zs = [], owners = [];
+    const pending = this.#over(wmos, x, y, (g) => query(g, x, y, zs, owners));
+    const all = zs.map((z, i) => ({ z, room: owners[i] ?? null })).sort((p, q) => p.z - q.z);
+    const out = [];
+    for (const l of all) if (!out.length || l.z - out[out.length - 1].z > 0.05) out.push(l);
+    return { levels: out, pending };
+  }
+
+  /**
    * The room you are standing in, as the game divides its buildings into rooms: the room whose
    * floor is at your feet. A shop is a room of a few hundred square yards; a hall of Ironforge
    * is one of many thousand.
@@ -178,7 +200,7 @@ export class FloorFinder {
       if (!m.collision) continue;
       let g = this.grids.get(w);
       if (!g) {
-        g = build(w, m.collision, m.meta?.groups ?? []);
+        g = build(w, m.collision, m.meta?.groups ?? [], m.meta?.wmoId ?? 0);
         this.grids.set(w, g);
         if (this.grids.size > MAX_GRIDS) {
           let oldest = null;

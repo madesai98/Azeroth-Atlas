@@ -402,7 +402,7 @@ export class ObjectLayer {
   async load() {
     const map = this.scene.map;
     const g = map.globalWmo;
-    if (g) this.#addWmo(g.fdid, g.pos, g.rot, g.scale, g.doodadSet, g.bounds);
+    if (g) this.#addWmo(g.fdid, g.pos, g.rot, g.scale, g.doodadSet, g.bounds, g.nameSet ?? 0);
     if (!map.wmoCount) return;
     const res = await fetch(`/data/maps/${map.id}/wmos.bin?v=${map.rev}`);
     if (!res.ok) return;
@@ -412,13 +412,14 @@ export class ObjectLayer {
     const dv = new DataView(buf, s.offset, s.size);
     for (let p = 0; p + 68 <= s.size; p += 68) {
       const f = (o) => dv.getFloat32(p + o, true);
-      this.#addWmo(dv.getUint32(p, true), [f(8), f(12), f(16)], [f(20), f(24), f(28)], f(32), dv.getUint16(p + 36, true), [f(44), f(48), f(52), f(56), f(60), f(64)]);
+      this.#addWmo(dv.getUint32(p, true), [f(8), f(12), f(16)], [f(20), f(24), f(28)], f(32), dv.getUint16(p + 36, true), [f(44), f(48), f(52), f(56), f(60), f(64)], dv.getUint16(p + 38, true));
     }
   }
 
-  #addWmo(fdid, pos, rot, scale, doodadSet, bounds) {
+  /** @param nameSet  which of the building's sets of room names this placement of it uses (the game's own number: see floors.js) */
+  #addWmo(fdid, pos, rot, scale, doodadSet, bounds, nameSet = 0) {
     const radius = Math.hypot(bounds[3] - bounds[0], bounds[4] - bounds[1], bounds[5] - bounds[2]) / 2;
-    this.wmos.push({ fdid, mat: placementMatrix(pos, rot, scale), scale, doodadSet, bounds, radius, doodads: null });
+    this.wmos.push({ fdid, mat: placementMatrix(pos, rot, scale), scale, doodadSet, nameSet, bounds, radius, doodads: null });
   }
 
   /** Called by the scene when a full-detail tile arrives: keep the doodads that stand on it. */

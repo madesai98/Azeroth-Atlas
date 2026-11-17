@@ -13,6 +13,7 @@ import { bindQuests } from './quests.js';
 import { bindPrices } from './prices.js';
 import { NpcFigures } from './npcfigures.js';
 import { FloorFinder } from './floors.js';
+import { NavGrid } from './navgrid.js';
 import { TravelRoutes } from './travel.js';
 import { Transit } from './transit.js';
 import { TransitRenderer, CRAFT_LENGTH, CRAFT_MIN_PX } from './transitview.js';
@@ -1711,6 +1712,8 @@ async function main() {
   app.models = new ModelRenderer(app.gpu);
   app.models.onChange = () => { app.dirty = true; };
   app.floors = new FloorFinder(app.models);
+  // the walkable-ground data, for the height tracker (docks and bridges the game places as objects; the walls of each floor)
+  app.nav = new NavGrid(app);
   app.cutaway = new Cutaway(app);
   app.applyCut();
   app.figure = new FigureRenderer(app.gpu);
@@ -1785,6 +1788,9 @@ async function main() {
   app.models.rev = app.manifest.revision;
   // Portals that put you on another floor of the same building: the map has to know them to
   // follow you through (teleports.json, which comes with the page; height.js).
+  // What the game calls each room of its buildings (rooms.json: made by Update map; a map from
+  // before has none, and the height tracker does without).
+  getJSON(`/data/rooms.json?v=${st.extracted.revision}`).then((rooms) => { if (rooms?.names && rooms.wmo) app.rooms = rooms; }).catch(() => { /* none yet */ });
   try { const res = await fetch('/teleports.json', { cache: 'no-cache' }); app.world.teleports = res.ok ? (await res.json()).teleports ?? [] : []; } catch (err) { app.world.teleports = []; console.warn('the list of portals between floors is unavailable', err); }
   // Sizes of all placeable objects (for distance culling before a model is downloaded).
   app.m2Radius = new Map();

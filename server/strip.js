@@ -3,36 +3,63 @@
 // Format (must match addon/AzerothAtlas/AzerothAtlas.lua): squares showing one
 // base-8 digit each as a colour (red = 4, green = 2, blue = 1):
 //   7 0 7 0 4 2 1     sync pattern + colour check
-//   version(1) layout(1) seq(1) flags(5) map(5) x(8) y(8) facing(4) zoneMap(5) level(2) height(6)
+//   version(1) layout(1) seq(1) flags(6) map(5) x(8) y(8) facing(4) zoneMap(5) level(2) height(6) speed(4) place(5)
 //   [party]   4 x ( flags(1) x(7) y(7) )            when layout has 1
 //   [target]  kind(1) map(5) x(8) y(8)              when layout has 4 (your current waypoint; version 5.
 //                                                   kind: 1 your guide's step, 2 a journey of your own
 //                                                   in Shortest Path Forever, 3 a pin on the game's map,
 //                                                   4 a quick waypoint: a Shift-click on the game's map)
 //   [text]    kind(1) key(2) part(1) 9 bytes(24)    when layout has 2 (names and travel facts, a piece per frame)
+//   [fix]     seq(1) 2 x ( kind(1) id(5) h(5) d(4) ) when layout has 8 (version 6, whose layout has two digits:
+//                                                   your height as the game measured it - see below)
 //   checksum(4)
 //   0 7               end marker
 // Older versions are still read, so the link keeps working until the addon in the game has been
-// updated and reloaded: 3 had flags(3) (nothing about how you are moving), 4 had no waypoint.
-export const PROTOCOL = 5;
+// updated and reloaded: 3 had flags(3) (nothing about how you are moving), 4 had no waypoint,
+// 5 had flags(5), neither speed nor place nor a fix (the map then works your height out without them).
+//
+// The fix. The game does not say how high you are, but it does say how far you are from a
+// flight master or a landmark of its map when its marker is pointed at one, and that distance
+// counts height. The addon points the marker at two of them for a frame each, and sends for
+// each: kind (1 flight master, 2 landmark; 0 none; 4 more: your spot was had finely, not rounded to a tenth of a yard), id (the game's own number for it), h (how
+// far above or below it you are, in 16ths of a yard: what is left of the distance once the way
+// across the map is taken off - it does not say which of the two) and d (how far off it is, in
+// 8 yards: the further, the less h is worth). seq counts the fixes, 1 to 7 and round again.
+export const PROTOCOL = 6;
 const HEADER = [7, 0, 7, 0, 4, 2, 1];
 const TRAILER = [0, 7];
-const FLAG_DIGITS = { 3: 3, 4: 5, 5: 5 }; // by version
-const BASE = 41, PARTY = 4 * 15, TARGET = 22, TEXT = 28, CHECK = 4; // BASE excludes the flags
-export const MAX_BLOCKS = HEADER.length + BASE + FLAG_DIGITS[PROTOCOL] + PARTY + TARGET + TEXT + CHECK + TRAILER.length;
+const FLAG_DIGITS = { 3: 3, 4: 5, 5: 5, 6: 6 }; // by version
+const LAYOUT_DIGITS = { 3: 1, 4: 1, 5: 1, 6: 2 };
+const BASE = { 3: 41, 4: 41, 5: 41, 6: 51 }, PARTY = 4 * 15, TARGET = 22, TEXT = 28, FIX = 31, CHECK = 4; // BASE excludes the flags
+export const MAX_BLOCKS = HEADER.length + BASE[PROTOCOL] + FLAG_DIGITS[PROTOCOL] + PARTY + TARGET + TEXT + FIX + CHECK + TRAILER.length;
+export const FIX_KIND = { 1: 'taxi', 2: 'poi' };
 // text kinds: a party member's name; speeds and hearthstone; the hearthstone's inn (name, spot); known flight points
 export const TEXT_KIND = { QLOG: 0, QDONE: 1, PARTY: 2, STATS: 3, BIND: 4, BINDPOS: 5, FLIGHTS: 6, TALK: 7 };
 export const FLAGS = {
   WORLD: 1, ZONE: 2, INSTANCE: 4, DEAD: 8, TAXI: 16, FACING: 32, HEIGHT: 64, INDOORS: 128, HORDE: 256,
   SWIMMING: 512, FALLING: 1024, FLYING: 2048, SUBMERGED: 4096, MOUNTED: 8192,
+  JUMPED: 16384, ASCEND: 32768, DESCEND: 65536, SPEED: 131072,
 };
+
+/**
+ * What the game calls a place - the words over its minimap - as the number the addon sends for
+ * it (AzerothAtlas.lua, Place): 1 to 32749, 0 for no words. The map works the same number out
+ * for the names of the rooms it knows, and so can tell which of them you stand in.
+ */
+export function placeNumber(name) {
+  const bytes = Buffer.from(String(name ?? ''), 'utf8');
+  if (!bytes.length) return 0;
+  let h = 0;
+  for (const b of bytes) h = (h * 31 + b) % 32749;
+  return h + 1;
+}
 
 const checksum = (digits, n) => {
   let sum = 0;
   for (let i = 0; i < n; i++) sum = (sum * 31 + digits[i] + 1) % 4093;
   return sum;
 };
-const dataLength = (version, layout) => BASE + FLAG_DIGITS[version] + (layout & 1 ? PARTY : 0) + (version >= 5 && layout & 4 ? TARGET : 0) + (layout & 2 ? TEXT : 0) + CHECK;
+const dataLength = (version, layout) => BASE[version] + FLAG_DIGITS[version] + (layout & 1 ? PARTY : 0) + (version >= 5 && layout & 4 ? TARGET : 0) + (layout & 2 ? TEXT : 0) + (version >= 6 && layout & 8 ? FIX : 0) + CHECK;
 
 /**
  * Decode one row of screen pixels (RGB bytes, starting at the game window's left edge).
@@ -85,8 +112,9 @@ function readAt(digitAt, width, w) {
   const at = (i) => Math.floor((i + 0.5) * w);
   if (at(HEADER.length + 2) >= width) return { ok: false, reason: 'short' };
   for (let i = 0; i < HEADER.length; i++) if (digitAt(at(i)) !== HEADER[i]) return { ok: false, reason: i < 4 ? 'nosignal' : 'colors' };
-  const version = digitAt(at(HEADER.length)), layout = digitAt(at(HEADER.length + 1));
+  const version = digitAt(at(HEADER.length));
   if (!FLAG_DIGITS[version]) return { ok: false, reason: 'version', version };
+  const layout = LAYOUT_DIGITS[version] === 2 ? digitAt(at(HEADER.length + 1)) * 8 + digitAt(at(HEADER.length + 2)) : digitAt(at(HEADER.length + 1));
   const n = dataLength(version, layout);
   const total = HEADER.length + n + TRAILER.length;
   if (at(total - 1) >= width) return { ok: false, reason: 'short' };
@@ -97,20 +125,27 @@ function readAt(digitAt, width, w) {
   const take = (count) => { let v = 0; for (let i = 0; i < count; i++) v = v * 8 + d[p++]; return v; };
   if (take(CHECK) !== checksum(d, n - CHECK)) return { ok: false, reason: 'checksum' };
 
-  p = 2;
+  p = 1 + LAYOUT_DIGITS[version];
   const seq = take(1), flags = take(FLAG_DIGITS[version]), map = take(5), rx = take(8), ry = take(8), rf = take(4), zone = take(5), level = take(2), rz = take(6);
+  // (since version 6) how fast the game says you move, and what it calls the place you stand in
+  const rs = version >= 6 ? take(4) : 0, place = version >= 6 ? take(5) : null;
   // How you are moving: only the current addon reports it (null = not known).
   const moving = version >= 4 ? (bit) => !!(flags & bit) : () => null;
+  const newer = version >= 6 ? (bit) => !!(flags & bit) : () => null;
   const out = {
     ok: true, version, seq, map, zone, level, blockWidth: Math.round(w * 100) / 100, blocks: total,
     swimming: moving(FLAGS.SWIMMING), falling: moving(FLAGS.FALLING), flying: moving(FLAGS.FLYING), submerged: moving(FLAGS.SUBMERGED), mounted: moving(FLAGS.MOUNTED),
+    // jumped: the time in the air began with a jump; ascend / descend: the key that takes you up / down is held (in water);
+    // speed: yards a second, as the game has it (null: it does not say); place: the number of the place's name (0: no name)
+    jumped: newer(FLAGS.JUMPED), ascend: newer(FLAGS.ASCEND), descend: newer(FLAGS.DESCEND),
+    speed: version >= 6 && flags & FLAGS.SPEED ? rs / 32 : null, place,
     mode: flags & FLAGS.WORLD ? 'world' : flags & FLAGS.ZONE ? 'zone' : 'none',
     x: null, y: null,
     z: flags & FLAGS.HEIGHT ? rz / 8 - 8192 : null, // null when the game does not report a height
     facing: flags & FLAGS.FACING ? (rf / 4096) * 2 * Math.PI : null, // radians, 0 = north, counter-clockwise
     inInstance: !!(flags & FLAGS.INSTANCE), dead: !!(flags & FLAGS.DEAD), taxi: !!(flags & FLAGS.TAXI), indoors: !!(flags & FLAGS.INDOORS),
     faction: flags & FLAGS.HORDE ? 'horde' : 'alliance',
-    party: [], target: null, text: null,
+    party: [], target: null, text: null, fix: null,
   };
   if (out.mode === 'world') { out.x = rx / 128 - 32768; out.y = ry / 128 - 32768; }
   else if (out.mode === 'zone') { out.x = rx / 16777215; out.y = ry / 16777215; }
@@ -130,6 +165,15 @@ function readAt(digitAt, width, w) {
     const bytes = [];
     for (let g = 0; g < 3; g++) { const v = take(8); bytes.push((v >> 16) & 255, (v >> 8) & 255, v & 255); }
     out.text = { kind, key, part: part & 3, last: !!(part & 4), bytes };
+  }
+  if (version >= 6 && layout & 8) {
+    // your height as the game measured it (see the top of this file): how far above or below two places of its map you are
+    const fseq = take(1), refs = [];
+    for (let k = 0; k < 2; k++) {
+      const kind = take(1), id = take(5), h = take(5), dq = take(4);
+      if (FIX_KIND[kind & 3]) refs.push({ kind: FIX_KIND[kind & 3], id, h: h / 16, d: dq * 8, fine: !!(kind & 4) });
+    }
+    if (fseq && refs.length) out.fix = { seq: fseq, refs };
   }
   return out;
 }

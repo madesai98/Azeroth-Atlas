@@ -22,6 +22,8 @@ export const TABLE_FDID = {
   AreaTrigger: 1354401,
   WorldSafeLocs: 1369425,
   WMOAreaTable: 1355528,
+  // lifts: how each moves, as the game plays it (world.js, liftsOf)
+  TransportAnimation: 1140686,
   FactionTemplate: 1361579,
   Light: 1375579,
   LightParams: 1334669,

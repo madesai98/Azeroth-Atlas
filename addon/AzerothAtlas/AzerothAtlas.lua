@@ -12,24 +12,35 @@
 -- Strip format (must match server/strip.js). Squares are BLOCK_W x BLOCK_H physical pixels and
 -- each shows one base-8 digit as a colour: red = 4, green = 2, blue = 1 (black = 0, white = 7).
 --   7 0 7 0 4 2 1     sync pattern + colour check
---   version(1) layout(1) seq(1) flags(5) map(5) x(8) y(8) facing(4) zoneMap(5) level(2) height(6)
+--   version(1) layout(2) seq(1) flags(6) map(5) x(8) y(8) facing(4) zoneMap(5) level(2) height(6) speed(4) place(5)
 --   [party]   4 x ( flags(1) x(7) y(7) )            when layout has 1
 --   [target]  kind(1) map(5) x(8) y(8)              when layout has 4 (your current waypoint: kind 1
 --                                                   your guide's step, 2 a journey of your own in
 --                                                   Shortest Path Forever, 3 a pin on the game's map,
 --                                                   4 a quick waypoint: a Shift-click on that map)
 --   [text]    kind(1) key(2) part(1) 9 bytes(24)    when layout has 2 (names and travel facts, a piece per frame)
+--   [fix]     seq(1) 2 x ( kind(1) id(5) h(5) d(4) ) when layout has 8 (your height as the game measured it:
+--                                                   Height.lua. For each of two places - kind 1 a flight
+--                                                   master, 2 a landmark, 0 none, and 4 more where your
+--                                                   spot was had finely; id the game's number for
+--                                                   it - h is how far above or below it you are, in 16ths
+--                                                   of a yard, and d how far off it is, in 8 yards. Drawn
+--                                                   for three seconds after each fix; seq counts them, 1 to 7)
 --   checksum(4)
 --   0 7               end marker
--- The strip is only as long as it needs to be: 348 px wide when you are alone with no waypoint,
--- 676 px at most.
+-- The strip is only as long as it needs to be: 392 px wide when you are alone with no waypoint
+-- (516 px for the three seconds after a fix), 844 px at most.
+-- (speed: how fast the game says you are moving, in 32nds of a yard a second; place: what the
+-- game calls the place you stand in - the words over its minimap - boiled down to a number,
+-- 0 for none. Both, the fix and the second digit of the layout are there since version 6, for
+-- the 3D map to tell how high you are by.)
 
-local PROTOCOL = 5
+local PROTOCOL = 6
 local BLOCK_W, BLOCK_H = 4, 6
 local HEADER = { 7, 0, 7, 0, 4, 2, 1 }
 local TRAILER = { 0, 7 }
 local MAX_PARTY = 4
-local MAX_BLOCKS = #HEADER + 46 + MAX_PARTY * 15 + 22 + 28 + 4 + #TRAILER
+local MAX_BLOCKS = #HEADER + 57 + MAX_PARTY * 15 + 22 + 28 + 31 + 4 + #TRAILER
 
 -- player flags
 local F_WORLD = 1     -- x / y are world coordinates
@@ -48,8 +59,13 @@ local F_FALLING = 1024   -- in the air: jumping or falling
 local F_FLYING = 2048    -- flying under your own control (not a flight path: that is F_TAXI)
 local F_SUBMERGED = 4096 -- under the surface
 local F_MOUNTED = 8192
+-- (since version 6: the strip has room for 18 such flags)
+local F_JUMPED = 16384   -- in the air, and it began with a jump (a fall that began with a step off a ledge does not have it)
+local F_ASCEND = 32768   -- the key that takes you up is held down (in water: you are rising)
+local F_DESCEND = 65536  -- the key that takes you down is held down (in water: you are sinking)
+local F_SPEED = 131072   -- speed is valid: the game says how fast you are moving
 -- layout
-local L_PARTY, L_TEXT, L_TARGET = 1, 2, 4
+local L_PARTY, L_TEXT, L_TARGET, L_FIX = 1, 2, 4, 8
 -- text kinds: a party member's name; your speeds and hearthstone; where your hearthstone is set
 -- (its name, and the spot if this addon saw you bind there); the flight points you know;
 -- the NPC whose window you last opened; and, a little at a time, your quests: the ones in your
@@ -242,7 +258,37 @@ function shared.Try(what, f, ...) return Caught(what, pcall(f, ...)) end
 
 -- ---- what we know ---------------------------------------------------------------------------
 -- (world, north, west: where you are in yards, for Route.lua; the rest is as the strip sends it)
-local player = { flags = 0, map = 0, x = 0, y = 0, z = 0, facing = 0, zone = 0, level = 0, world = false, north = 0, west = 0 }
+local player = { flags = 0, map = 0, x = 0, y = 0, z = 0, facing = 0, zone = 0, level = 0, speed = 0, place = 0, world = false, north = 0, west = 0 }
+
+-- The keys that take you up and down. The game does not say how high you are, and the 3D map
+-- works it out: for that it helps to know that a spell in the air began with a jump (you rise
+-- before you fall), and, in water, whether you are holding the key that takes you up or the one
+-- that takes you down. Nothing is done with the keys: they are only seen going down and up, the
+-- way the game lets any addon see them.
+local keys = { jumpAt = -100, up = false, down = false, air = false, jumped = false }
+do
+  local function see(name, fn)
+    if hooksecurefunc and type(_G[name]) == "function" then pcall(hooksecurefunc, name, fn) end
+  end
+  see("JumpOrAscendStart", function() keys.jumpAt = GetTime(); keys.up = true end)
+  see("AscendStop", function() keys.up = false end)
+  see("SitStandOrDescendStart", function() keys.down = true end)
+  see("DescendStop", function() keys.down = false end)
+end
+
+-- What the game calls the place you stand in, as a number from 1 to 32749 (0: it says nothing).
+-- The 3D map works the same number out for every room it knows (server/strip.js, placeNumber).
+local placeText, placeNumber = nil, 0
+local function Place()
+  local name = GetMinimapZoneText and GetMinimapZoneText() or nil
+  if name == nil or (issecretvalue ~= nil and issecretvalue(name)) or type(name) ~= "string" then name = "" end
+  if name ~= placeText then
+    local h = 0
+    for i = 1, #name do h = (h * 31 + string.byte(name, i)) % 32749 end
+    placeText, placeNumber = name, (#name > 0) and (h + 1) or 0
+  end
+  return placeNumber
+end
 local party = {}     -- [slot] = { flags, x, y, name }
 for i = 1, MAX_PARTY do party[i] = { flags = 0, x = 0, y = 0, name = nil } end
 local partyPresent = false
@@ -378,12 +424,16 @@ local function Corpse()
   local x, y = pos:GetXY()
   return World(corpseSpot, uiMap, x, y)
 end
+local trackedLast = 0
 local function TrackedQuest()
+  -- (while the game's marker is pointed elsewhere for a moment, to measure your height by - Height.lua -
+  -- the quest you track is the one it was on, and will be on again)
+  if shared.measuring then return trackedLast end
   local id = nil
   if C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID then id = plain(C_SuperTrack.GetSuperTrackedQuestID()) end
   if (not id or id == 0) and GetSuperTrackedQuestID then id = plain(GetSuperTrackedQuestID()) end
-  if id and id > 0 and id < 16777216 then return id end
-  return 0
+  trackedLast = id and id > 0 and id < 16777216 and id or 0
+  return trackedLast
 end
 -- How far a quest in your log has got, as the game's own list of what it asks for has it:
 -- whether it is ready to hand in (1) or failed (2), how many things it asks for, which of them
@@ -1014,8 +1064,36 @@ local function ReadPlayer()
   if yes(UnitIsDeadOrGhost("player")) then p.flags = p.flags + F_DEAD end
   if yes(UnitOnTaxi("player")) then p.flags = p.flags + F_TAXI end
   if IsIndoors and yes(IsIndoors()) then p.flags = p.flags + F_INDOORS end
-  if IsSwimming and yes(IsSwimming()) then p.flags = p.flags + F_SWIMMING end
-  if IsFalling and yes(IsFalling()) then p.flags = p.flags + F_FALLING end
+  local swimming = IsSwimming and yes(IsSwimming())
+  local falling = IsFalling and yes(IsFalling())
+  if swimming then p.flags = p.flags + F_SWIMMING end
+  if falling then p.flags = p.flags + F_FALLING end
+  -- (in the air: did it begin with a jump? Said for as long as you are up there)
+  if falling then
+    if not keys.air then keys.air, keys.jumped = true, GetTime() - keys.jumpAt < 0.5 end
+    if keys.jumped then p.flags = p.flags + F_JUMPED end
+  else
+    keys.air = false
+  end
+  -- (in water: the keys that take you up and down; a key let go while the game was not looking is not held for ever)
+  if swimming then
+    if keys.up and keys.down then keys.up, keys.down = false, false end
+    if keys.up then p.flags = p.flags + F_ASCEND end
+    if keys.down then p.flags = p.flags + F_DESCEND end
+  else
+    keys.down = false
+    if not falling then keys.up = false end
+  end
+  -- how fast the game says you are moving (on a boat that is nothing at all, while the boat moves you)
+  p.speed = 0
+  if GetUnitSpeed then
+    local now = plain((GetUnitSpeed("player")))
+    if now then
+      p.flags = p.flags + F_SPEED
+      p.speed = clamp(now * 32, 4095)
+    end
+  end
+  p.place = Place()
   if IsFlying and yes(IsFlying()) then p.flags = p.flags + F_FLYING end
   if IsSubmerged and yes(IsSubmerged()) then p.flags = p.flags + F_SUBMERGED end
   if IsMounted and yes(IsMounted()) then p.flags = p.flags + F_MOUNTED end
@@ -1103,13 +1181,16 @@ local function Update(scan)
   if target.kind > 0 then layout = layout + L_TARGET end
   local kind, key, part, name, offset = NextText()
   if kind then layout = layout + L_TEXT end
+  -- (your height as the game measured it, for three seconds after each time it has: Height.lua)
+  local fix = shared.FixNow and shared.FixNow(GetTime()) or nil
+  if fix then layout = layout + L_FIX end
 
   local p = player
   local n = 0
   n = put(n, PROTOCOL, 1)
-  n = put(n, layout, 1)
+  n = put(n, layout, 2)
   n = put(n, 0, 1)             -- sequence number, filled in below
-  n = put(n, p.flags, 5)
+  n = put(n, p.flags, 6)
   n = put(n, p.map, 5)
   n = put(n, p.x, 8)
   n = put(n, p.y, 8)
@@ -1117,6 +1198,8 @@ local function Update(scan)
   n = put(n, p.zone, 5)
   n = put(n, p.level, 2)
   n = put(n, p.z, 6)
+  n = put(n, p.speed, 4)
+  n = put(n, p.place, 5)
   if partyPresent then
     for i = 1, MAX_PARTY do
       local m = party[i]
@@ -1140,6 +1223,20 @@ local function Update(scan)
       n = put(n, (b1 or 0) * 65536 + (b2 or 0) * 256 + (b3 or 0), 8)
     end
   end
+  if fix then
+    n = put(n, fix.seq, 1)
+    for i = 1, 2 do
+      local g = fix.refs[i]
+      if g then
+        n = put(n, g.kind + (g.fine and 4 or 0), 1)
+        n = put(n, g.id, 5)
+        n = put(n, clamp(g.h * 16, 32767), 5)
+        n = put(n, clamp(g.d / 8, 4095), 4)
+      else
+        n = put(n, 0, 15)
+      end
+    end
+  end
 
   -- Skip the repaint when nothing changed since the last frame.
   local sum = 0
@@ -1148,7 +1245,7 @@ local function Update(scan)
   lastSum, lastCount = sum, n
 
   seq = (seq + 1) % 8
-  digits[3] = seq
+  digits[4] = seq
   sum = 0
   for i = 1, n do sum = (sum * 31 + digits[i] + 1) % 4093 end
   n = put(n, sum, 4)
@@ -1262,6 +1359,8 @@ strip:SetScript("OnEvent", function(_, event)
     pcall(ClaimSlash)
     if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end
     if AzerothAtlasDB.enabled == nil then AzerothAtlasDB.enabled = true end
+    -- (what the height probes of November 2026 kept there: read long since, and only a weight to load at every login)
+    AzerothAtlasDB.probe, AzerothAtlasDB.probe2, AzerothAtlasDB.probe3 = nil, nil, nil
     if type(AzerothAtlasCharDB) ~= "table" then AzerothAtlasCharDB = {} end
     -- (its notes go on where they were; and this login is the first of the new ones)
     OpenLog()
@@ -1339,6 +1438,11 @@ SlashCmdList["AZEROTHATLAS"] = function(msg)
     return
   elseif word == "options" or word == "config" or word == "settings" then
     if not (shared.OpenOptions and shared.OpenOptions()) then say("the options are under Esc > Options > AddOns > Azeroth Atlas.") end
+    return
+  end
+  if word == "measure" then
+    -- /atlas measure, /atlas measure off, /atlas measure on: your height as the game measures it (Height.lua)
+    if shared.MeasureSay then shared.MeasureSay(rest) else say("this copy of the addon does not measure your height: update it from the 3D map, and start the game again.") end
     return
   end
   if word == "log" then

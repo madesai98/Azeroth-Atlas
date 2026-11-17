@@ -5,9 +5,71 @@ import crypto from 'node:crypto';
 import { loadTable } from './tables.js';
 import { transportLines, findPortalData, readPortals } from './transit.js';
 
-export const WORLD_VERSION = 5; // raise when the contents of world.json change
+export const WORLD_VERSION = 6; // raise when the contents of world.json change (6: lifts)
+export const ROOMS_VERSION = 1; // ...and of rooms.json
 const hex = (argb) => '#' + ((argb >>> 0) & 0xffffff).toString(16).padStart(6, '0');
 const r3 = (v) => v.map((x) => Math.round(x * 1000) / 1000);
+
+/**
+ * What the game calls each room of its buildings (its table WMOAreaTable): the words it shows
+ * over the minimap while you stand in that room. A building is put together of rooms ("groups"),
+ * and the table names them by the building's number, the set of names its placement on the map
+ * uses, and the room's own number (-1: the whole building, for every room with no line of its
+ * own). A line with no name of its own takes the name of the area it is filed under.
+ *
+ * The game says that name to an addon (GetMinimapZoneText), and the map knows which room every
+ * floor belongs to: so where two floors, one over the other, are in rooms of different names,
+ * the name says which you are on (viewer/js/height.js).
+ * @returns {{ names: string[], wmo: { [building]: number[] } }}  per building a flat list of
+ *          name set, room, index into names - three numbers a line
+ */
+export function roomNames(rows, areas) {
+  const names = [], index = new Map(), wmo = {};
+  for (const r of rows) {
+    const name = String(r.AreaName_lang || areas[r.AreaTableID]?.n || '').trim();
+    if (!name || !Number.isInteger(r.WMOID) || r.WMOID <= 0) continue;
+    let i = index.get(name);
+    if (i === undefined) { i = names.length; names.push(name); index.set(name, i); }
+    (wmo[r.WMOID] ??= []).push(r.NameSetID | 0, Number.isInteger(r.WMOGroupID) ? r.WMOGroupID : -1, i);
+  }
+  return { names, wmo };
+}
+
+const LIFT_TRAVEL = 10; // yards up and down that make a lift (the doors beside one move less)
+const LIFT_ACROSS = 6;  // ...and no further than this across (the tram's cars are objects of the same kind)
+const LIFT_REACH = 7;   // yards from its middle within which you may be standing on it
+const LIFT_SAME = 5;    // two such objects this close are parts of one lift: the one that travels furthest is it
+
+/**
+ * The lifts: objects that carry whoever stands on them up and down (Thunder Bluff, the
+ * Undercity, the Great Lift). Nothing the game tells an addon says you are on one, and it moves
+ * you a long way up or down without a step across the map: so the map has to know where they
+ * are. Where each stands is the reference database's word (the game's files do not place
+ * objects, its server does), how far it travels the game's own: its table TransportAnimation
+ * says where such an object is at each moment of its round, counted from where it stands.
+ * @param ref   what readReference() gave: objects (where each object stands) and movers (the objects of this kind)
+ * @param rows  TransportAnimation
+ * @returns [{ id, name, map, x, y, lo, hi, r }]  lo, hi: how low and how high its platform gets; r: how far from its middle you may be on it
+ */
+export function liftsOf(ref, rows) {
+  const travel = new Map();
+  for (const r of rows) {
+    if (!Array.isArray(r.Pos)) continue;
+    let t = travel.get(r.TransportID);
+    if (!t) travel.set(r.TransportID, (t = { lo: [Infinity, Infinity, Infinity], hi: [-Infinity, -Infinity, -Infinity] }));
+    for (let i = 0; i < 3; i++) { t.lo[i] = Math.min(t.lo[i], r.Pos[i]); t.hi[i] = Math.max(t.hi[i], r.Pos[i]); }
+  }
+  const all = [];
+  for (const [id, name] of ref?.movers ?? []) {
+    const t = travel.get(id), at = ref.objects?.get(id);
+    if (!t || !at || t.hi[2] - t.lo[2] < LIFT_TRAVEL || Math.max(t.hi[0] - t.lo[0], t.hi[1] - t.lo[1]) > LIFT_ACROSS) continue;
+    for (let i = 0; i + 3 < at.length; i += 4) all.push({ id, name, map: at[i], x: r3([at[i + 1]])[0], y: r3([at[i + 2]])[0], lo: r3([at[i + 3] + t.lo[2]])[0], hi: r3([at[i + 3] + t.hi[2]])[0], r: LIFT_REACH });
+  }
+  all.sort((a, b) => (b.hi - b.lo) - (a.hi - a.lo) || a.id - b.id || a.x - b.x || a.y - b.y);
+  const out = [];
+  for (const l of all) if (!out.some((o) => o.map === l.map && Math.hypot(o.x - l.x, o.y - l.y) < LIFT_SAME)) out.push(l);
+  return out.sort((a, b) => a.map - b.map || a.x - b.x || a.y - b.y);
+}
 
 export async function buildWorld(casc, log, cfg = null) {
   const names = ['Map', 'AreaTable', 'UiMap', 'UiMapAssignment', 'AreaPOI', 'LiquidType', 'LiquidObject', 'LiquidMaterial', 'TaxiNodes', 'TaxiPath', 'TaxiPathNode', 'AreaTrigger'];

@@ -231,7 +231,25 @@ export class PlayerTracker {
       map: d.map, mode: d.mode, x: d.x, y: d.y, z: d.z, facing: d.facing, zone: d.zone, level: d.level, inInstance: d.inInstance, dead: d.dead, taxi: d.taxi, indoors: d.indoors, faction: d.faction,
       // how you are moving (null when the addon in the game is an older one that does not say)
       swimming: d.swimming, submerged: d.submerged, falling: d.falling, flying: d.flying, mounted: d.mounted,
+      // (addon version 6) a time in the air that began with a jump; the keys that take you up and down in water; how fast
+      // the game says you move; the number of what it calls the place (strip.js, placeNumber)
+      jumped: d.jumped, ascend: d.ascend, descend: d.descend, speed: d.speed, place: d.place,
     };
+    // Your height as the game measured it (strip.js: the fix). It is drawn in the strip for a
+    // few seconds; each one is numbered when it first comes, and kept with where and when that
+    // was - the map holds it against where you were then, once.
+    if (d.fix && d.fix.seq !== this.fixSeq) {
+      this.fixSeq = d.fix.seq;
+      this.fixCount = (this.fixCount ?? 0) + 1;
+      this.fix = { n: this.fixCount, refs: d.fix.refs, map: d.map, x: d.x, y: d.y, t: Date.now() };
+    } else if (!d.fix) this.fixSeq = null;
+    if (this.fix && d.mode === 'world') player.fix = this.fix;
+    // When this was read off the game's window (this computer's clock, ms): the map times your
+    // falls and your speed by it. (A reading that says what the one before said keeps that one's
+    // time: nothing has happened, and nothing is sent on.)
+    const said = JSON.stringify(player);
+    player.t = said === this.saidLast && this.state.player?.t ? this.state.player.t : Date.now();
+    this.saidLast = said;
     // A corrupted read can very occasionally pass the checksum. A real jump (teleport, map
     // change) persists, so only believe one once the next frame agrees with it.
     const prev = this.state.player;

@@ -8,6 +8,8 @@
 ## SavedVariablesPerCharacter: AzerothAtlasCharDB
 
 AzerothAtlas.lua
+HeightRefs.lua
+Height.lua
 Route.lua
 TransitData.lua
 Transit.lua

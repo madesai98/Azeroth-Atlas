@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// The scheduled functions (functions/) - the one that reads the auction houses, and the one
-// that takes each new version of QuestieDB into the database - put in the cloud and looked
-// after. For whoever keeps the Atlas database: it needs a sign-in that owns the database's
+// The scheduled functions (functions/) - the one that reads the auction houses, the one that
+// takes each new version of QuestieDB into the database, and the one that measures the boats
+// from what every copy has seen of them - put in the cloud and looked after. For whoever keeps the Atlas database: it needs a sign-in that owns the database's
 // Firebase project (https://console.firebase.google.com), which must be on the pay-as-you-go
 // plan (Firebase runs no functions without it).
 //
@@ -15,7 +15,7 @@
 //                                   holding nothing else, go into the project's Secret Manager.
 //                                   Nothing of it is kept on this computer; delete the two files after
 //   node tools/cloud.mjs deploy     put the functions in the cloud, or the newer version of them
-//   node tools/cloud.mjs logs       what their last runs said (--only=auctions or --only=questie: one of them)
+//   node tools/cloud.mjs logs       what their last runs said (--only=auctions, --only=questie or --only=boats: one of them)
 //   node tools/cloud.mjs rules      publish atlasdb/rules.json as the database's rules
 //                                   (the same as pasting it into the console)
 //
@@ -65,7 +65,7 @@ if (command === 'login') {
   }
   process.exitCode = firebase(['deploy', '--only', 'functions', '--force']);
 } else if (command === 'logs') {
-  const only = ['auctions', 'questie'].includes(value('only')) ? value('only') : 'auctions,questie';
+  const only = ['auctions', 'questie', 'boats'].includes(value('only')) ? value('only') : 'auctions,questie,boats';
   process.exitCode = firebase(['functions:log', '--only', only, '--lines', value('lines') ?? '40']);
 } else if (command === 'rules') {
   process.exitCode = firebase(['deploy', '--only', 'database']);

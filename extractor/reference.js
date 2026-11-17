@@ -127,6 +127,9 @@ function columns(sql, name) {
  *   loot       { creature, reference, object: Map<loot id, [[item, chance, group, min count or -reference, max count], ...]> }
  *              (chance: per cent; negative: only while you are on the quest that wants it; 0: an equal share of what its group has left)
  *   chests     Map<object id, loot id>
+ *   movers     Map<object id, name>: the objects that carry you (lifts, moving platforms: the game's
+ *              "transport" kind). Where each stands is among the object spawns; how far it
+ *              travels is the game's own to say (world.js, liftsOf)
  *   quests     Map<quest id, { title, type, limit (seconds), needs: [['n' | 'o' | 'i', id, how many], ...] }>
  */
 function readFacts(sql) {
@@ -154,12 +157,16 @@ function readFacts(sql) {
     return out;
   };
   const loot = { creature: lootTable('creature_loot_template'), reference: lootTable('reference_loot_template'), object: lootTable('gameobject_loot_template') };
-  const chests = new Map();
+  const chests = new Map(), movers = new Map();
   {
     const t = reader('gameobject_template');
-    const iId = t.at('entry'), iType = t.at('type'), iData = t.at('data1');
-    // (type 3: a chest - anything you open and take from; its second number is the loot it holds)
-    if (t.ok && Math.min(iId, iType, iData) >= 0) for (const r of t.rows()) if (num(r[iType]) === 3 && num(r[iData]) > 0) chests.set(num(r[iId]), num(r[iData]));
+    const iId = t.at('entry'), iType = t.at('type'), iData = t.at('data1'), iName = t.at('name');
+    // (type 3: a chest - anything you open and take from; its second number is the loot it holds.
+    // type 11: something that moves along a way of its own with whoever stands on it - a lift)
+    if (t.ok && Math.min(iId, iType, iData) >= 0) for (const r of t.rows()) {
+      if (num(r[iType]) === 3 && num(r[iData]) > 0) chests.set(num(r[iId]), num(r[iData]));
+      else if (num(r[iType]) === 11) movers.set(num(r[iId]), iName >= 0 ? String(r[iName] ?? '') : '');
+    }
   }
   const quests = new Map();
   {
@@ -176,7 +183,7 @@ function readFacts(sql) {
       quests.set(num(r[iId]), { title: iTitle >= 0 ? r[iTitle] : '', type: iType >= 0 ? num(r[iType]) : 0, limit: iLimit >= 0 ? num(r[iLimit]) : 0, needs });
     }
   }
-  return { templates, respawn, loot, chests, quests };
+  return { templates, respawn, loot, chests, movers, quests };
 }
 
 /**
@@ -213,7 +220,7 @@ export function readReference(file) {
     }
     return out;
   };
-  let facts = { templates: new Map(), respawn: new Map(), loot: { creature: new Map(), reference: new Map(), object: new Map() }, chests: new Map(), quests: new Map() };
+  let facts = { templates: new Map(), respawn: new Map(), loot: { creature: new Map(), reference: new Map(), object: new Map() }, chests: new Map(), movers: new Map(), quests: new Map() };
   try { facts = readFacts(sql); } catch { /* the spawn tables alone, as before */ }
   return { hash, creatures: table('creature'), objects: table('gameobject'), ...facts };
 }

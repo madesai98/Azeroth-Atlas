@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Casc } from './casc/casc.js';
 import { loadConfig } from './config.js';
-import { buildWorld } from './world.js';
+import { buildWorld, roomNames, liftsOf, ROOMS_VERSION } from './world.js';
 import { parseWDT } from './formats/wdt.js';
 import { Pool } from './pool.js';
 import { writeFileAtomic, unpackContainer } from './container.js';
@@ -321,7 +321,8 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
   report({ type: 'phase', name: 'Placing creatures' });
   let danger = null;
   let questie = null; // which QuestieDB file this map was built from (even if it was unusable)
-  let innsSig = null, dungeonsSig = null;
+  let innsSig = null, dungeonsSig = null, liftsSig = null;
+  let reference = null, ref = null; // the reference database, once it has been looked for (the NPC layer and the lifts both read it)
   let questieDb = null, factionTemplates = null, factionHash = null; // kept for the NPC layer below
   try {
     const file = findQuestieDb(cfg);
@@ -398,8 +399,7 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
     try {
       const db = questieDb;
       const source = `QuestieDB ${db.version ?? '?'}`;
-      const reference = await fetchReference(cfg, dataDir, log);
-      let ref = null;
+      reference = await fetchReference(cfg, dataDir, log);
       if (reference) { try { ref = readReference(reference.file); } catch (err) { log(`reference database unreadable (${err.message}): heights come from the map data alone`); } }
       const placed = placeNpcs(db, world.data.zones, factionTemplates, ref ? { areas: world.data.areas, ref, mapIds: new Set(maps.map((m) => m.id)) } : null);
       const todo = [];
@@ -443,6 +443,39 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
     } catch (err) {
       log(`NPC layer unavailable: ${err.message}`);
     }
+  }
+
+  // ---- lifts, and what the game calls each room of its buildings ---------------------------
+  // For the height tracker (viewer/js/height.js), which works out how high you are from what the
+  // game does tell an addon: a lift carries you up or down with no step across the map, so the
+  // map has to know where the lifts are (world.json: lifts); and the game says the name of the
+  // room you stand in, so the map has to know the rooms' names (rooms.json). Either missing only
+  // leaves the tracker without that help.
+  try {
+    if (!reference) { reference = await fetchReference(cfg, dataDir, log); if (reference) ref = readReference(reference.file); }
+    const anim = await loadTable(casc, 'TransportAnimation', log);
+    world.data.lifts = ref && anim ? liftsOf(ref, anim.rows) : [];
+    liftsSig = sig('lifts1', reference?.sha ?? null, anim?.hash ?? null);
+    if (world.data.lifts.length) log(`${world.data.lifts.length} lifts, from the reference database and the game's own table of how each moves`);
+  } catch (err) {
+    world.data.lifts = [];
+    log(`lifts unavailable: ${err.message}`);
+  }
+  try {
+    const t = await loadTable(casc, 'WMOAreaTable', log);
+    if (t) {
+      const rs = sig('rooms', ROOMS_VERSION, t.hash, sig(Object.entries(world.data.areas).map(([id, a]) => [id, a.n])));
+      if (fresh('rooms.json', rs)) stats.reused++;
+      else {
+        const rooms = roomNames(t.rows, world.data.areas);
+        writeFileAtomic(abs('rooms.json'), JSON.stringify(rooms));
+        stats.built++;
+        log(`rooms: ${rooms.names.length.toLocaleString()} names for the rooms of ${Object.keys(rooms.wmo).length.toLocaleString()} buildings`);
+      }
+      next.artifacts['rooms.json'] = { sig: rs };
+    }
+  } catch (err) {
+    log(`room names unavailable: ${err.message}`);
   }
 
   // ---- items ---------------------------------------------------------------------------
@@ -525,7 +558,7 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
     });
   }
   writeFileAtomic(abs('world.json'), JSON.stringify(world.data));
-  next.artifacts['world.json'] = { sig: sig(world.hash, innsSig, dungeonsSig) };
+  next.artifacts['world.json'] = { sig: sig(world.hash, innsSig, dungeonsSig, liftsSig) };
 
   // A filtered run (--maps) must not drop the other maps that were extracted earlier.
   if (mapFilter && !prev.stale) {

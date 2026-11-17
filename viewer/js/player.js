@@ -10,6 +10,7 @@
 // is one of three, by the kind of place you are in (places.js) - zoom yourself and it comes
 // back a few seconds later.
 import { HeightTracker } from './height.js';
+import { note } from './log.js';
 import { Places } from './places.js';
 import { basis, clamp, DEG } from './math.js';
 
@@ -40,7 +41,7 @@ export class PlayerLink {
     this.onChange = () => {};
     this.onFollow = () => {}; // following was switched on or off (by you, or by moving the map from under yourself)
     this.switching = false;
-    this.height = new HeightTracker(app);
+    this.height = new HeightTracker(app, { note });
     // the dungeon you were last in while alive or dead in it ({ map, at }), and - dead outside it - the dungeon your body is in (see receive)
     this.inside = null;
     this.bodyIn = null;
@@ -92,6 +93,19 @@ export class PlayerLink {
         this.me.swimming = p.swimming ?? null;
         this.me.falling = p.falling ?? null;
         this.me.flying = p.flying ?? null;
+        // (from the current addon: your head is under water; a time in the air began with a jump; the keys that
+        // take you up and down in water; how fast the game says you move; the number of what it calls the place;
+        // and when this was read off the game's window)
+        this.me.submerged = p.submerged ?? null;
+        this.me.mounted = p.mounted ?? null;
+        this.me.jumped = p.jumped ?? null;
+        this.me.ascend = p.ascend ?? null;
+        this.me.descend = p.descend ?? null;
+        this.me.speed = p.speed ?? null;
+        this.me.place = p.place ?? null;
+        this.me.t = p.t ?? null;
+        // (and your height as the game measured it, when it has: how far above or below two places of its map you are)
+        this.me.fix = p.fix ?? null;
         this.height.reading(this.me);
       }
     }

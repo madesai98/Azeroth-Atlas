@@ -1495,8 +1495,9 @@ Addons cannot talk to other programs, so this works in two halves:
 
 1. The **AzerothAtlas** addon (`addon/AzerothAtlas`, installed into the game's AddOns folder
    with the **Install addon** button) draws a thin strip of coloured squares in a corner of
-   the game window: the top-left one, unless you move it (6 px tall; 348 px wide when you are
-   alone with no waypoint, 676 px at most).
+   the game window: the top-left one, unless you move it (6 px tall; 392 px wide when you are
+   alone with no waypoint - 516 px for the three seconds after your height was measured - and
+   844 px at most).
    `/atlas` in game turns it on or off. After the map updates the addon (the button turns
    orange), type `/reload` in game; until then the older addon keeps working.
 
@@ -1700,18 +1701,83 @@ takes the tops of all objects, as it did.
 The game tells addons where you are on the map but not how high: in this client `UnitPosition`
 gives no usable height. (If a future version does report it, the addon already sends it and the
 map uses it directly.) So the height is worked out (`viewer/js/height.js`) from what the game
-does report, which besides your position is whether you are on a flight path, swimming, falling
-or indoors, and from what the map data knows.
+does report and from what the map data knows - and, every few seconds, checked against a
+measurement that the game can be made to give (next paragraph). What the game reports, besides
+your position: whether you are on a flight path, swimming, under water, falling or indoors; how
+fast it has you moving; and what it calls the place you are in (the words over its minimap).
+The addon adds what only it sees: whether a time in the air began with a jump, and whether you
+are holding the key that takes you up, or the one that takes you down, in water.
+
+**Measured, every few seconds.** The game has a marker of its own that it points at where you
+are heading, and it says how far off that is. To a pin on its map that distance is the way
+across the map and no more: a pin given a height of 500 yards, one given -500 and one given
+none all read the same, and jumping beside a pin changes nothing. But pointed at a **flight
+master** or a **landmark** of its map - places the game's data has in three dimensions - the
+distance counts height. Tried in the game on 17 November 2026, at Sentinel Hill: on top of the
+tower three places 136, 712 and 752 yards off all gave 95.60 to 95.62 yards for a floor the
+map has at 95.6; on open ground Anvilmar, 4,352 yards away and 360 yards up, gave 38.50 where
+the map's ground is at 38.49; and running up the tower's stairs, the two places of each
+measurement agreed with each other to a twenty-fifth of a yard.
+
+So the addon (`addon/AzerothAtlas/Height.lua`) points the game's marker at three such places,
+one frame each, and puts it straight back on what you were tracking (a quest, a pin: nothing
+is seen of it, and it works with the marker switched off, as most have it). For each place,
+what is left of the distance once the way across the map is taken off is how far above or
+below it you are. Which of the two the addon cannot say, nor what there is to stand on: it
+sends the two places that say most through the strip, and the map, which knows the floors,
+takes the floor at that height - whatever it had worked out before. Where the map has nothing
+at that height you are on something it does not have (a lift on its way, a ship's deck), at
+the height measured. Under water it says how deep you are. That is what makes the rest of this
+section the way your height is followed *between* two measurements, not the last word on it.
+
+Two things had to be found out for it to be that good, both in the game:
+
+- **Where you are, finely.** What is left of a distance once the way across the map is taken
+  off is only as good as that way across, and the game rounds where you are to a tenth of a
+  yard (`UnitPosition`). Where its own *map* of the place has you is not rounded: laid over
+  the world by that map's corners it gives the same spot some twenty times as finely, and the
+  addon goes by that (and says with the measurement which of the two it had).
+- **A frame late.** The distance the game gives in a frame is the one it worked out the frame
+  before: it belongs with where you were then. Taken with where you are now, two places would
+  disagree by a yard or two as soon as you ran; standing still they agreed to an inch.
+
+How much a place says depends on how steeply it is above or below you: a place far off and at
+about your own height says least (a town a thousand yards off at exactly your height: three
+or four yards), one far over or under you most. The addon chooses the places for that, from
+the 473 flight masters and landmarks of the game's data (`HeightRefs.lua`, written by
+`tools/make-height-refs.mjs` from the map data; any of them can be pointed at, not only the
+few the game lists for the map you are on) - and both continents have places high up that can
+be had from anywhere on them: Ironforge at 495 yards and Anvilmar at 399 in the east, Mount
+Hyjal at 1,659 and Darnassus at 1,335 in the west. Reckoned for a spot beside every flight
+master and landmark of the two continents, at its height and thirty yards over and under it,
+the best place there gives the height to within a twentieth of a yard at nine spots in ten and
+a tenth of a yard at ninety-nine in a hundred. (With only the rounded spot - a map the game
+gives no place on - that would be half a yard and a yard.) What goes through the strip is
+good to a sixteenth of a yard.
+
+When: on arriving somewhere (a login, a portal, a hearthstone), on landing from a fall or a
+flight, on coming out of water, on going indoors or out or into a place of another name, a
+moment after you stop, and every four seconds while you move (every second and a half under
+water). `/atlas measure off` turns it off (and `on`, on); `/atlas measure` says what was last
+found. Without it - an older addon, a map with none of those places, an instance - everything
+below works as it did.
 
 **On a flight path** (the game says so) your height is the flight route's own: every route is
 in the game data as 3D points, and the map follows the same curve through them. Where it sets
 you down you are on the ground at the flight master's height, which is also in the data, so you
-arrive on the platform and not under the city. Zeppelins and boats have no such flag, so they
-are recognised by moving along one of their routes faster than you can travel yourself. A
-zeppelin slows to a crawl long before its tower: once it has been carrying you, you are on its
-deck, at its route's height, for as long as you are on its line - until you step onto something
-the map has within reach of that height (the tower's platform), and not, as it was, onto the
-ground far under the ship after twenty yards of crawling.
+arrive on the platform and not under the city.
+
+**On a zeppelin or a boat** there is no such flag, but the game counts how fast you move from
+the deck you stand on: it says you are standing (or strolling) while the map sees you cross
+the sea. Where the game owns up to less than a third of the speed the map sees, for most of a
+second, along one of their routes, something is carrying you, and your height is that route's.
+That holds at any speed, from the first second. (A copy of the addon from before it sent the
+speed is served as before: they are recognised by moving along one of their routes faster than
+you can travel yourself, which takes longer and misses a ship that is crawling.) A zeppelin
+slows to a crawl long before its tower: once it has been carrying you, you are on its deck, at
+its route's height, for as long as you are on its line - until you step onto something the map
+has within reach of that height (the tower's platform), and not, as it was, onto the ground far
+under the ship after twenty yards of crawling.
 
 **Through a portal to another floor** of the same building (the one at the top of Stormwind's
 Mage Tower, into the Wizard's Sanctum under it, and the one back out) you move a few yards
@@ -1729,44 +1795,125 @@ floor it puts you down on. Before, the map took the lowest floor not buried unde
 and had you on the street over the Sanctum.
 
 **Walking**, the map retraces the way from your previous position in quarter-yard steps over
-the surfaces you could be standing on (the terrain, the floors, stairs and bridges in the
-buildings' collision data, and the surface of deep water) and stays on the ground as it rises
-and falls:
+the surfaces you could be standing on and stays on the ground as it rises and falls. Those
+surfaces are the terrain, the floors, stairs and bridges in the buildings' collision data, the
+surface of deep water - and what the game places as *objects*: the decks of docks, the planks
+of rope bridges, scaffolds, ramps. The page's own floor lookup has only buildings; the
+walkable-ground data made for the route planner (`maps/<id>/nav`) has the collision of objects
+too, so it is asked as well (`viewer/js/navgrid.js`).
 
-- only surfaces with room for a character above them count, so the floor underneath the first
-  treads of a staircase, or under a counter, is not somewhere you can be;
-- if the ground carries on at about the same height (a tread up or down), you are still on it.
-  That is what takes you up a staircase even though the floor carries on underneath it;
-- if something stands between your feet and your head, you have stepped up onto it;
-- if the ground ends, you have dropped to the next surface below, but only once the game has
-  reported you **falling** for long enough to cover the drop. Without that you are taken to be
-  on something the map does not have (a bridge or platform that is a prop, a ship's deck) and
-  your height is kept, for up to 20 yd of travel;
-- the storey above is never any of these, so it stays over your head.
+- Only surfaces with room for a character above them count, so the floor underneath the first
+  treads of a staircase, or under a counter, is not somewhere you can be.
+- If the ground carries on at about the same height (a tread up or down), you are still on it.
+  That is what takes you up a staircase even though the floor carries on underneath it.
+- If something stands between your feet and your head, you have stepped up onto it.
+- If neither the terrain nor a building has anything at your height any more (for longer than
+  a hairline gap), but the walkable-ground data has something to stand on there, you have
+  walked on onto that: the first plank of a dock where the quay ends, a bridge that is an
+  object.
+- The ground can also carry on *under* such a thing: a beach slopes away under the planks of
+  its dock. Where the walkable-ground data has nowhere to stand at the ground's height in its
+  cell (a character needs 1.7 yards of room, and the planks are in it) and has the top of an
+  object just over it, you are on the object, not under it. And on water too deep to stand
+  in, not swimming, with an object's top a little over the water, you are on that: so a dock
+  left by mistake is found again at the latest over deep water.
+- That data is a yard coarse - a cell of it holds whatever reaches into the cell anywhere -
+  so a floor of it only counts as *a thing of its own* (somewhere a fall can end, a second
+  place you might be) where no floor of a building and no ground comes within 1.2 yards of
+  its height anywhere in its cell. Else it is the edge of a roof over the street beside it,
+  or the porch a step further on: taken for objects, those made every street beside a house a
+  place with "two floors".
+- If the ground ends and the game does not say you are in the air, you are taken to be on
+  something the map does not have at all (a ship's deck) and your height is kept, for up to
+  20 yd of travel.
+- The storey above is never any of these, so it stays over your head.
 
-**In water** too deep to stand in you are at the surface: the game says when you are swimming.
+**In the air.** The game says when you are in the air and when that ends, and the addon whether
+it began with a jump. Nothing is decided while you are up there. Where you come down, how long
+you were in the air says how far you fell - the game's gravity is 19.3 yd/s², a jump leaves the
+ground at 7.96 yd/s, and nothing falls faster than 60 yd/s - and of the surfaces at that spot
+the one at that height is where you landed. So a jump across a gap lands on the far side and
+not at the bottom of the gap; a hop on a staircase stays on the staircase; and a drop down a
+stairwell ends on the storey the time fits, not on the first thing under the edge. (Before, a
+fall was "believed" once it had lasted long enough to cover the drop to the next surface
+below, whatever lay beyond it.) While you fall, the figure is drawn falling.
+
+**In water** too deep to stand in you are at the surface for as long as the game says your
+head is above it. Under it there is no measurement, but there is something to reckon by: the
+speed the game has for you counts the way down as well, and the map sees how fast you cross
+it. What is left over is how fast you sink or rise. Which of the two the game does not say; so
+it is rising while you hold the key that takes you up (Space), and sinking otherwise - you
+went under to get down there. You are never put above the surface or under the bottom the map
+has at that spot. While nothing changes the game says nothing new, so this goes on by the
+clock between its readings. It is dead reckoning: it tells the bottom of a lake from its
+surface, which is what a route or a quest marker needs; it is not right to the yard, and after
+a long dive with many turns you may be shown deeper than you are until your head comes out.
 On deep water without swimming, something is carrying you (a boat), and the first pier within
 reach above the water is where you step off.
+
+**On a lift** you go a long way up or down with no step across the map, and nothing the game
+reports says so. But the map now knows where the lifts are and how far each goes
+(`world.json`: `lifts` - 24 of them: the Undercity's three, the lifts of Thunder Bluff and of
+Thousand Needles, the one down to Gnomeregan, the scaffold cars of the Searing Gorge; from the
+reference database's list of what moves, and the game's own table of how far). Having stood
+still on one for two and a half seconds, where you
+step off decides which end you are at: the end that has a floor there. If the level you got on
+at carries on there as well, that one is followed alongside (next paragraph).
+
+**More than one answer.** Sometimes the height is a guess: arriving somewhere with several
+floors, stepping off a lift, a fall that fits two surfaces, ground that was not there for
+twenty yards. From such a moment the other floors at that spot are followed alongside, each as
+if it were the one you are on, and what the game goes on to say is held against every one of
+them:
+
+- a floor that ends under you where another carries on;
+- a wall between two spots you were at one after the other: the walkable-ground data knows,
+  for every yard of every floor, which of its four sides lead on;
+- a room the game counts as indoors, while it says you are outdoors;
+- a room with another name than the game shows over its minimap, where a room of that name is
+  at that spot. The game's files name the rooms of its buildings (`rooms.json`: 1,533 names
+  for the rooms of 864 buildings - "The Park", "Cathedral of Light", "Stormwind Keep"); the
+  addon sends the name the game shows as a number, and the map makes the same number of each
+  room's name.
+
+The floor that fits best is where you are, and when another comes to fit clearly better you
+are moved to it. This is only done from a real guess and for forty yards of walking after it:
+if nothing has told the floors apart by then, the guess stands. A floor you walked to step by
+step is never put in doubt by any of it. (That was tried: the walls in the ground data are a
+yard coarse, and the map's idea of which rooms the game counts as indoors is right on
+Stormwind's streets and wrong in some of its shops, whose floor is a piece of the street's. So
+the game's word on indoors is only ever taken the one way round that holds - it says outdoors,
+so you are not on the floor of an indoor room.)
 
 **Arriving with no way in between** (hearthstone, teleport, login, a new map), in this order:
 the height saved for your last position if you are still there; the height you had when you
 walked through that place before (floors of buildings you have been in are remembered in the
 browser, so hearthing back to an inn you have walked around in puts you on the right floor); a
-flight master's if
-you are beside one; otherwise the topmost surface outdoors and the lowest sensible floor
-indoors.
+flight master's if you are beside one; otherwise the topmost surface outdoors and the lowest
+sensible floor indoors - with the other floors there followed alongside, as above.
+
+What the tracker decides is written in the page's notes (`page.log`, lines beginning
+`height`; see "The notes it keeps"): something carrying you, a fall and where it was settled,
+a lift, a dive, a guess and the floors followed with it, a move to a floor that fits better,
+and every time a measurement put you somewhere other than where you were taken to be. A report
+sent in has them. The addon notes the first measurements of each login in full (what the game
+gave, and the way across the map by the fine spot and the rounded one), and when the game gives
+it nothing.
 
 Limits that come from the game, not from this tool:
 
 - The game only tells addons the position of you and your group, never of creatures or other
   players, so live enemy positions cannot be shown (spawn zones show where they are stationed).
 - Inside dungeons and raids the game may hide your position; the map then only switches to
-  the right map.
-- Lifts move you up or down without walking, falling or a route to go by, so after one the
-  height can be a storey out until you have walked about 20 yd, gone outside or used stairs.
-  The same goes for a first arrival indoors somewhere you have never walked, when the guess
-  picks the wrong storey.
-- Under water the depth is not known; you are shown at the surface.
+  the right map. There is nothing to measure by there either.
+- Your height is measured every few seconds, not all the time, and only on maps the game's
+  data has flight masters or landmarks for (the two continents; not instances). Between two
+  measurements, and where there are none:
+  - a lift is only known where the game's data has it as one, and only taken where you stood
+    still on it;
+  - a first arrival indoors somewhere you have never walked is a guess, with the other floors
+    followed alongside;
+  - under water the depth is reckoned from your speed.
 - The game must not be minimized (and the strip not hidden by a loading screen).
 
 ### Under a mountain
@@ -1818,7 +1965,8 @@ The extractor keeps what a pathfinder needs, in `dataDir`:
 | `user/npcs-seen.json` | Where you have seen NPCs stand for yourself (see "Seen in game"). Never touched by a map update |
 | `sources/classic-db/` | The reference database as downloaded, with a note of where it came from |
 | `sources/questiedb/` | QuestieDB as fetched from the Atlas database (see "Where QuestieDB comes from"): `source.json` says which version is in use, and the files are in a folder of that version's own, laid out as in the addon, with QuestieDB's licence. The version before it is kept until the next one comes |
-| `world.json` | Area names/hierarchy, zones with world rectangles, points of interest, liquid types (water / ocean / magma / slime), **flight masters and flight paths with their full 3D route points** (boat and zeppelin routes too; `pointMaps` says which map each point is on when a route crosses continents), `transports` (each boat / zeppelin line: its stops with map and position, seconds to the next stop, seconds for a full round), `portals` (doorways between maps, from `extractor/doorways.json`, or ShortestPathForever's `Data/Portals.lua` where that addon is installed), `inns` (every innkeeper: map, zone, position, reaction to each side; from QuestieDB), area triggers (dungeon entrances and other transitions) |
+| `rooms.json` | What the game calls the rooms of its buildings: `names`, and per building (`wmo`: by the building's number in the game's files) runs of three numbers - which set of names the placed building uses, the room's number in it (-1: the whole building), and the name's place in `names`. For telling floors apart by the name the game shows (see "How your height is known") |
+| `world.json` | Area names/hierarchy, zones with world rectangles, points of interest, liquid types (water / ocean / magma / slime), `lifts` (each lift: map, where it stands, the heights of its two ends `lo` and `hi`, how far from its middle its platform reaches `r`), **flight masters and flight paths with their full 3D route points** (boat and zeppelin routes too; `pointMaps` says which map each point is on when a route crosses continents), `transports` (each boat / zeppelin line: its stops with map and position, seconds to the next stop, seconds for a full round), `portals` (doorways between maps, from `extractor/doorways.json`, or ShortestPathForever's `Data/Portals.lua` where that addon is installed), `inns` (every innkeeper: map, zone, position, reaction to each side; from QuestieDB), area triggers (dungeon entrances and other transitions) |
 
 World coordinates are the game's: +X north, +Y west, +Z up, in yards. A tile is 533.33 yd and
 `col`/`row` map to world space as `X = (32 − row) × 533.33`, `Y = (32 − col) × 533.33` at the
@@ -2230,6 +2378,7 @@ notes what it does - a line for every *change*, not for every yard walked:
   its page, and nothing more of the page's was written down until it loaded again, two hours
   later): where each route is heading and which way it is taken to go ("lead:
   hearth, then walk"), with what was looked for and how long it took; what the game is handed;
+  what the height tracker decided (lines beginning "height": see "How your height is known");
   the graphics card; every warning and error;
 - **the addon** (with what it saves for the character; `/atlas log` shows the last of it):
   each mailbox opened, which delivery was in it and what was made of it, the waypoint and what
