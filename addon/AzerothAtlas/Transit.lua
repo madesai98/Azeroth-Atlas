@@ -16,7 +16,9 @@
 --                       put a wrong time into anybody's timers;
 --   the server's own    a restart starts every boat afresh. The warning the server gives in chat
 --                       ("restart in 15:00") is read, and so is a ride of your own that plainly
---                       no longer fits what was known.
+--                       no longer fits what was known. What a ride alone says is not for good:
+--                       what was known of the other lines is set aside, not thrown away, and
+--                       your next ride on another line settles whether there was a restart.
 -- Nothing is taken on one voice's word where voices differ: sightings that agree with each
 -- other (give or take what a round's own uncertainty allows) make a timetable, a sighting that
 -- stands alone against a fresh one waits for a second to back it, and the length of a round is
@@ -30,6 +32,7 @@
 --
 -- /atlas boats           what is known, line by line
 -- /atlas boats listen    other players' sightings: taken, or not
+-- /atlas boats restore   a restart that only a ride of yours said: taken back, by hand
 
 local shared = AzerothAtlas
 if type(shared) ~= "table" or type(shared.TransitData) ~= "table" then return end
@@ -51,11 +54,24 @@ local UNSURE = { own = 0.7, dw = 1.5, ft = 3, nau = 4 }
 local COUNTS = { own = 3, dw = 1.5, ft = 1, nau = 0.5 }
 local CHANNEL = "DockWatchData" -- where DockWatch passes its sightings on
 local PREFIX_DW, PREFIX_FT, PREFIX_NAU = "DockWatch2", "FTrans2", "NauticSync"
+local MADE = 22            -- what is kept is as this version of the addon keeps it (see Mend)
 
 local T = { lines = {}, rev = 0 }
 shared.Transit = T
 
 local function say(msg) print("|cff7fd4ffAzeroth Atlas|r: " .. msg) end
+-- (the addon's own notes of what it did, which "Report a problem" on the 3D map packs: AzerothAtlas.lua)
+local function Note(what)
+  if shared.Log then pcall(shared.Log, "boats: " .. what) end
+end
+-- a moment, as this computer's clock would show it
+local function Hour(t)
+  if date then
+    local ok, s = pcall(date, "%d %b %H:%M:%S", t)
+    if ok and type(s) == "string" then return s end
+  end
+  return tostring(math.floor(t))
+end
 local function secret(v) return issecretvalue ~= nil and issecretvalue(v) end
 local function plain(v)
   if v == nil or secret(v) or type(v) ~= "number" or v ~= v or v == math.huge or v == -math.huge then return nil end
@@ -144,7 +160,9 @@ end
 -- Kept with the addon's settings, for every character: AzerothAtlasDB.transit = { sight =
 -- { [line] = { { t (when it left stop s, or got there), s, arr (true: got there), src, who, lane,
 -- e (when that boat left stop 1 on that round) } } }, restart (the server restarted then, or
--- will), before (the restart known before that one), listen }.
+-- will), before (the restart known before that one), soft (true: that restart is only what a
+-- ride of yours said), why (what said it), aside (what was seen before such a restart, line by
+-- line as `sight` is: kept until it is settled), made (the addon's version that keeps it), listen }.
 local function Store()
   if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end
   local s = AzerothAtlasDB.transit
@@ -154,6 +172,19 @@ local function Store()
   end
   if type(s.sight) ~= "table" then s.sight = {} end
   return s
+end
+-- A sighting into a list of them: kept in the order they were seen, the oldest dropped past MOST.
+local function Put(S, x)
+  local at = #S + 1
+  while at > 1 and S[at - 1].t > x.t do at = at - 1 end
+  table.insert(S, at, x)
+  while #S > MOST do table.remove(S, 1) end
+end
+-- What was set aside of a line (made, if there is none yet).
+local function Aside(store, n)
+  if type(store.aside) ~= "table" then store.aside = {} end
+  if type(store.aside[n]) ~= "table" then store.aside[n] = {} end
+  return store.aside[n]
 end
 
 -- One timetable: sightings that agree. The moment its newest boat left stop 1 (ref + a), and
@@ -216,31 +247,14 @@ local function Join(L, c, x)
   if x.src == "own" then c.own = true end
 end
 
-local function Solve(L, now)
-  local store = Store()
-  local S = store.sight[L.n]
-  L.fit, L.held = nil, nil
-  if type(S) ~= "table" then return end
-  local restart = store.restart
-  -- the sightings that still count, newest first
-  local live = {}
-  for i = #S, 1, -1 do
-    local x = S[i]
-    local into = type(x) == "table" and plain(x.t) and (x.arr and L.arr[x.s] or L.dep[x.s])
-    if not into or now - x.t > KEEP or (restart and restart <= now and x.t < restart) then
-      table.remove(S, i)
-    else
-      -- (when that boat left stop 1 on that round)
-      x.e, x.unsure = x.t - into, UNSURE[x.src] or 4
-      live[#live + 1] = x
-    end
-  end
-  if #live == 0 then return end
-  -- Gathered into timetables, newest first: each sighting joins the first it belongs to. One that
-  -- plainly belongs to none starts a timetable of its own (another voice, or the boats as they ran
-  -- before a restart). One that cannot be told is set aside: it starts nothing, so it can neither
-  -- hold back the newest timetable nor be taken for a restart. It is tried again once the others
-  -- are in (they may have pinned the round down enough to place it), and kept for the next time.
+-- Sightings (newest first, each with when its boat left stop 1 and how exact it is) gathered into
+-- timetables, newest first: each sighting joins the first it belongs to. One that plainly belongs
+-- to none starts a timetable of its own (another voice, or the boats as they ran before a
+-- restart). One that cannot be told is set aside: it starts nothing, so it can neither hold back
+-- the newest timetable nor be taken for a restart. It is tried again once the others are in (they
+-- may have pinned the round down enough to place it). Returns the timetables, and what could not
+-- be placed.
+local function Gather(L, live)
   local found, waiting = {}, live
   repeat
     local aside = {}
@@ -261,6 +275,35 @@ local function Solve(L, now)
     local placed = #aside < #waiting
     waiting = aside
   until not placed or #waiting == 0
+  return found, waiting
+end
+
+local function Solve(L, now)
+  local store = Store()
+  local S = store.sight[L.n]
+  L.fit, L.held = nil, nil
+  if type(S) ~= "table" then return end
+  local restart = store.restart
+  -- the sightings that still count, newest first
+  local live = {}
+  for i = #S, 1, -1 do
+    local x = S[i]
+    local into = type(x) == "table" and plain(x.t) and (x.arr and L.arr[x.s] or L.dep[x.s])
+    if not into or now - x.t > KEEP then
+      table.remove(S, i)
+    elseif restart and restart <= now and x.t < restart then
+      table.remove(S, i)
+      -- (a restart that only a ride of yours said: kept aside until the next ride settles it - see Weigh)
+      if store.soft then Put(Aside(store, L.n), x) end
+    else
+      -- (when that boat left stop 1 on that round)
+      x.e, x.unsure = x.t - into, UNSURE[x.src] or 4
+      live[#live + 1] = x
+    end
+  end
+  if #live == 0 then return end
+  -- (kept for the next time: what could not be placed)
+  local found, waiting = Gather(L, live)
   -- The newest sighting's timetable is the one that runs now, unless it stands alone against
   -- another that was confirmed not long before it: then it waits for a second voice.
   local first, second = found[1], found[2]
@@ -271,10 +314,12 @@ local function Solve(L, now)
   elseif second and first.own and second.counts >= 3 and first.oldest > second.newest then
     -- Your own ride no longer fits a timetable that was well founded and came before it: the
     -- server has restarted since that one was last seen to hold (and with it every other line's).
-    -- That forgets every line's sightings, so it is taken only where there is no doubt: where the
-    -- older timetable's window at your ride (as in Belongs) is within an eighth of a gap, and the
-    -- ride is outside it. An older timetable that is less sure of its boat by then (seen hours
-    -- before, or with a round that is not well known) says nothing either way.
+    -- That takes every line's sightings away, so it is taken only where there is no doubt: where
+    -- the older timetable's window at your ride (as in Belongs) is within an eighth of a gap, and
+    -- the ride is outside it. An older timetable that is less sure of its boat by then (seen hours
+    -- before, or with a round that is not well known) says nothing either way. And it is one
+    -- ride's word against a timetable that may itself have been wrong: the other lines' sightings
+    -- are set aside, not forgotten, until your next ride on another line settles it (Weigh).
     local window, off
     for _, m in ipairs(first.members) do
       if m.src == "own" then
@@ -282,7 +327,11 @@ local function Solve(L, now)
         if not window or w < window then window, off = w, o end
       end
     end
-    if window <= SURE * L.gap and abs(off) > window then T.Restarted(second.newest + 1, "your ride on " .. L.name) end
+    if window <= SURE * L.gap and abs(off) > window and T.Restarted(second.newest + 1, "your ride on " .. L.name, true) then
+      -- (this line's own older timetable is the one the ride was off: of no more use either way)
+      local aside = Store().aside
+      if type(aside) == "table" then aside[L.n] = nil end
+    end
   end
   -- (what is left of older timetables is of no more use; what was set aside is kept for next time)
   local keep = {}
@@ -312,17 +361,103 @@ local function Changed()
 end
 
 -- The server restarted at (about) `at`, or will: what was seen before then is of an older
--- timetable. Only ever moves later.
-function T.Restarted(at, why)
+-- timetable. Only ever moves later. `soft`: nothing says so but a ride of yours (see Solve):
+-- what was seen before is set aside, to be put back should your next ride say otherwise (Weigh).
+-- True where it was taken.
+function T.Restarted(at, why, soft)
   local store = Store()
-  if store.restart and at <= store.restart then return end
+  if store.restart and at <= store.restart then return false end
+  -- (said by the server itself, or a second time by a ride: whatever was set aside for an
+  -- earlier one is of before that one too)
+  store.aside = nil
   store.before, store.restart = store.restart, at
+  store.soft, store.why = soft and true or nil, why
   T.restartWhy = why
   local now = T.Now()
+  Note((at <= now and "the server is taken to have restarted at " or "the server restarts at ") .. Hour(at) .. ", by " .. tostring(why)
+    .. (soft and ": what was known of the other lines is set aside until a ride on another line settles it" or ""))
   if at <= now then
     for _, L in pairs(T.lines) do Solve(L, now) end
     Changed()
   end
+  return true
+end
+
+-- A restart that only a ride of yours said is taken back: what was set aside for it is put back,
+-- and the boats run by it again. (why: for the addon's notes.) True, and how many sightings came
+-- back; false where there is no such restart.
+local function PutBack(why)
+  local store = Store()
+  if not store.soft then return false end
+  local now = T.Now()
+  local count = 0
+  if type(store.aside) == "table" then
+    for n, A in pairs(store.aside) do
+      if T.lines[n] and type(A) == "table" then
+        if type(store.sight[n]) ~= "table" then store.sight[n] = {} end
+        for _, y in ipairs(A) do
+          if type(y) == "table" and plain(y.t) and now - y.t <= KEEP then
+            Put(store.sight[n], y)
+            count = count + 1
+          end
+        end
+      end
+    end
+  end
+  Note("the restart of " .. Hour(store.restart or 0) .. " (" .. tostring(store.why) .. ") is taken back: " .. tostring(why) .. "; " .. count .. " sightings put back")
+  store.restart, store.before, store.soft, store.why, store.aside = store.before, nil, nil, nil, nil
+  for _, L in pairs(T.lines) do Solve(L, now) end
+  Changed()
+  return true, count
+end
+
+-- A restart that only a ride of yours said is settled by your next ride on another line. Where
+-- that ride fits what was set aside for its line, the boats run as they did: there was no
+-- restart (the timetable the first ride was off was the wrong one), and everything set aside is
+-- put back. Where it plainly does not fit, there was one, and what was set aside is forgotten.
+-- As sure as it takes to say there was a restart in the first place (Solve): a well-founded
+-- timetable, sure of its boat to an eighth of a gap. Only a ride of yours settles it: what other
+-- players pass on may itself be reckoned on from before a restart.
+local function Weigh(L, x)
+  local store = Store()
+  local A = store.soft and type(store.aside) == "table" and store.aside[L.n]
+  if type(A) ~= "table" then return end
+  local live = {}
+  for i = #A, 1, -1 do
+    local y = A[i]
+    local into = type(y) == "table" and plain(y.t) and (y.arr and L.arr[y.s] or L.dep[y.s])
+    if into then
+      y.e, y.unsure = y.t - into, UNSURE[y.src] or 4
+      live[#live + 1] = y
+    end
+  end
+  if #live == 0 then return end
+  local c = Gather(L, live)[1]
+  if not c or c.counts < 3 then return end
+  local _, off, window = Against(c, x)
+  if window > SURE * L.gap then return end
+  if abs(off) <= window then
+    PutBack("your ride on " .. L.name .. " fits what was known before it")
+  else
+    store.soft, store.aside = nil, nil
+    Note("the restart of " .. Hour(store.restart or 0) .. " is borne out by your ride on " .. L.name .. ": what was set aside is forgotten")
+  end
+end
+
+-- What came in from other players since it was last noted, and what became of it (for the
+-- addon's notes: a report then shows whether anything was heard at all, and why it was not used).
+local heard, heardAt = {}, 0
+local function Heard(src, what)
+  local key = tostring(src) .. " " .. what
+  heard[key] = (heard[key] or 0) + 1
+end
+local function TellHeard()
+  local parts = {}
+  for key, count in pairs(heard) do parts[#parts + 1] = key .. " x" .. count end
+  heard = {}
+  if #parts == 0 then return end
+  table.sort(parts)
+  Note("heard from other players: " .. table.concat(parts, ", "))
 end
 
 -- A boat of line L was seen: it left stop `s` at server time `t` (or, with `arrived`, got there).
@@ -330,8 +465,14 @@ end
 function T.Sighted(L, s, t, arrived, src, who, lane)
   local store = Store()
   local now = T.Now()
-  if not (L and L.dep[s] and plain(t)) or t > now + 30 or t < now - KEEP then return false end
-  if store.restart and store.restart <= now and t < store.restart then return false end
+  if not (L and L.dep[s] and plain(t)) or t > now + 30 or t < now - KEEP then
+    Heard(src, "not of a time or place that can be used")
+    return false
+  end
+  if store.restart and store.restart <= now and t < store.restart then
+    Heard(src, "from before the restart")
+    return false
+  end
   local S = store.sight[L.n]
   if type(S) ~= "table" then
     S = {}
@@ -342,14 +483,20 @@ function T.Sighted(L, s, t, arrived, src, who, lane)
     if x.s == s and (x.arr == true) == (arrived == true) and abs(x.t - t) < 0.15 then
       if (COUNTS[src] or 0) > (COUNTS[x.src] or 0) then x.src, x.who = src, who end
       if lane and not x.lane then x.lane = lane end
+      Heard(src, "known already")
       return false
     end
   end
-  local x = { t = t, s = s, arr = arrived and true or nil, src = src, who = who, lane = lane, e = t - (arrived and L.arr[s] or L.dep[s]) }
-  local at = #S + 1
-  while at > 1 and S[at - 1].t > t do at = at - 1 end
-  table.insert(S, at, x)
-  while #S > MOST do table.remove(S, 1) end
+  local x = { t = t, s = s, arr = arrived and true or nil, src = src, who = who, lane = lane, e = t - (arrived and L.arr[s] or L.dep[s]), unsure = UNSURE[src] or 4 }
+  if src == "own" then
+    Weigh(L, x)
+    Note("your ride on " .. L.name .. ": it left stop " .. s .. " at " .. Hour(t))
+  else
+    Heard(src, "taken")
+  end
+  -- (the list as it stands now: a restart taken back has put back what was set aside)
+  S = store.sight[L.n]
+  Put(S, x)
   Solve(L, now)
   Changed()
   return true
@@ -669,6 +816,8 @@ local function OnAddonMessage(prefix, msg, how, sender)
   prefix, msg, how, sender = text(prefix), text(msg), text(how), text(sender)
   if not (prefix and msg and sender) or Store().listen == false then return end
   if prefix == PREFIX_DW then
+    -- (for the addon's notes: that its players are heard at all, and by which way)
+    Heard("dw", "messages by " .. string.lower(how or "?"))
     FromDockWatch(msg, sender)
   elseif prefix == PREFIX_FT then
     if how == "PARTY" or how == "RAID" or how == "GUILD" or how == "YELL" or how == "WHISPER" then FromForeverTransport(msg, sender) end
@@ -714,6 +863,13 @@ local function Listen(on)
         if window then pcall(hide, window, CHANNEL) end
       end
     end
+    -- (noted a little later: whether the game let it in)
+    local function check()
+      local ok, id = pcall(function() return GetChannelName and GetChannelName(CHANNEL) end)
+      id = ok and plain(id) or nil
+      Note(id and id > 0 and ("listening to DockWatch's players (channel " .. id .. ")") or "DockWatch's channel could not be joined: its players are heard by guild and whisper only")
+    end
+    if C_Timer and C_Timer.After then C_Timer.After(8, check) end
   elseif LeaveChannelByName then
     -- (DockWatch itself, where it is installed, has the channel for its own use)
     local loaded = C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("DockWatch")
@@ -788,6 +944,11 @@ function shared.TransitWord(word, rest)
     say(store.listen and "other players' sightings of the boats are taken (nothing is sent)." or "other players' sightings of the boats are not taken: only your own rides time them.")
     return true
   end
+  if rest == "restore" then
+    local ok, count = PutBack("you asked for it")
+    say(ok and ("the restart is taken back: " .. count .. " sightings of before it are in use again.") or "there is nothing to put back: no restart rests on a ride of yours alone.")
+    return true
+  end
   local now = T.Now()
   local known = 0
   for n = 1, #T.lines do
@@ -806,7 +967,45 @@ function shared.TransitWord(word, rest)
   if known == 0 then say("no boat, zeppelin or tram has been timed yet: ride one, or wait for another player's sighting.") end
   if known < #T.lines and known > 0 then say((#T.lines - known) .. " more lines have not been timed since the last restart.") end
   if store.restart and store.restart > now then say("the server restarts in " .. Clock(store.restart - now) .. ": every boat starts afresh then.") end
+  if store.soft and store.restart and store.restart <= now then
+    say(tostring(store.why or "a ride of yours") .. " did not fit what was known, so the server is taken to have restarted " .. Ago(now - store.restart)
+      .. ": the other lines wait to be seen again. Your next ride on another line settles it; /atlas boats restore puts back what was known before.")
+  end
   return true
+end
+
+-- ---- what an older version left behind --------------------------------------------------------------
+-- Up to version 21 a restart was put down for good, whatever said it, and everything seen before
+-- it was thrown away and turned away from then on. A ride that was wrongly taken for one (16
+-- November 2026: the airship's round was out) left every line untimed, and kept other players'
+-- sightings out for as long as they were of before that moment. A restart such a version left
+-- behind is forgotten, once: what is seen from now on says how the boats run.
+local function Mend(now)
+  local store = Store()
+  if (tonumber(store.made) or 0) >= MADE then return end
+  store.made = MADE
+  if store.restart and store.restart <= now then
+    Note("a restart put down by an older version of the addon (" .. Hour(store.restart) .. ") is forgotten: sightings of before it are taken again")
+    store.restart, store.before, store.soft, store.why, store.aside = nil, nil, nil, nil, nil
+  end
+end
+-- What is known as the game starts, in a line, for the addon's notes.
+local function Summary(now)
+  local store = Store()
+  local parts = {}
+  for n = 1, #T.lines do
+    local L = T.lines[n]
+    local c = L.fit
+    if c then
+      local _, _, unsure = T.Next(L, 1, now)
+      parts[#parts + 1] = n .. " " .. tostring(c.src) .. "x" .. tostring(c.size) .. " +-" .. string.format("%.1f", unsure or 0)
+    end
+  end
+  local aside = 0
+  if type(store.aside) == "table" then for _, A in pairs(store.aside) do if type(A) == "table" then aside = aside + #A end end end
+  Note(#parts .. " of " .. #T.lines .. " lines timed" .. (#parts > 0 and (" (" .. table.concat(parts, ", ") .. ")") or "")
+    .. "; restart: " .. (store.restart and (Hour(store.restart) .. " by " .. tostring(store.why or "?") .. (store.soft and (", not settled, " .. aside .. " sightings set aside") or "")) or "none known")
+    .. "; other players' sightings " .. (store.listen == false and "not taken" or "taken"))
 end
 
 -- ---- starting ------------------------------------------------------------------------------------
@@ -828,14 +1027,23 @@ frame:SetScript("OnUpdate", function(_, dt)
       Changed()
     end
   end
+  -- (what other players passed on, noted every ten minutes in which there was any)
+  local g = GetTime()
+  if g - heardAt >= 600 then
+    heardAt = g
+    pcall(TellHeard)
+  end
 end)
-for _, event in ipairs({ "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "CHAT_MSG_ADDON", "CHAT_MSG_SYSTEM" }) do pcall(frame.RegisterEvent, frame, event) end
+for _, event in ipairs({ "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "PLAYER_LOGOUT", "CHAT_MSG_ADDON", "CHAT_MSG_SYSTEM" }) do pcall(frame.RegisterEvent, frame, event) end
 local joined = false
 frame:SetScript("OnEvent", function(_, event, ...)
   if event == "CHAT_MSG_ADDON" then
     pcall(OnAddonMessage, ...)
   elseif event == "CHAT_MSG_SYSTEM" then
     pcall(OnSystemMessage, ...)
+  elseif event == "PLAYER_LOGOUT" then
+    -- (the game writes the addon's notes down now: with what was heard up to this moment)
+    pcall(TellHeard)
   elseif event == "PLAYER_LOGIN" then
     Tick()
     local register = C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix
@@ -843,8 +1051,13 @@ frame:SetScript("OnEvent", function(_, event, ...)
       for _, prefix in ipairs({ PREFIX_DW, PREFIX_FT, PREFIX_NAU }) do pcall(register, prefix) end
     end
     local now = T.Now()
+    pcall(Mend, now)
+    -- (a restart that only a ride said, so long ago that nothing set aside for it is of use any more: it stands)
+    local store = Store()
+    if store.soft and (not store.restart or now - store.restart > KEEP) then store.soft, store.aside = nil, nil end
     for _, L in pairs(T.lines) do pcall(Solve, L, now) end
     Changed()
+    pcall(Summary, now)
   elseif event == "PLAYER_ENTERING_WORLD" and not joined then
     joined = true
     local function join()
@@ -857,5 +1070,6 @@ end)
 -- (for the tests, and for a look from the game with /dump AzerothAtlas.Transit.Peek())
 function T.Peek()
   return { Solve = Solve, Sample = Sample, TryFix = TryFix, FromDockWatch = FromDockWatch, FromForeverTransport = FromForeverTransport,
-    FromNauticus = FromNauticus, OnAddonMessage = OnAddonMessage, OnSystemMessage = OnSystemMessage, Store = Store, LegBetween = LegBetween, Tick = Tick }
+    FromNauticus = FromNauticus, OnAddonMessage = OnAddonMessage, OnSystemMessage = OnSystemMessage, Store = Store, LegBetween = LegBetween, Tick = Tick,
+    PutBack = PutBack, Mend = Mend, TellHeard = TellHeard }
 end

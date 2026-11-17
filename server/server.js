@@ -30,11 +30,12 @@ const configFile = configArg ? path.resolve(configArg.slice(9)) : CONFIG_FILE;
 openLogs(logDir(configFile));
 noteCrashes('the map server');
 note('server', 'starting', { node: process.versions.node, electron: process.versions.electron ?? null, asApplication: !!process.env.AZEROTH_ATLAS_APP, folder: PROJECT_ROOT, config: configFile, pid: process.pid });
-// The map tool keeps itself current (appupdate.js). While it writes its files, and while a map
-// build runs, server/watch.js is asked not to start the server again.
+// The map tool keeps itself current (appupdate.js). While it writes its files, while a map
+// build runs, and while a report of a problem is being made, server/watch.js is asked not to
+// start the server again.
 const job = { running: false, phase: '', done: 0, total: 0, log: [], summary: null, error: null, startedAt: null, finishedAt: null };
-let updating = false;
-const busy = () => process.send?.({ busy: job.running || updating });
+let updating = false, reporting = false;
+const busy = () => process.send?.({ busy: job.running || updating || reporting });
 let cfg;
 try { cfg = loadConfig(configFile); } catch (err) {
   if (err.code !== 'NO_GAME') { note('server', 'the settings could not be taken', { error: err.message }); throw err; }
@@ -69,7 +70,7 @@ const VIEWER_DIR = path.join(PROJECT_ROOT, 'viewer');
 // The page's own files, watched: a page that is open loads itself again when they change (changes.js).
 const changes = new Changes(VIEWER_DIR);
 // "Report a problem": everything that may explain one, in a zip (report.js)
-const reports = new Reports({ configFile, cfg, live: { status: () => status(), tracker, mail, atlas, auctions, addon: () => addonStatus(cfg) } });
+const reports = new Reports({ configFile, cfg, busy: (on) => { reporting = on; busy(); }, live: { status: () => status(), tracker, mail, atlas, auctions, addon: () => addonStatus(cfg) } });
 note('server', 'the settings in use', { game: cfg.installRoot, found: !!cfg.foundGame, flavour: flavourFolder(cfg), data: cfg.dataDir, port: cfg.port, ingame: cfg.ingame !== false, autoUpdate: cfg.autoUpdate ?? true, oldAddonInUse: oldAddon });
 
 // ---- update job ---------------------------------------------------------------------------

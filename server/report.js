@@ -199,8 +199,9 @@ $o | ConvertTo-Json -Depth 6 -Compress
 /** The lines the addon noted for itself (Route.lua: shared.Log), out of a file of what it saved: [{ t (ms), text }]. */
 export function addonNotes(lua) {
   const out = [];
-  // (as the game writes a list of words: "1794852599 1234.5 fetch ...", -- [17])
-  for (const m of lua.matchAll(/^\s*"(\d{9,11}) (-?[\d.]+) ((?:[^"\\]|\\.)*)", -- \[\d+\]\s*$/gm)) {
+  // (as the game writes a list of words: "1794852599 1234.5 fetch ...", -- [17] - or, as this
+  // game writes it, with no number after it: for want of that, a report once had none of them)
+  for (const m of lua.matchAll(/^\s*"(\d{9,11}) (-?[\d.]+) ((?:[^"\\]|\\.)*)",(?: -- \[\d+\])?\s*$/gm)) {
     out.push({ t: +m[1] * 1000, game: +m[2], text: m[3].replace(/\\(.)/g, (_, c) => (c === 'n' ? ' ' : c)) });
   }
   // (kept in a ring: put back in the order they were noted - by the game's own clock, which never goes back within a session)
@@ -572,7 +573,11 @@ function readAll(req, limit) {
 }
 
 export class Reports {
-  /** @param ctx  as for buildReport (its `live` may change as the server gets going: it is read when a report is asked for) */
+  /**
+   * @param ctx  as for buildReport (its `live` may change as the server gets going: it is read when a
+   *             report is asked for), and `busy(on)`: told while a report is being made and handed over,
+   *             so that the server is not started again in the middle of it
+   */
   constructor(ctx) { this.ctx = ctx; this.busy = false; }
 
   /** One of this module's requests? Answered, and true; false: not one of them. */
@@ -593,16 +598,19 @@ export class Reports {
       if (req.method !== 'POST' || !ownPage(req)) { res.writeHead(req.method === 'POST' ? 403 : 405); res.end(); return true; }
       if (this.busy) { json(res, 409, { error: 'a report is being made already' }); return true; }
       this.busy = true;
+      // (until the page has it, or has gone: an update of the map tool waits that long with starting the server again)
+      const done = () => { if (!this.busy) return; this.busy = false; try { this.ctx.busy?.(false); } catch { /* nobody to tell */ } };
+      try { this.ctx.busy?.(true); } catch { /* nobody to tell */ }
+      res.once('close', done);
       readAll(req, BODY_MAX)
         .then((body) => buildReport(this.ctx, body.length ? JSON.parse(body.toString('utf8')) : {}))
         .then((r) => {
           // (what is in it, in a few words, for the page to say: the file itself is the answer)
           const about = { files: r.entries.length, bytes: r.zip.length, left: r.left.slice(0, 12), trouble: r.trouble.slice(0, 12), seconds: r.seconds };
           res.writeHead(200, { 'content-type': 'application/zip', 'content-length': r.zip.length, 'content-disposition': `attachment; filename="${r.name}"`, 'x-report-name': r.name, 'x-report': encodeURIComponent(JSON.stringify(about)), 'cache-control': 'no-store' });
-          res.end(r.zip);
+          res.end(r.zip, done);
         })
-        .catch((err) => { note('report', 'a report could not be made', { error: err.message }); if (!res.headersSent) json(res, 500, { error: err.message }); else res.destroy(); })
-        .finally(() => { this.busy = false; });
+        .catch((err) => { note('report', 'a report could not be made', { error: err.message }); if (!res.headersSent) json(res, 500, { error: err.message }); else res.destroy(); done(); });
       return true;
     }
     return false;

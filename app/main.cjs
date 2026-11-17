@@ -332,11 +332,14 @@ else {
     open();
     watch();
     try {
-      let timer = 0;
+      // (Windows says so of a file that was only read, too - "Report a problem" reads every file
+      // of the map tool: started again only where this file has been written)
+      const stamp = () => { try { const st = fs.statSync(__filename); return `${st.size}|${Math.floor(st.mtimeMs)}`; } catch { return null; } };
+      let timer = 0, made = stamp();
       fs.watch(__dirname, (event, name) => {
         if (!name || !/^main\.cjs$/i.test(name)) return;
         clearTimeout(timer);
-        timer = setTimeout(() => { renew = true; if (!busy) again(); }, 1500);
+        timer = setTimeout(() => { const now = stamp(); if (!now || now === made) return; made = now; renew = true; if (!busy) again(); }, 1500);
       });
     } catch { /* started again by hand after such an update, that is all */ }
   });

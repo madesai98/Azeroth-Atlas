@@ -17,7 +17,7 @@ const ROOT = path.resolve(HERE, '..');
 const SERVER = path.join(HERE, 'server.js');
 const PORT_TAKEN = 3;   // the server's way of saying another copy is already running (see server.js)
 const AGAIN = 75;       // this watcher's way of asking Start Map.bat to start it again (its own code has changed)
-const SELF = path.basename(fileURLToPath(import.meta.url)).toLowerCase();
+const SELF = fileURLToPath(import.meta.url);
 const SETTLE_MS = 350;  // an update writes several files: wait until it has gone quiet
 const args = process.argv.slice(2);
 const configArg = args.find((a) => a.startsWith('--config='));
@@ -100,12 +100,43 @@ function restart() {
   setTimeout(() => { if (child === mine) mine.kill(); }, 2500);
 }
 
-const changed = () => { clearTimeout(timer); timer = setTimeout(restart, SETTLE_MS); };
+// What the server is made of, as it stands on the disk: the name, size and date of every file of
+// its code, and of the settings. Windows tells a watcher of a file that was only READ, too (it
+// keeps the time a file was last read, an hour at a time): so being told is only a reason to
+// look, and the server is started again only where something has been written. (Once, it started
+// itself again four times every hour, and "Report a problem", which reads every file of the map
+// tool, took the whole application down with it.)
+function stamp() {
+  const lines = [];
+  const walk = (dir, rel) => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const name = rel + e.name;
+      if (NOT_CODE.test(name)) continue;
+      if (e.isDirectory()) { walk(path.join(dir, e.name), `${name}/`); continue; }
+      if (!CODE.test(e.name)) continue;
+      try { const st = fs.statSync(path.join(dir, e.name)); lines.push(`${dir}|${name}|${st.size}|${Math.floor(st.mtimeMs)}`); } catch { /* gone again */ }
+    }
+  };
+  for (const dir of FOLDERS) walk(dir, '');
+  try { const st = fs.statSync(CONFIG); lines.push(`${CONFIG}|${st.size}|${Math.floor(st.mtimeMs)}`); } catch { lines.push(`${CONFIG}|not there`); }
+  return lines.sort().join('\n');
+}
+const own = () => { try { const st = fs.statSync(SELF); return `${st.size}|${Math.floor(st.mtimeMs)}`; } catch { return ''; } };
+let made = stamp(), madeOwn = own();
+const look = () => {
+  const now = stamp();
+  if (now === made) return; // (read, not written)
+  made = now;
+  if (own() !== madeOwn) renew = true;
+  restart();
+};
+const changed = () => { clearTimeout(timer); timer = setTimeout(look, SETTLE_MS); };
 const watchers = [];
 for (const dir of FOLDERS) {
   try {
     watchers.push(fs.watch(dir, { recursive: true }, (event, name) => {
-      if (name && path.basename(name).toLowerCase() === SELF && dir === HERE) renew = true;
       if (name && CODE.test(name) && !NOT_CODE.test(name)) changed();
     }));
   } catch (err) { say(`Cannot watch ${dir} for changes (${err.message}): after an update there, close this window and start the map again.`); }

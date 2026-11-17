@@ -122,7 +122,15 @@ When the map's own code is updated, nothing has to be restarted or reloaded by h
 - **The server starts itself again.** The application and `Start Map.bat` both run
   `server/watch.js`, which runs the server and watches the code it is made of (the `server` and `extractor` folders, and
   `config.json`). A change there, and the server is stopped and started anew, a second or so
-  later. A map update that is running is left to finish first. If the new code does not start
+  later. A map update that is running is left to finish first, and so is a report of a problem
+  that is being made. Only a file that has been *written* counts: Windows keeps the time a file
+  was last read as well (moved on at most once an hour) and tells whoever watches a folder when
+  it does, so being told is only a reason to look at each file's size and date. (Up to version
+  0.3.7 it was taken for a change. An hour after its files had last been read the server
+  started itself again, four times running, each start reading a few more of them, and so
+  every hour; and "Report a problem", which reads every file of the map tool, had the watcher
+  take its own file for updated and start the whole application again in the middle of the
+  report: "Failed to fetch", and the window gone and back.) If the new code does not start
   (a mistake in it), the error stays on show in the window and the server is started again as
   soon as the files change once more. (`npm run serve` runs the server alone, without the
   watching.)
@@ -1228,7 +1236,7 @@ into one answer, with nothing to set up:
 | **The timetables** (`viewer/transit.json`; the addon's copy is written from it by `tools/make-transit-lua.mjs`) | How long each line's round takes, each leg, each stop, and where the craft is every couple of seconds of a leg: eleven boat and zeppelin lines and both tram cars as DockWatch's players recorded them in this game (MIT licence), and the Feathermoon ferry from the game's own path and the round Nauticus measured for it (its times are rough). The game's own path of each line is where the craft is drawn; all 695 recorded moments of the eleven lines lie on those paths. The round of the Dalaran - Valanaar airship is 352.49 s, as two rides 57 rounds apart had it (the recording said 353.74 s, Nauticus 353 s). Where a line's legs and stops do not add up to its round, its stay at its first stop takes up the difference: the airship's add up to 354.0 s, so it is taken to stay 59.7 s at Dalaran rather than 61.2 s. |
 | **Your own rides** | Something is carrying you when you move without moving yourself. Carried along a line's track where the boat is under way, each spot you pass says how long ago it left; five of them over five seconds that agree to the second are when it left, wherever you boarded. |
 | **Other players' sightings** | Three addons pass sightings from player to player, each in its own way, and each is read as that addon writes it, without being installed: **DockWatch** (the moment a boat left a dock, by where the dock is; over its own hidden channel, the guild and whispers), **ForeverTransport** (when it arrived, by a line's number) and **Nauticus** (how far into its round a boat is as the message is sent). The addon **only listens**: it never sends, so it cannot put a wrong time into anyone's timers. `/atlas boats listen` turns the listening off. |
-| **The server's restarts** | A restart starts every boat afresh. The warning the server gives in chat ("restart in 15:00") is read, and a ride of your own that plainly no longer fits a well-founded timetable says one has happened (when that is plain: see "Which boat a sighting was" below). |
+| **The server's restarts** | A restart starts every boat afresh. The warning the server gives in chat ("restart in 15:00") is read, and a ride of your own that plainly no longer fits a well-founded timetable says one has happened (when that is plain: see "Which boat a sighting was" below). What a ride alone says is not for good: the other lines' sightings are set aside, and your next ride on another line settles it (see "A restart that only a ride said"). |
 
 **Voices that differ** (`addon/AzerothAtlas/Transit.lua`). Sightings that agree (give or
 take what a round's own uncertainty allows) make a timetable. Each is weighed by how exact it
@@ -1273,6 +1281,26 @@ before a restart that morning, and was none of them); the round in the timetable
 out, the two together made it 354.42 s, and 57 rounds later the map had the airship two
 minutes late, and sure of it. Your next ride did not fit that, was taken for a restart, and
 every line's sightings up to then were forgotten.)
+
+**A restart that only a ride said** (addon version 22). The server's own warning is for good:
+what was seen before it is forgotten. A ride of yours that is off a timetable is one voice
+against another, and the timetable may be the one that was wrong. So that line runs by your
+ride from then on, and what was known of the *other* lines is **set aside, not thrown away**:
+they count as not timed, and wait. Your next ride on another line settles it. Where that ride
+fits what was set aside for its line (as sure as it takes to say there was a restart at all: a
+well-founded timetable, sure of its boat to an eighth of a round), the boats run as they did,
+there was no restart, and everything set aside is put back at once. Where it is plainly off,
+there was one, and what was set aside is forgotten. Only a ride of yours settles it: what other
+players pass on may itself be reckoned on from before a restart (it times its own line again,
+no more). `/atlas boats` says when such a restart is in force, and `/atlas boats restore` takes
+it back by hand. What was set aside is kept for three days, like any sighting.
+
+Before version 22 a restart was put down for good whatever said it: everything seen before it
+was thrown away, and anything from before that moment was turned away from then on. The wrong
+one of 16 November (above) left every line but the airship untimed that evening,
+and would have kept other players' older sightings out for three days.
+A restart that such a version left behind is forgotten the first time version 22 runs; what was
+thrown away then is gone, and comes back as boats are ridden and seen again.
 
 **What it is used for:**
 
@@ -2083,7 +2111,13 @@ notes what it does - a line for every *change*, not for every yard walked:
   each mailbox opened, which delivery was in it and what was made of it, the waypoint and what
   else you could head for as they change, the quest you track moving on - and every mistake
   caught in its own code. The addon does much of what it does so that a mistake cannot stop
-  the rest; such a mistake used to be seen by nobody, the route simply staying as it was.
+  the rest; such a mistake used to be seen by nobody, the route simply staying as it was. Of
+  the boats (lines beginning "boats:"): what is timed when you log in, each ride of yours,
+  whether DockWatch's channel could be joined, what other players passed on in every ten
+  minutes in which there was any (by which way it came, and whether it was taken, known
+  already, or from before a restart), and a restart taken, settled or taken back. (A report
+  reads these notes out of what the game saved; up to version 0.3.7 it looked for them written
+  one way only, and this game writes them another: a report had none of them.)
 
 They are kept beside `config.json`, in `logs` (the installed application's:
 `%LOCALAPPDATA%\Azeroth Atlas\logs`; run from the source, `server/.build/logs`), each file

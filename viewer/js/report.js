@@ -181,7 +181,23 @@ function bindReport() {
       const include = { shot: $('reportShot').checked, cache: $('reportCache').checked, others: $('reportOthers').checked, hotfixes: $('reportHotfixes').checked };
       const app = map();
       const page = { state: app ? part(() => snapshot(app)) : { note: 'the map itself had not started' }, log: notes(), shot: include.shot && app ? picture(app) : null };
-      const res = await fetch('/api/report', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, when: $('reportWhen').value, include, page }) });
+      const body = JSON.stringify({ text, when: $('reportWhen').value, include, page });
+      const ask = () => fetch('/api/report', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+      let res;
+      try { res = await ask(); } catch (err) {
+        // The map's server went away while it was asked (it was starting itself again just then:
+        // an update of the map): once it answers, it is asked once more.
+        note('report', 'the map\'s server went away while the report was being made: asked again once it answers', { error: String(err?.message ?? err) });
+        say('The map\'s server is starting itself again: one moment…');
+        let up = false;
+        for (let i = 0; i < 40 && !up; i++) {
+          await new Promise((r) => setTimeout(r, 750));
+          try { up = (await fetch('/api/report/check', { cache: 'no-store' })).ok; } catch { /* not yet */ }
+        }
+        if (!up) throw new Error('the map\'s server is not answering. Try again once the map is back.');
+        say('Gathering everything: this takes a few seconds…');
+        res = await ask();
+      }
       if (!res.ok) { let why = `the map's server answered ${res.status}`; try { why = (await res.json()).error ?? why; } catch { /* as said */ } throw new Error(why); }
       const blob = await res.blob();
       let about = {};
