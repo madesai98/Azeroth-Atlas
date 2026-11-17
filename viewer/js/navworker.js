@@ -28,6 +28,8 @@ const MAX_TILES = 64;
 const SNAP = 14;         // cells: how far from the asked position a place to stand is looked for
 const DOCK_LEVEL = 12;   // yards above or below a boat's or zeppelin's stop that its landing can be
 const COVERED = 75;      // seconds: how much quicker buried ground must be before it is taken for the floor built over it
+const SPARE = 900;       // seconds: how much quicker another floor at the spot must be before it is taken for the one at the height asked for
+const SEED_OVER = 4;     // yards: a walk begins on no floor further than this above the height you are at
 const EXTRA = 400000;    // floors looked at, at most, for the floor over buried ground once the ground has been reached
 const WIDE = 5;          // cells: something built over the ground this far to each side is a street or a hall, not an awning
 // "Which levels are there at this spot?" (a waypoint is a spot on a map: under it there can be a
@@ -314,21 +316,45 @@ async function findRoute(req) {
     if (goals.length && c.d > goals[0].d + 1.6) break;
     if (!(await enclosed(c, start))) goals.push(c);
   }
-  if (!goals.length && !levels) return { ok: false, reason: 'no way there on foot' };
+  // With a height asked for, the floors at the spot itself count too, as a second choice: what
+  // is at that height may be nowhere anyone can walk onto (the rim of a well a quest has you use
+  // stands a few yards over the ground around it), and then the way there is the way to its foot.
+  // It used to be no way at all: the search looked at two million floors for the rim and gave up,
+  // "too far to work out on foot", three hundred yards from it.
+  const spare = [];
+  if (!levels && req.to[2] !== null && req.to[2] !== undefined) {
+    // (the nearest place of each level there: one is enough to tell whether that level leads anywhere)
+    const taken = goals.map((c) => slots[c.slot].z[c.node]);
+    const near = ends.slice(0, 400).map((c) => { const [x, y] = pos(c.slot, c.cell); return { c, off: Math.hypot(x - req.to[0], y - req.to[1]) }; })
+      .filter((e) => e.off <= LEVEL_NEAR).sort((a, b) => a.off - b.off);
+    for (const { c } of near) {
+      const z = slots[c.slot].z[c.node];
+      if (taken.some((v) => Math.abs(v - z) <= LEVEL_GAP)) continue;
+      taken.push(z);
+      if (!(await enclosed(c, start))) spare.push(c);
+    }
+  }
+  if (!goals.length && !spare.length && !levels) return { ok: false, reason: 'no way there on foot' };
   // Likewise begin from the nearest place to stand that leads somewhere (not the top of a signpost);
-  // where your height is not known, from any of the floors there.
+  // where your height is not known, from any of the floors there. Where it is known, not from
+  // anything more than a step over it: you can drop down from where you are, but not rise to a
+  // floor overhead. (In the Wizard's Sanctum under Stormwind, whose only way out is its portal,
+  // the search began on the earth under the streets above it and walked off along that.)
   const loose = !req.landFrom && (req.from[2] === null || req.from[2] === undefined);
+  const over = loose || req.landFrom ? Infinity : req.from[2] + SEED_OVER;
   const seeds = [];
   for (const c of starts.slice(0, 400)) {
     if (seeds.length && (!loose || c.d > seeds[0].d + 1.6)) break;
-    if (!(await enclosed(c, goals[0] ?? { slot: -1, node: -1 }))) seeds.push(c);
+    if (slots[c.slot].z[c.node] > over) continue;
+    if (!(await enclosed(c, goals[0] ?? spare[0] ?? { slot: -1, node: -1 }))) seeds.push(c);
   }
   if (!seeds.length) return { ok: false, reason: 'no way out of where you are on foot' };
   // Buried ground counts as that much further away, at either end: the floor built over it is
-  // the one meant unless only the ground can be reached.
-  const goalSet = new Set(goals.map((c) => c.slot * 1048576 + c.node));
-  const buried = new Set(goals.filter(covered).map((c) => c.slot * 1048576 + c.node));
-  const plain = goals.length - buried.size; // goals that are not buried ground
+  // the one meant unless only the ground can be reached. (So do the spare floors at the spot.)
+  const goalSet = new Set([...goals, ...spare].map((c) => c.slot * 1048576 + c.node));
+  const buried = new Set([...goals.filter(covered), ...spare].map((c) => c.slot * 1048576 + c.node));
+  const spares = new Set(spare.map((c) => c.slot * 1048576 + c.node));
+  const plain = goals.length - goals.filter(covered).length; // goals that are not buried ground
   let goalId = -1, goalCost = Infinity, goalAt = 0;
   const gx = req.to[0], gy = req.to[1];
   const vmax = Math.max(run, swim);
@@ -370,7 +396,7 @@ async function findRoute(req) {
       if (since >= 0 && expanded > since + (firstRealAt >= 0 || realCount > 0 ? LEVEL_EXTRA : NEAR_EXTRA)) break;
       if ((expanded & 4095) === 0 && performance.now() - began > (since >= 0 ? LEVEL_MS : LEVEL_FIRST_MS)) break;
     } else if (goalSet.has(id)) {
-      const under = buried.has(id), cost = st.g[n] + (under ? COVERED : 0);
+      const under = buried.has(id), cost = st.g[n] + (spares.has(id) ? SPARE : under ? COVERED : 0);
       if (cost < goalCost) { if (!found) goalAt = expanded; found = true; goalId = id; goalCost = cost; }
       if (!under || !plain) break; // (reached buried ground first: see if the floor over it is nearly as near)
     }

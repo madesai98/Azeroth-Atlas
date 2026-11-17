@@ -15,8 +15,11 @@
 const KEPT = 4000;        // lines kept in hand
 const SEND_EVERY = 4000;  // ms between sendings
 const WAITING = 1500;     // lines that may wait to be sent (the server is away): past that the oldest go unsent
+const LINE_MOST = 12000;  // characters one line's particulars may take up: past that they are cut short
+const BATCH_MOST = 48000; // characters sent at once (the server takes up to a megabyte; a farewell beacon, 64 KB)
 const lines = [];
 let unsent = [];
+const sizes = new WeakMap(); // line -> the characters it takes up when sent
 const before = new Map();
 
 /** Anything, as something that can be written down and read: long lists and rows of numbers are counted, not listed. */
@@ -51,8 +54,18 @@ export function lean(v, depth = 0) {
  * @param data   the particulars, or nothing
  */
 export function note(about, text, data) {
-  const l = { t: Date.now(), k: String(about), m: String(text) };
+  const l = { t: Date.now(), k: String(about), m: String(text).slice(0, 4000) };
   if (data !== undefined) { try { l.d = lean(data); } catch { l.d = '(particulars that could not be written down)'; } }
+  // (how much room it takes when sent; particulars too long to send with the rest are cut short,
+  // and say so: one line of a hundred kilobytes once held back every line after it - see send)
+  let size = l.m.length + 60;
+  if (l.d !== undefined) {
+    let text;
+    try { text = JSON.stringify(l.d) ?? ''; } catch { text = ''; }
+    if (text.length > LINE_MOST) { l.d = `(particulars cut short: ${text.length} characters) ${text.slice(0, LINE_MOST - 200)}…`; text = l.d; }
+    size += text.length;
+  }
+  sizes.set(l, size);
   lines.push(l);
   if (lines.length > KEPT) lines.shift();
   unsent.push(l);
@@ -73,23 +86,54 @@ export const notes = () => lines.slice();
 
 // ---- sent on to the server ---------------------------------------------------------------------
 const PAGE = typeof window !== 'undefined' && typeof document !== 'undefined'; // (not so where a test reads this file outside any page)
-let sending = false;
-async function send() {
-  if (sending || !unsent.length) return;
-  sending = true;
-  const batch = unsent.slice(0, 400);
-  try {
-    const res = await fetch('/api/log', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lines: batch }), keepalive: true });
-    // (an older server has nowhere to put them: they stay in hand, and are not offered again)
-    if (res.ok || res.status === 404 || res.status === 405) unsent = unsent.filter((l) => !batch.includes(l));
-  } catch { /* the server is away: offered again */ }
-  sending = false;
+let sending = null; // the sending under way (a promise), if any
+/**
+ * The lines waiting to be sent that fit in one sending, the oldest first (or the newest, `last`):
+ * as many as come to BATCH_MOST characters, and always at least one.
+ */
+function batchOf(list, last = false) {
+  const out = [];
+  let room = BATCH_MOST;
+  for (let i = 0; i < list.length; i++) {
+    const l = list[last ? list.length - 1 - i : i], size = sizes.get(l) ?? 500;
+    if (out.length && size > room) break;
+    out.push(l);
+    room -= size;
+  }
+  return last ? out.reverse() : out;
 }
-if (PAGE) setInterval(send, SEND_EVERY);
-// (the page is going - loading itself again, or closed: what is left is sent with it)
-if (PAGE) window.addEventListener('pagehide', () => { if (unsent.length && navigator.sendBeacon) { try { navigator.sendBeacon('/api/log', JSON.stringify({ lines: unsent.slice(-400) })); unsent = []; } catch { /* it goes unsent */ } } });
-/** Send what is waiting now (before a report is asked for). */
-export const sendNow = () => send();
+// The lines go a batch at a time, of a size the server and the browser both take. They used to
+// go four hundred at a time with `keepalive`, which a browser refuses for anything over 64 KB:
+// one batch that size and every sending after it failed the same way, for as long as the page
+// was open (a report then had nothing of what the page did after that).
+/** Send one batch. Resolves to true when it was taken off the waiting list (false: nothing waits, or the server is away). */
+function send() {
+  if (sending) return sending;
+  if (!unsent.length) return Promise.resolve(false);
+  const batch = batchOf(unsent);
+  sending = (async () => {
+    try {
+      const res = await fetch('/api/log', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lines: batch }) });
+      // (any answer from the server and they are done with: written down, or - an older server with
+      // nowhere to put them, or one that will not take them - kept in hand only, and not offered again)
+      if (res.status) { unsent = unsent.filter((l) => !batch.includes(l)); return true; }
+    } catch { /* the server is away: offered again */ }
+    return false;
+  })().finally(() => { sending = null; });
+  return sending;
+}
+/** Send what is waiting, a batch at a time: at most `most` batches (or all of it). */
+async function drain(most = Infinity) {
+  if (sending) await sending;
+  for (let i = 0; i < most && unsent.length; i++) if (!(await send())) break;
+}
+// (a backlog - the server was away a while - goes several batches to a turn)
+if (PAGE) setInterval(() => { drain(10); }, SEND_EVERY);
+// (the page is going - loading itself again, or closed: what is left is sent with it, as much of
+// the newest as a beacon may carry)
+if (PAGE) window.addEventListener('pagehide', () => { if (unsent.length && navigator.sendBeacon) { try { navigator.sendBeacon('/api/log', JSON.stringify({ lines: batchOf(unsent, true) })); unsent = []; } catch { /* it goes unsent */ } } });
+/** Send everything that is waiting now (before a report is asked for). */
+export const sendNow = () => drain(200);
 
 // ---- what goes wrong, noted by itself ------------------------------------------------------------
 const words = (a) => a.map((x) => (x instanceof Error ? `${x.message}${x.stack ? ` @ ${String(x.stack).split('\n').slice(1, 4).join(' | ').trim()}` : ''}` : typeof x === 'string' ? x : (() => { try { return JSON.stringify(lean(x)); } catch { return String(x); } })())).join(' ');

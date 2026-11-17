@@ -147,8 +147,9 @@ export class Camera {
   }
 
   /**
-   * The same view, in coordinates moved over by (dx, dy): for when the map beside the one in
-   * hand is taken in hand instead (main.js), and everything is counted from its origin.
+   * The same view, in coordinates moved over by (dx, dy): for when another map of the picture
+   * than the one in hand is taken in hand instead (main.js), and everything is counted from its
+   * origin.
    */
   shift(dx, dy) {
     this.pos[0] += dx; this.pos[1] += dy;

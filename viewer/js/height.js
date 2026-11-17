@@ -387,9 +387,24 @@ export class HeightTracker {
   }
 
   /**
+   * Where a portal puts you down, if that is within reach of where you are: its height (or null).
+   * The portals of teleports.json, and the doorways between maps (world.json) of maps this game has.
+   */
+  #landing(me) {
+    const W = this.app.world, maps = new Set((this.app.manifest?.maps ?? []).map((m) => m.id));
+    let best = null, bestD = HOP_REACH;
+    const near = (x, y, z) => { const d = Math.hypot(me.x - x, me.y - y); if (d < bestD && Number.isFinite(z)) { bestD = d; best = z; } };
+    for (const t of W?.teleports ?? []) if (t.map === me.map) near(t.to[0], t.to[1], t.to[2]);
+    for (const p of W?.portals ?? []) if (p.to.map === me.map && (!maps.size || maps.has(p.from.map))) near(p.to.pos[0], p.to.pos[1], p.to.pos[2]);
+    return best;
+  }
+
+  /**
    * A height to start from at a spot reached with no way in between, or null: the one saved
-   * for your last position if you are still there, the one from walking through this place
-   * before, or a flight master's if you are standing next to one.
+   * for your last position if you are still there; where a portal puts you down, if you are
+   * there (through the Skyborne Portal from Dalaran you are in the Wizard's Sanctum, under
+   * Stormwind's streets: the street over it is the floor the map would take otherwise); the one
+   * from walking through this place before; or a flight master's if you are standing next to one.
    */
   #recall(me, here) {
     this.#loadSaved();
@@ -397,6 +412,8 @@ export class HeightTracker {
     if (s && s.map === me.map && Number.isFinite(s.z) && Math.hypot(s.x - me.x, s.y - me.y) <= SAME_SPOT) return { z: s.z, sure: !!s.sure, how: 'same spot' };
     const can = standable(here.all);
     const onto = (z, reach) => can.reduce((best, v) => (Math.abs(v - z) <= reach && (best === null || Math.abs(v - z) < Math.abs(best - z)) ? v : best), null);
+    const landing = this.#landing(me), floor = landing === null ? null : onto(landing, HOP_FLOOR);
+    if (floor !== null) return { z: floor, sure: true, how: 'where a portal puts you down' };
     let spot = null, spotD = SPOT * 1.6;
     const cx = Math.round(me.x / SPOT), cy = Math.round(me.y / SPOT);
     for (let j = cy - 1; j <= cy + 1; j++) for (let i = cx - 1; i <= cx + 1; i++) {

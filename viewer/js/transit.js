@@ -17,6 +17,7 @@ const STEP = 6;        // yards between the points a line's path is laid out in
 const JUMP = 1500;     // yards: a step of the path longer than this is not sailed (the craft is moved)
 const SURE = 20;       // seconds from a dock for which a craft crossing the sea is shown just where the game has it
 const CROSS_STEP = 0.5; // seconds between the points a crossing is laid out in
+const RIDE_NEAR = 120;  // yards: a tram car this near you is the one you are aboard
 const ZERO = [0, 0];
 const mod = (v, m) => ((v % m) + m) % m;
 
@@ -110,6 +111,7 @@ export class Transit {
     this.sig = '';
     this.layout = new Map(); // which maps lie together on one picture (setLayout)
     this.riding = null;      // the number of the line you are aboard, if any
+    this.you = null;         // ...and where your figure is drawn while you are: { x, y, z, heading } on the picture (see onMap)
   }
 
   /** @param world world.json (its paths give the height a craft sails or flies at) */
@@ -267,9 +269,9 @@ export class Transit {
    * A craft's place in the world: { map, x, y, z, heading (compass degrees) }.
    *
    * Between two maps there is no such place: the game moves the craft from one continent to
-   * the other in a moment, out at sea, while its riders look at a loading screen. Where both
-   * continents are on one picture (setLayout) the craft is shown sailing the sea between them
-   * instead: { group, x, y, z, heading }, in the yards of that picture. It is where the game has
+   * the other (or to the island in the sky) in a moment, out at sea, while its riders look at a
+   * loading screen. Where both maps are on one picture (setLayout) the craft is shown sailing or
+   * flying across between them instead: { group, x, y, z, heading }, in the yards of that picture. It is where the game has
    * it for the first and last SURE seconds of the crossing, in sight of the docks; in between it
    * sails evenly from the one stretch to the other. The craft you are aboard (`riding`) is
    * always where the game has it, and crosses in the moment you do. Otherwise: null.
@@ -340,7 +342,11 @@ export class Transit {
       // on the game's own path, where both moments could be laid onto it: so far along it between the two
       if (a[5] >= 0 && b[5] >= 0 && line.way) {
         const n = line.way.length;
-        const u = (a[5] + mod(b[5] - a[5], n) * f) % n;
+        // (a moment laid onto it a little behind the one before - the craft settling at its dock -
+        // is a small step back, not the whole way round)
+        let du = mod(b[5] - a[5], n);
+        if (du > n / 2) du -= n;
+        const u = mod(a[5] + du * f, n);
         const q = pointOn(line.way, u);
         return { map: b[1], x: q[0], y: q[1], z: q[2], heading: mod((Math.atan2(-q[4], q[3]) * 180) / Math.PI, 360) };
       }
@@ -394,6 +400,20 @@ export class Transit {
         const lane = n.lane && line.lanes ? `, ${line.lanes[n.lane - 1].name.toLowerCase()}` : '';
         docks.push({ line, stop: i, x: s.x + off[0], y: s.y + off[1], z: line.legs[i].track[0][4], text: n.gets <= t ? `To ${to}: boarding, leaves in ${about}${clock(n.leaves - t)}${lane}` : `To ${to}: in ${about}${clock(n.gets - t)}${lane}` });
       });
+    }
+    // The craft you are aboard is drawn under your figure. The timetable puts it where it is to
+    // the second, and your figure is where the game last said you were, a moment ago: at an
+    // airship's thirty yards a second the two came apart, and you were drawn floating behind the
+    // ship you stood on. Of a line of one craft it is that one; of the tram, the car nearest you.
+    // (A line the timetable has nowhere on this picture just now - not timed yet, or between two
+    // maps - still has its craft under you.)
+    const you = this.you, line = this.riding === null ? null : this.lines.find((l) => l.n === this.riding);
+    if (you && line) {
+      let mine = null, near = Infinity;
+      for (const c of crafts) if (c.line === line) { const d = Math.hypot(c.x - you.x, c.y - you.y); if (d < near) { near = d; mine = c; } }
+      if (!mine || (line.cars > 1 && near > RIDE_NEAR)) crafts.push((mine = { line, map: null, x: you.x, y: you.y, z: you.z, heading: you.heading ?? 0, docked: false, text: '' }));
+      mine.x = you.x; mine.y = you.y; mine.z = you.z;
+      if (you.heading !== null && you.heading !== undefined) mine.heading = you.heading;
     }
     return { crafts, docks };
   }

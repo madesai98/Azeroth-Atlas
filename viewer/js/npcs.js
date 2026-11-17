@@ -200,7 +200,8 @@ export class NpcLayer {
     this.rebuild();
     // (another map may be asked for before this one has come: the last one asked for is the one kept)
     const turn = (this.turn = (this.turn ?? 0) + 1);
-    if (!map.npcs) return;
+    // (a map with nobody on it still has the quests: the tracked one's business may be on another map)
+    if (!map.npcs) { await this.#shared(); return; }
     const [res] = await Promise.all([fetch(`/data/maps/${map.id}/npcs.bin?v=${map.rev}`), this.#shared()]);
     if (!res.ok || turn !== this.turn) return;
     const buf = await res.arrayBuffer();
@@ -378,26 +379,34 @@ export class NpcLayer {
    * Where everything it still asks for is inside a dungeon, it is the dungeon's door (the nearest
    * on this map, else one on another): leading to who takes a quest you have not done yet leads
    * nowhere you want to go.
+   * Where none of it is on this map at all (a Westfall quest while you are on Zephras Isle, after
+   * a hearthstone), it is on another map: see #elsewhere. The route there is a journey.
    * @returns { x, y, z (null where the height is not known), name, done (it is to be handed in),
-   *            map (only where it is not on this map: a dungeon's door on another) } or null
+   *            map (only where it is not on this map: a dungeon's door, or the quest's business,
+   *            on another) } or null
    */
   questGoal(id, from, progress = null) {
     const d = this.data, q = this.quests?.quests?.[id];
-    if (!d || !q || !from) return null;
+    if (!q || !from) return null;
     const done = progress ? progress.state === 1 : this.mine?.log.get(id) === 1;
+    const left = done ? null : this.#left(q, progress);
+    // (no NPC data for this map at all: there is nothing of it here to look for)
+    if (!d) return (done ? null : this.#door(q, from)) ?? this.#elsewhere(q, done, left) ?? (done ? null : this.#elsewhere(q, true, null));
     const takers = () => {
       const out = new Set();
       for (const n of q.e ?? []) { const e = d.index.get('n' + n); if (e !== undefined) out.add(e); }
       for (const n of q.eo ?? []) { const e = d.index.get('o' + n); if (e !== undefined) out.add(e); }
       return out;
     };
-    const left = done ? null : this.#left(q, progress);
     let who = done ? takers() : this.#targets(id, new Set(), left), handIn = done;
     // (a place it has you go to and look at: no one stands there, it is a spot of its own)
     const spots = !done && (!left || left.tr) ? (q.tr?.at ?? []).filter((s) => s[0] === d.map) : [];
     if (!who.size && !spots.length && !done) {
       const door = this.#door(q, from);
       if (door) return door;
+      // (what it still asks for is on another map: that is where to go, not to who takes it)
+      const far = this.#elsewhere(q, false, left);
+      if (far) return far;
       who = takers(); handIn = true;
     }
     let best = -1, bestD = Infinity, spot = null;
@@ -411,8 +420,53 @@ export class NpcLayer {
       if (dist < bestD) { bestD = dist; spot = s; }
     }
     if (spot) return { x: spot[1], y: spot[2], z: null, name: q.tr.t || 'the place it names', done: false };
-    if (best < 0) return null;
+    // (nobody it involves stands on this map: who takes it, or what it asks for, is on another)
+    if (best < 0) return this.#elsewhere(q, handIn, left);
     return { x: d.x[best], y: d.y[best], z: Number.isFinite(d.z[best]) ? d.z[best] : null, name: d.entries[d.owner[best]].n, done: handIn };
+  }
+
+  /**
+   * The quest's business where the NPC data of the map in hand has none of it: quests.json keeps
+   * one spot for every NPC and object a quest involves (QuestieDB's first: map, x, y), on any map.
+   * A spot on another map is where the quest's route goes, as a journey (and once you are on that
+   * map, its own NPC data takes over and finds the nearest). With several (something to kill on
+   * both continents), the ones in the zone the quest is filed under come first, then the map most
+   * of them are on, and of those the one in the middle of the rest.
+   * @param handIn  who takes it (true), or what it still asks for (false; `left`: which of it is left)
+   * @returns { x, y, z: null, name, done, map (where not the map in hand) } or null
+   */
+  #elsewhere(q, handIn, left) {
+    const Q = this.quests, here = this.data?.map ?? this.app.scene?.map.id;
+    const found = [];
+    const add = (r) => { if (Array.isArray(r) && r.length >= 4 && Number.isFinite(r[2]) && Number.isFinite(r[3])) found.push({ name: r[0], map: r[1], x: r[2], y: r[3] }); };
+    const npc = (n) => add(Q.npcs?.[n]), obj = (n) => add(Q.objects?.[n]);
+    if (handIn) {
+      (q.e ?? []).forEach(npc);
+      (q.eo ?? []).forEach(obj);
+    } else {
+      (q.oc ?? []).forEach((n, k) => { if (!left || left.oc[k]) npc(n); });
+      if (!left || left.ok) (q.ok ?? []).forEach(npc);
+      (q.oo ?? []).forEach((n, k) => { if (!left || left.oo[k]) obj(n); });
+      (q.oi ?? []).forEach((item, k) => {
+        if (left && !left.oi[k]) return;
+        const it = Q.items?.[item];
+        (it?.d ?? []).forEach(npc);
+        (it?.o ?? []).forEach(obj);
+      });
+      if (!left || left.tr) for (const s of q.tr?.at ?? []) found.push({ name: q.tr.t || 'the place it names', map: s[0], x: s[1], y: s[2] });
+    }
+    if (!found.length) return null;
+    // the zone the quest is filed under (a positive number is an area: its zone's rectangle)
+    const zone = q.z > 0 ? this.app.world?.zones?.find((z) => z.type === 3 && z.area === q.z) : null;
+    const inZone = zone ? found.filter((c) => c.map === zone.map && c.x >= zone.region[0] && c.x <= zone.region[2] && c.y >= zone.region[1] && c.y <= zone.region[3]) : [];
+    let pool = inZone.length ? inZone : found;
+    const count = new Map();
+    for (const c of pool) count.set(c.map, (count.get(c.map) ?? 0) + 1);
+    const map = [...count].sort((a, b) => b[1] - a[1])[0][0];
+    pool = pool.filter((c) => c.map === map);
+    const spread = (c) => pool.reduce((s, o) => s + Math.hypot(o.x - c.x, o.y - c.y), 0);
+    const c = pool.reduce((b, o) => (spread(o) < spread(b) ? o : b));
+    return { x: c.x, y: c.y, z: null, name: c.name, done: handIn, ...(c.map === here ? {} : { map: c.map }) };
   }
 
   /**
@@ -425,14 +479,15 @@ export class NpcLayer {
     if (!list?.length || !(q.z > 0)) return null;
     const dungeon = list.find((x) => x.area === q.z || x.also?.includes(q.z));
     if (!dungeon) return null;
+    const here = this.data?.map ?? this.app.scene?.map.id;
     let best = null, bestD = Infinity;
     for (const door of dungeon.doors) {
       // (one on the map you are on comes before any that is not)
-      const dist = door.map === this.data.map ? Math.hypot(door.pos[0] - from[0], door.pos[1] - from[1]) : 1e9;
+      const dist = door.map === here ? Math.hypot(door.pos[0] - from[0], door.pos[1] - from[1]) : 1e9;
       if (dist < bestD) { bestD = dist; best = door; }
     }
     if (!best) return null;
-    return { x: best.pos[0], y: best.pos[1], z: null, name: `${dungeon.name}, the way in`, done: false, ...(best.map === this.data.map ? {} : { map: best.map }) };
+    return { x: best.pos[0], y: best.pos[1], z: null, name: `${dungeon.name}, the way in`, done: false, ...(best.map === here ? {} : { map: best.map }) };
   }
 
   /**

@@ -15,12 +15,15 @@
 --                       This addon only ever listens: it sends nothing to anyone, so it cannot
 --                       put a wrong time into anybody's timers;
 --   the server's own    a restart starts every boat afresh. The warning the server gives in chat
---                       ("restart in 15:00") is read, and so is a ride of your own that no
---                       longer fits what was known.
+--                       ("restart in 15:00") is read, and so is a ride of your own that plainly
+--                       no longer fits what was known.
 -- Nothing is taken on one voice's word where voices differ: sightings that agree with each
 -- other (give or take what a round's own uncertainty allows) make a timetable, a sighting that
 -- stands alone against a fresh one waits for a second to back it, and the length of a round is
--- worked out from the sightings themselves as they spread over hours.
+-- worked out from the sightings themselves as they spread over hours. A sighting is put down to
+-- one of a timetable's boats only where there is no doubt which one it was: a sighting from so
+-- long before or after the others that it could as well be the boat before or after is set
+-- aside, and counts for nothing either way until the timetable is sure enough to place it.
 --
 -- The 3D map is told what is known (through the strip's messages), counts boats and trams into
 -- the journeys it plans, and shows them moving. The step list counts down to a departure.
@@ -35,7 +38,9 @@ local floor, ceil, abs, sqrt, max, min = math.floor, math.ceil, math.abs, math.s
 local strbyte, strchar, strsub, strfind = string.byte, string.char, string.sub, string.find
 
 local TOL = 5              -- seconds two sightings of one boat may differ by (on top of what its round's uncertainty allows)
-local ROUND_UNSURE = 0.4   -- seconds a round may be off the measured one, until sightings say
+local ROUND_UNSURE = 0.4   -- seconds a round may be off the measured one, until sightings say (unless a line gives its own)
+local PLACE = 1 / 4        -- a sighting is put down to one of a timetable's boats only while its window is at most this much of a gap
+local SURE = 1 / 8         -- a ride of yours says the server restarted only against a timetable this sure of its boat (see Solve)
 local STALE = 2700         -- a timetable nobody has confirmed for this long gives way to one new sighting
 local KEEP = 3 * 86400     -- sightings older than this are forgotten
 local MOST = 30            -- sightings kept of one line
@@ -103,8 +108,13 @@ end
 -- ---- the lines -----------------------------------------------------------------------------------
 -- dep[s], arr[s]: how far into its round (seconds after leaving stop 1) a boat leaves stop s, and
 -- gets there. gap: how often one leaves each stop (a round; half of one for the tram's two cars).
+-- roundUnsure: how far its round may be off, until sightings say. The timetables give most rounds
+-- to a few tenths of a second; the two airships of Zephras Isle, measured less well, carry a
+-- larger figure of their own. Where the legs and stops do not add up to the round, the stay at
+-- the first stop takes up the difference: a boat leaves there a round after it last did, and gets
+-- there when its last leg says.
 for _, d in ipairs(shared.TransitData) do
-  local L = { n = d.n, id = d.id, key = d.key, kind = d.kind, round = d.period, cars = d.cars or 1, stops = d.stops, legs = d.legs,
+  local L = { n = d.n, id = d.id, key = d.key, kind = d.kind, round = d.period, roundUnsure = d.periodUnsure or ROUND_UNSURE, cars = d.cars or 1, stops = d.stops, legs = d.legs,
     rough = d.rough, lanes = d.lanes, ft = d.ft, ft2 = d.ft2, ftStops = d.ftStops, dep = { 0 }, arr = {}, stay = {} }
   local count, at = #d.stops, 0
   for i = 1, count do
@@ -151,7 +161,7 @@ end
 -- exact it is, the gap held near the measured one for as long as the sightings span little time.
 -- (va, vb, cab: how unsure the two are, and how the one's error goes with the other's.)
 local function Fit(L, c)
-  local q = 1 / ((ROUND_UNSURE / L.cars) ^ 2)
+  local q = 1 / ((L.roundUnsure / L.cars) ^ 2)
   local sw, sn, snn, sy, sny = 0, 0, 0, 0, 0
   for _, x in ipairs(c.members) do
     local w = 1 / (x.unsure * x.unsure)
@@ -166,16 +176,44 @@ end
 local function Unsure(c, k)
   return sqrt(max(0, c.va + k * k * c.vb + 2 * k * c.cab))
 end
--- Does a sighting belong to this timetable: is it a whole number of boats away from it, as near
--- as its own exactness and the timetable's allow?
-local function Belongs(L, c, x)
+-- Where a sighting stands against a timetable: which of its boats it would be (k: so many boats
+-- on from the one the timetable counts from), how far it is off that boat, and its window: how far
+-- off it may be and still be that boat (TOL, its own exactness, and twice the timetable's
+-- uncertainty at that boat).
+local function Against(c, x)
   local k = floor((x.e - c.ref - c.a) / c.b + 0.5)
-  local off = x.e - c.ref - c.a - k * c.b
-  local allowed = TOL + x.unsure + 2 * Unsure(c, k)
-  if allowed > L.gap / 3 then allowed = L.gap / 3 end
-  if abs(off) > allowed then return false end
+  return k, x.e - c.ref - c.a - k * c.b, TOL + x.unsure + 2 * Unsure(c, k)
+end
+-- Does a sighting belong to this timetable: is it a whole number of boats away from it, as near
+-- as its own exactness and the timetable's allow? true or false, or nil where that cannot be told.
+-- A round is known only so well, so a timetable is less sure of where its boat was with every
+-- round away from what it rests on, and the window grows with it. Past a quarter of a gap there
+-- is no telling: the boat the sighting would be put down to might as well be the one before or
+-- after it, and a sighting of anything at all would land in the window as often as not. Within a
+-- quarter, the windows of the boats on either side are at least half a gap away, so the boat is
+-- the right one even if the timetable were twice as unsure as it reckons.
+local function Belongs(L, c, x)
+  local k, off, window = Against(c, x)
+  if window > PLACE * L.gap then return nil end
+  if abs(off) > window then return false end
   x.k = k
   return true
+end
+
+-- A sighting joins a timetable: fitted again, and counted (a player counts once, for the best of
+-- what they saw).
+local function Join(L, c, x)
+  c.members[#c.members + 1] = x
+  Fit(L, c)
+  if x.t > c.newest then c.newest = x.t end
+  if x.t < c.oldest then c.oldest = x.t end
+  local who = x.src == "own" and "*" or (x.who or "?")
+  local worth = COUNTS[x.src] or 0.5
+  if (c.seen[who] or 0) < worth then
+    c.counts = c.counts + worth - (c.seen[who] or 0)
+    c.seen[who] = worth
+  end
+  if x.src == "own" then c.own = true end
 end
 
 local function Solve(L, now)
@@ -198,30 +236,31 @@ local function Solve(L, now)
     end
   end
   if #live == 0 then return end
-  -- gathered into timetables: each sighting joins the first it agrees with
-  local found = {}
-  for _, x in ipairs(live) do
-    local home
-    for _, c in ipairs(found) do
-      if Belongs(L, c, x) then home = c break end
+  -- Gathered into timetables, newest first: each sighting joins the first it belongs to. One that
+  -- plainly belongs to none starts a timetable of its own (another voice, or the boats as they ran
+  -- before a restart). One that cannot be told is set aside: it starts nothing, so it can neither
+  -- hold back the newest timetable nor be taken for a restart. It is tried again once the others
+  -- are in (they may have pinned the round down enough to place it), and kept for the next time.
+  local found, waiting = {}, live
+  repeat
+    local aside = {}
+    for _, x in ipairs(waiting) do
+      local home, unsure = nil, false
+      for _, c in ipairs(found) do
+        local fits = Belongs(L, c, x)
+        if fits then home = c break end
+        if fits == nil then unsure = true end
+      end
+      if not home and not unsure then
+        x.k = 0
+        home = { ref = x.e, members = {}, newest = x.t, oldest = x.t, seen = {}, counts = 0 }
+        found[#found + 1] = home
+      end
+      if home then Join(L, home, x) else aside[#aside + 1] = x end
     end
-    if home then
-      home.members[#home.members + 1] = x
-    else
-      x.k = 0
-      home = { ref = x.e, members = { x }, newest = x.t, seen = {}, counts = 0 }
-      found[#found + 1] = home
-    end
-    Fit(L, home)
-    -- (a player counts once, for the best of what they saw)
-    local who = x.src == "own" and "*" or (x.who or "?")
-    local worth = COUNTS[x.src] or 0.5
-    if (home.seen[who] or 0) < worth then
-      home.counts = home.counts + worth - (home.seen[who] or 0)
-      home.seen[who] = worth
-    end
-    if x.src == "own" then home.own = true end
-  end
+    local placed = #aside < #waiting
+    waiting = aside
+  until not placed or #waiting == 0
   -- The newest sighting's timetable is the one that runs now, unless it stands alone against
   -- another that was confirmed not long before it: then it waits for a second voice.
   local first, second = found[1], found[2]
@@ -229,19 +268,31 @@ local function Solve(L, now)
   if second and first.counts < 3 and first.newest - second.newest <= (first.counts >= 1.5 and STALE or 4 * STALE) then
     chosen = second
     L.held = first
-  elseif second and first.own and second.counts >= 3 then
-    -- your own ride no longer fits a timetable that was well founded: the server has restarted
-    -- since that one was last seen to hold (and with it every other line's)
-    T.Restarted(second.newest + 1, "your ride on " .. L.name)
-  end
-  -- (what is left of older timetables is of no more use)
-  for i = #S, 1, -1 do
-    local x, keep = S[i], false
-    for _, m in ipairs(chosen.members) do if m == x then keep = true break end end
-    if not keep and L.held then
-      for _, m in ipairs(L.held.members) do if m == x then keep = now - x.t <= 2 * STALE break end end
+  elseif second and first.own and second.counts >= 3 and first.oldest > second.newest then
+    -- Your own ride no longer fits a timetable that was well founded and came before it: the
+    -- server has restarted since that one was last seen to hold (and with it every other line's).
+    -- That forgets every line's sightings, so it is taken only where there is no doubt: where the
+    -- older timetable's window at your ride (as in Belongs) is within an eighth of a gap, and the
+    -- ride is outside it. An older timetable that is less sure of its boat by then (seen hours
+    -- before, or with a round that is not well known) says nothing either way.
+    local window, off
+    for _, m in ipairs(first.members) do
+      if m.src == "own" then
+        local _, o, w = Against(second, m)
+        if not window or w < window then window, off = w, o end
+      end
     end
-    if not keep then table.remove(S, i) end
+    if window <= SURE * L.gap and abs(off) > window then T.Restarted(second.newest + 1, "your ride on " .. L.name) end
+  end
+  -- (what is left of older timetables is of no more use; what was set aside is kept for next time)
+  local keep = {}
+  for _, x in ipairs(waiting) do keep[x] = true end
+  for _, m in ipairs(chosen.members) do keep[m] = true end
+  if L.held then
+    for _, m in ipairs(L.held.members) do if now - m.t <= 2 * STALE then keep[m] = true end end
+  end
+  for i = #S, 1, -1 do
+    if not keep[S[i]] then table.remove(S, i) end
   end
   local best
   for _, m in ipairs(chosen.members) do
@@ -699,8 +750,12 @@ function shared.TransitReport()
     turn = turn % count + 1
     local L = T.lines[turn]
     local c = L.fit
-    if c then
-      local leaves, _, unsure = T.Next(L, 1, now)
+    local leaves, unsure, _
+    if c then leaves, _, unsure = T.Next(L, 1, now) end
+    -- (a timetable too unsure to name a moment by is told as none, as a step in the game names
+    -- none past a sixth of a gap: a byte carries no more than 25.5 s of how unsure it is, and the
+    -- map would take it for surer than it is. The tram's cars, a minute apart, are told up to that.)
+    if c and unsure <= max(L.gap / 6, 25.5) then
       local k = floor((leaves - L.dep[1] - c.ref - c.a) / c.b + 0.5)
       local flags = 128 + (SOURCE[c.src] or 4)
       if c.laneAt then

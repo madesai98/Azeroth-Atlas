@@ -210,26 +210,56 @@ Two things are on the map itself:
   there is nothing to say and it is gone.
 - **Find me**, the round button at the bottom right: flies to your character and follows them.
 
-### The two continents on one picture
+### The continents and Zephras Isle on one picture
 
 The game keeps the Eastern Kingdoms and Kalimdor as two maps, each with its own coordinates.
 Here they are drawn together on one sea, as far apart as the game's own world map has them:
 its picture of Azeroth gives each continent a rectangle, and from those two rectangles (they
 are in the game's files) Kalimdor comes out 24,000 yards to the west of the Eastern Kingdoms
-and 4,800 to the south (whole terrain tiles, so both lie on one grid). Choosing either from the
-map list shows both; the first view takes in the two of them. Zephras Isle, the tram and the
-dungeons are maps of their own as before.
+and 4,800 to the south (whole terrain tiles, so all the maps on the picture lie on one grid).
 
-One of the two is the map *in hand*: the one the list names, whose NPCs are shown and on which
-your route is worked out. It is the continent your character is on while the game is running;
-otherwise, or after you choose the other from the list (which also ends **Follow me**), it is
-the one you are looking at (zoomed in: from high up, with both in view, nothing changes hands). The other continent is
-drawn in full all the same: terrain, buildings, place names, spawn zones, your arrow if you
-are there. The read-out under the cursor and a marker you drop work on either, in that
-continent's own coordinates, and a marker dropped across the sea from where you stand gets a
-journey there by boat or zeppelin. A page address still holds one map and a place on it.
+Zephras Isle is a third map, and the game's world map has no place for it: it is an island in
+the sky, its ground some 650 yards up, and the only ways there are the airships from Dalaran,
+in the Eastern Kingdoms, and from Skywatcher Plateau, in Kalimdor. All three are open world
+that the game joins together, so the island is put on the same picture, out over the sea
+between the two continents its airships come from. Where exactly is the map's own choice, not
+the game's, and is worked out from the game's files rather than set by hand: the island lies
+about halfway between the Eastern Kingdoms' west coast and Kalimdor's east coast (each coast as
+far out as that continent's zones go along the stretch of sea the island takes up), and as far
+north as puts its two docks level with the middle of Dalaran's and Skywatcher Plateau's, so
+that the airships fly across the sea rather than up or down it. That comes to 8,000 yards to
+the west of the Eastern Kingdoms and 4,267 to the south, in whole tiles again, with at least
+2,600 yards of open sea between the island's tiles and either continent's.
 
-Boats and zeppelins cross between them (see "Boats, zeppelins and the tram, live").
+The island keeps its own heights, so it floats over the sea. In the game its ground goes down
+in cliffs from the top almost to the height of the sea, with nothing below them but sky; over
+the sea of the picture those cliffs would stand in the water and make the island a mountain
+in the sea. So it is drawn down to halfway between its lowest dock and the sea (about 320
+yards up) and no further: from the side you see it hang in the air. The island has no sea of
+its own, and the continents' sea goes on under it at their level. Around the island the game
+keeps ground under its holes (the open sky): flat at the height of the sea, and here and there
+standing up in walls hundreds of yards high. Close up the holes leave it out; from further off
+the terrain is drawn coarser, and a coarse level knows of holes only where a whole tile is
+missing. So the island reads the holes of all its tiles once when it is opened (the tiles come
+again from the browser's own store when they are drawn close up), and its distant levels leave
+them out as well.
+
+Choosing any of the three from the map list shows all three; the first view takes in the
+whole picture. The tram and the dungeons are maps of their own as before.
+
+One of them is the map *in hand*: the one the list names, whose NPCs are shown and on which
+your route is worked out. It is the map your character is on while the game is running;
+otherwise, or after you choose another from the list (which also ends **Follow me**), it is the
+one you are looking at (zoomed in: from high up, with all of them in view, nothing changes
+hands). The others are drawn in full all the same: terrain, buildings, place names, spawn
+zones, your arrow if you are there. The read-out under the cursor and a marker you drop work on
+any of them, in that map's own coordinates, and a marker dropped across the sea from where you
+stand gets a journey there by boat, zeppelin or airship. A spot counts as the island's only up
+on the island: the sea beside it and under it belongs to a continent. A page address still
+holds one map and a place on it.
+
+Boats, zeppelins and the airships cross between them (see "Boats, zeppelins and the tram,
+live").
 
 **Steep slopes** tints ground steeper than the chosen angle (default 50°, the classic walkable
 limit) using the true surface geometry; **Contour lines** adds elevation contours.
@@ -622,8 +652,16 @@ section, where each also says how long it is:
   drawn beside it, a little thinner. Switching the leading one off leaves the others.
 - **There is one waypoint of your own**, wherever you place it: a Shift-click or a Ctrl-click
   on the game's map, a click on this one. Each new one takes the place of the one before.
-- The tracked quest's route needs the NPC data of the map you are on (what a quest asks for is
-  looked up there), so it reaches what is on your continent.
+- The tracked quest's route is worked out from the NPC data of the map you are on: what a quest
+  asks for is looked up there, and the nearest of it is where the route goes. **Where none of
+  the quest's business is on that map, it goes to another map**: a Westfall quest while you are
+  on Zephras Isle (you used your hearthstone with it tracked) is a journey to Westfall, by the
+  airship, the portal and a flight. QuestieDB gives one spot for every NPC and object a quest
+  involves, on whichever map it is (`quests.json` keeps it), and that spot is where the journey
+  goes; with several, the ones in the zone the quest is filed under come first, then the map
+  most of them are on, then the one in the middle of the rest. Once you are on that map, its own
+  data takes over and the route goes to the nearest. It used to stop there: on another map than
+  its business, the quest had no route at all.
 - **A quest that is done inside a dungeon is led to the dungeon's door.** Nothing it asks for is
   on the map you stand on outside, and in a dungeon new to this game nobody can be placed at
   all; the route used to go to who takes the quest then, with nothing of it done ("Old Ironforge
@@ -708,7 +746,13 @@ When the waypoint is on someone the map knows (within six yards of an NPC or que
 preferring whoever your quests send you to), it is them you are heading for, on the floor they
 are on: the route climbs the stairs to Captain Stoutfist rather than stopping in the hall below
 him, and the Routes section says "To Captain Stoutfist". **Route here** on an NPC's card does the
-same. Where the NPC's own height is only a guess, it says that which floor is a guess.
+same. That is only where the NPC's floor is known (from the reference database, seen in the
+game, or the only place to stand there): where it is the map data's guess, the guess is only a
+hint to which level is meant, and the levels below decide - so ground buried under a street is
+never where the route ends. (A waypoint in the middle of Stormwind's Trade District was put on
+the earth under the city, where the data guesses a cat stands.) A **quick waypoint** is a spot
+of your own and takes no one's floor: whoever happens to stand near it, it is on the level
+nearest yours.
 
 For any other waypoint the route worker is asked **which levels there are at that spot that you
 can walk to** (`viewer/js/navworker.js`, `viewer/js/levels.js`): every floor within a couple of
@@ -728,6 +772,20 @@ enough to say the rest cannot be reached. Two rules keep out what is not a real 
 If **no level at the spot can be reached** (the waypoint is on a roof, or inside a wall) the
 route goes to the nearest place within 45 yards that can be, and the end of the route is marked
 there.
+
+Two more rules hold for every walk:
+
+- **A walk to a place at a known height ends at the foot of it** when nothing at that height can
+  be walked onto. The well a quest has you use is at the height of its rim, a few yards over the
+  ground around it; the search looked at two million floors for a way onto the rim and gave up,
+  "too far to work out on foot", three hundred yards from the well. The floors at the spot
+  itself now count as a second choice, taken when the one at the height asked for cannot be
+  reached at all.
+- **A walk begins on the floor you are on**, never on one more than a step above your height.
+  Where nothing around you leads anywhere (you are in a room whose only way out is a portal),
+  the search used to begin on whatever did, at any height: in the Wizard's Sanctum under
+  Stormwind that was the earth under the streets thirty yards overhead, and the route walked
+  off along it. You can drop down from where you are; you cannot rise to a floor overhead.
 
 With **more than one level**, the choice is yours:
 
@@ -780,10 +838,19 @@ zones" for why going round them was taken out).
   that stop in the other faction's towns are left out (a place counts as theirs when the flight
   masters there serve only them), and so is one the game's tables still list but which no
   longer sails;
-- **the Deeprun Tram and portals** (Darnassus): the tram is counted the same way, by when its
-  next car leaves. The doorways between maps are not in the game's files (the server decides
-  where one leads): they are listed in `extractor/doorways.json`, and read from the
-  ShortestPathForever addon's own list where that addon happens to be installed;
+- **the Deeprun Tram and portals** (Darnassus, Dalaran): the tram is counted the same way, by
+  when its next car leaves. The doorways between maps are not in the game's files (the server
+  decides where one leads): they are listed in `extractor/doorways.json`, and read from the
+  ShortestPathForever addon's own list where that addon happens to be installed. Only the ones
+  between maps this game has are used: the list has Northrend's Dalaran in it (a map this game
+  does not have), whose portal to Stormwind and the one back stand on the same spot there, and
+  together they made a free way from the top of Stormwind's Mage Tower to the middle of the
+  city ("walk to the Dalaran portal, Portal to Dalaran, Portal to Stormwind"). The portals that
+  put you somewhere else on the same map are in `viewer/teleports.json`, with the floor you
+  walk onto to go through each: the **Skyborne Portal** in this game's Dalaran, to the Wizard's
+  Sanctum under Stormwind's Mage Tower, and the Mage Tower's own portal into the Sanctum and the
+  one back out - the only way out of the Sanctum (a route from there used to be "no way out of
+  where you are on foot");
 - **your hearthstone**, if it is set somewhere useful: it counts the time left on its cooldown
   plus the cast, and is only suggested when it saves at least a minute and a half over the next
   best way. The game tells an addon only the name of the place it is set to ("Deepwater
@@ -844,11 +911,11 @@ way on is still worked out when it has put you down; until then the journey in h
 it is (it used to be taken away for the crossing).
 
 **The whole journey is drawn, on every continent and across the sea.** A journey that goes on
-to the other continent is drawn there too, on the picture that shows the two side by side: its
-walks and flights over there, and the way the boat or zeppelin takes across, in lilac. The
-game's own path for a boat stops a little way out from each dock (the craft is moved from one
-continent's map to the other's while its riders look at a loading screen), so its two ends are
-joined by a straight line over the open sea: the line the boats on the map are shown sailing.
+to another map of the picture (the other continent, or Zephras Isle) is drawn there too: its
+walks and flights over there, and the way the boat, zeppelin or airship takes across, in lilac.
+The game's own path for a boat stops a little way out from each dock (the craft is moved from
+one map to the other while its riders look at a loading screen), so its two ends are joined by
+a straight line over the open sea: the line the boats on the map are shown sailing.
 These lines are shown, not followed. Your place on the route is kept on the line of the map
 you are on, exactly as before; the rest is worked out afresh when you get there.
 
@@ -1158,10 +1225,10 @@ into one answer, with nothing to set up:
 
 | What | How it is used |
 | --- | --- |
-| **The timetables** (`viewer/transit.json`; the addon's copy is written from it by `tools/make-transit-lua.mjs`) | How long each line's round takes, each leg, each stop, and where the craft is every couple of seconds of a leg: eleven boat and zeppelin lines and both tram cars as DockWatch's players recorded them in this game (MIT licence), and the Feathermoon ferry from the game's own path and the round Nauticus measured for it (its times are rough). The game's own path of each line is where the craft is drawn; all 695 recorded moments of the eleven lines lie on those paths. |
+| **The timetables** (`viewer/transit.json`; the addon's copy is written from it by `tools/make-transit-lua.mjs`) | How long each line's round takes, each leg, each stop, and where the craft is every couple of seconds of a leg: eleven boat and zeppelin lines and both tram cars as DockWatch's players recorded them in this game (MIT licence), and the Feathermoon ferry from the game's own path and the round Nauticus measured for it (its times are rough). The game's own path of each line is where the craft is drawn; all 695 recorded moments of the eleven lines lie on those paths. The round of the Dalaran - Valanaar airship is 352.49 s, as two rides 57 rounds apart had it (the recording said 353.74 s, Nauticus 353 s). Where a line's legs and stops do not add up to its round, its stay at its first stop takes up the difference: the airship's add up to 354.0 s, so it is taken to stay 59.7 s at Dalaran rather than 61.2 s. |
 | **Your own rides** | Something is carrying you when you move without moving yourself. Carried along a line's track where the boat is under way, each spot you pass says how long ago it left; five of them over five seconds that agree to the second are when it left, wherever you boarded. |
 | **Other players' sightings** | Three addons pass sightings from player to player, each in its own way, and each is read as that addon writes it, without being installed: **DockWatch** (the moment a boat left a dock, by where the dock is; over its own hidden channel, the guild and whispers), **ForeverTransport** (when it arrived, by a line's number) and **Nauticus** (how far into its round a boat is as the message is sent). The addon **only listens**: it never sends, so it cannot put a wrong time into anyone's timers. `/atlas boats listen` turns the listening off. |
-| **The server's restarts** | A restart starts every boat afresh. The warning the server gives in chat ("restart in 15:00") is read, and a ride of your own that no longer fits a well-founded timetable says one has happened. |
+| **The server's restarts** | A restart starts every boat afresh. The warning the server gives in chat ("restart in 15:00") is read, and a ride of your own that plainly no longer fits a well-founded timetable says one has happened (when that is plain: see "Which boat a sighting was" below). |
 
 **Voices that differ** (`addon/AzerothAtlas/Transit.lua`). Sightings that agree (give or
 take what a round's own uncertainty allows) make a timetable. Each is weighed by how exact it
@@ -1172,10 +1239,40 @@ once. A sighting that stands alone against a timetable confirmed in the last thr
 an hour waits until a second player backs it; your own ride always counts. **The length of a
 round is worked out from the sightings** as they spread over hours (the sources give it a few
 tenths of a second apart, which is a minute's drift over a day): two sightings three hours
-apart give it to a few hundredths. How unsure a departure is goes with it everywhere: under six
-seconds it is given plainly, over that as "about", and past a sixth of a round the line counts
-as not timed: no moment is named for it (a journey still counts what such a time says about
-the wait, up to half a round unsure, where it says nothing).
+apart give it to a few hundredths. Until they do, a round is reckoned to be unsure by 0.4 s;
+the rounds of the two airships of Zephras Isle are measured less well, and are reckoned unsure
+by a second (Dalaran - Valanaar, its round now from two rides) and a second and a half
+(Valanaar - Skywatcher Plateau, whose 347 s both sources give as a whole number). How unsure a
+departure is goes with it everywhere: under six seconds it is given plainly, over that as
+"about", and past a sixth of a round the line counts as not timed: no moment is named for it,
+and the 3D map is told it is not timed, neither showing its craft nor counting on one. (The
+tram is the exception: its cars are only a minute apart, so a journey still counts what a time
+up to 25 seconds unsure says about the wait.)
+
+**Which boat a sighting was.** Every few minutes another boat of a line leaves the same dock,
+so a sighting says something only once it is put down to the right one of them, and a
+timetable is less sure of where its boat was with every round away from what it rests on. A
+sighting is put down to a boat only while the window it may be off by (five seconds, how exact
+the sighting is, and twice how unsure the timetable is of that boat) is no more than a quarter
+of the time between two boats. The windows of the boats on either side are then at least half
+that time away, so it is the right boat even if the timetable were twice as unsure as it
+reckons. A sighting further off than that (hours before or after the others, while the round
+is not yet pinned down) is set aside: it starts no timetable of its own, so it can neither hold
+back the newest one nor be taken for a restart. It is kept, and put down to its boat once the
+timetable has firmed up enough (or forgotten after three days, like any sighting). **Your own
+ride says the server has restarted** only when it is plainly off a well-founded timetable that
+came before it (your own earlier ride, or two other players), and that timetable is sure, at
+your ride, to within an eighth of a round of where its boat was. A restart forgets every line's
+sightings, so it is not taken on less: an older timetable that is unsure of its boat by then
+says nothing either way, and your ride simply runs the line from then on. (Addon version 21.
+Before, the window was cut down to a third of a round however unsure the timetable was, which
+turned "it could be any of them" into "it is this one". On 16 November a DockWatch sighting of
+the Dalaran airship, sixteen hours older than a ride of yours, was put down to the boat 163
+rounds before it, although it could not be told which boat it was (most likely it was seen
+before a restart that morning, and was none of them); the round in the timetables was 1.25 s
+out, the two together made it 354.42 s, and 57 rounds later the map had the airship two
+minutes late, and sure of it. Your next ride did not fit that, was taken for a restart, and
+every line's sightings up to then were forgotten.)
 
 **What it is used for:**
 
@@ -1200,9 +1297,16 @@ the wait, up to half a round unsure, where it says nothing).
   shown making that crossing: for its first and last twenty seconds, in sight of the docks, it
   is exactly where the game has it, and in between it sails evenly over the sea from the one
   stretch to the other, so the time over it ("0:48 to Ratchet") and its arrival are right
-  throughout. The craft you are aboard is the exception: it stays under you, exactly where the
-  game has it, and makes the crossing during your loading screen. (A boat to Zephras Isle,
-  which is on no common picture, simply leaves one map and turns up on the other.)
+  throughout. The craft you are aboard is the exception: it is drawn under your figure, and
+  makes the crossing during your loading screen. (Its timetable has it where it is to the
+  second, and your figure is where the game last said you were, a moment before: at an
+  airship's thirty yards a second the two came apart, and you stood in the air behind the ship
+  you were on.) The airships to Zephras Isle cross the same way, through the air: the island is
+  on the picture too (see "The continents and Zephras Isle on one picture"), so an airship from
+  Dalaran or from Skywatcher Plateau is seen flying out over the sea to it and in to its docks,
+  and back. Where a recorded crossing has the craft settle a yard or two back at its dock, it
+  now stays there; it used to be drawn racing once round its whole route in the last two
+  seconds.
 
 The addon tells the map what it knows through the strip (three lines a second, in turn, and
 how far the server's clock is from this computer's), so the map goes on showing the boats after
@@ -1532,6 +1636,13 @@ retraced as a walk it would leave you on the floor you came from. The map knows 
 and where they put you down (`viewer/teleports.json`: where each takes hold is in the game's
 files, where it leads is not): at one's doorstep on its level, then all at once where it puts
 you down, faster than anything carries you on the ground, you have gone through.
+
+**Through a portal from far away** - the Skyborne Portal in Dalaran puts you in the Wizard's
+Sanctum, under the Mage Tower and under the streets - there is no doorstep to have been seen at,
+only a jump with nothing in between. Wherever you arrive like that within ten yards of where a
+portal puts you down (one in `viewer/teleports.json`, or a doorway between maps), you are on the
+floor it puts you down on. Before, the map took the lowest floor not buried under the terrain,
+and had you on the street over the Sanctum.
 
 **Walking**, the map retraces the way from your previous position in quarter-yard steps over
 the surfaces you could be standing on (the terrain, the floors, stairs and bridges in the
@@ -1962,7 +2073,10 @@ notes what it does - a line for every *change*, not for every yard walked:
   builds, errors. The application adds what only it knows: a page or a helper of its own that
   crashed, and (`app.json`) the graphics card and the screens;
 - **the page** (`page.log`, sent on to the server as it goes, so that it outlasts the page
-  loading itself again): where each route is heading and which way it is taken to go ("lead:
+  loading itself again; a batch at a time of a size any browser sends - one batch of four
+  hundred lines once came to more than the 64 KB a browser allows a request that is to outlive
+  its page, and nothing more of the page's was written down until it loaded again, two hours
+  later): where each route is heading and which way it is taken to go ("lead:
   hearth, then walk"), with what was looked for and how long it took; what the game is handed;
   the graphics card; every warning and error;
 - **the addon** (with what it saves for the character; `/atlas log` shows the last of it):
@@ -2013,6 +2127,6 @@ The 3D map shows them, the game does not. In the order worth looking:
 - Objects are drawn in their rest pose (no animation, particles or lights); skin-swapped
   textures on a few props fall back to a neutral colour.
 - Content the game ships encrypted (unreleased areas) is skipped automatically.
-- With both continents on the picture, NPC markers are those of the map in hand; the other
-  continent shows them once it is taken in hand (look at it closely, or choose it from the
-  list). The route is drawn on both.
+- With the continents and Zephras Isle on one picture, NPC markers are those of the map in
+  hand; each of the others shows them once it is taken in hand (look at it closely, or choose
+  it from the list). The route is drawn on all of them.

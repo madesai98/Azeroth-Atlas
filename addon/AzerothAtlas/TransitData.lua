@@ -5,8 +5,10 @@
 -- Round of the Feathermoon line and of a tram car, and the line numbers under "ft": NauticusClassicResurrected (MIT licence), by way of ForeverTransport by Stilo. https://github.com/sam-k-taylor/NauticusClassicResurrected
 --
 -- A line: n (its number between the addon and the map), id (the game's own number for its
--- path; none for the tram), period (seconds for one craft's whole round), stops (in the order
--- the craft calls at them: name, map, x and y as the game counts them, wait in seconds), legs
+-- path; none for the tram), period (seconds for one craft's whole round), periodUnsure (seconds
+-- that round may be off, given for a line whose round is less well measured than the others;
+-- for the rest the addon has a figure of its own), stops (in the order the craft calls at them:
+-- name, map, x and y as the game counts them, wait in seconds), legs
 -- (leg i runs from stop i to the stop after it: trip in seconds, and track, where the craft is
 -- so many seconds after leaving: { seconds, map, x, y }; track2 is the tram's other track),
 -- ft and ftStops (ForeverTransport's and Nauticus' number for the line, and which of our
@@ -130,7 +132,7 @@ shared.TransitData = {
       { trip = 66.4, track = { { 0, 1, 6548, 949 }, { 5.5, 1, 6533.1, 955.6 }, { 9.5, 1, 6507, 971.9 }, { 13.5, 1, 6472.8, 1000.9 }, { 19.5, 1, 6421.5, 1082.9 }, { 25.5, 1, 6400.4, 1207.4 }, { 27.5, 1, 6403.4, 1273.3 }, { 29.5, 1, 6409.4, 1322 }, { 37.5, 1, 6451, 1567.5 }, { 49.6, 0, -8804.9, 1342.4 }, { 51.9, 0, -8764.1, 1325.3 }, { 53.9, 0, -8734.5, 1321.5 }, { 57.9, 0, -8688.3, 1324.3 }, { 61.9, 0, -8660.5, 1334.8 }, { 66, 0, -8650, 1339.6 }, { 66.4, 0, -8649.3, 1338.4 } } },
     },
   },
-  { n = 11, id = 11457, key = "valanaar-skywatcher", kind = "zeppelin", period = 347,
+  { n = 11, id = 11457, key = "valanaar-skywatcher", kind = "zeppelin", period = 347, periodUnsure = 1.5,
     ft = 12, ftStops = { 1, 2 },
     stops = {
       { name = "Valanaar", map = 2991, x = 1941.5, y = 1001.7, wait = 31 },
@@ -141,7 +143,7 @@ shared.TransitData = {
       { trip = 102.9, track = { { 0, 1, -794, 347.5 }, { 3.5, 1, -798.4, 353.5 }, { 5.5, 1, -804.2, 361 }, { 7.5, 1, -812.7, 371.7 }, { 9.5, 1, -824.2, 385.5 }, { 11.5, 1, -839.2, 402.3 }, { 13.5, 1, -858.1, 421.8 }, { 15.5, 1, -881, 443.2 }, { 17.5, 1, -908.1, 465.4 }, { 19.5, 1, -938.9, 486.4 }, { 21.5, 1, -973.2, 503.8 }, { 23.5, 1, -1010.3, 514.2 }, { 25.5, 1, -1046.3, 512.8 }, { 27.5, 1, -1084.1, 497.7 }, { 29.5, 1, -1125, 467.8 }, { 31.5, 1, -1170.2, 425.9 }, { 33.5, 1, -1222, 376.5 }, { 35.5, 1, -1279.7, 326.8 }, { 37.5, 1, -1321.1, 294.2 }, { 39.5, 1, -1369.1, 256.3 }, { 41.5, 1, -1421.7, 214.5 }, { 43.5, 1, -1476.7, 170.5 }, { 45.5, 1, -1532.6, 125.9 }, { 47.5, 1, -1587, 82.4 }, { 49.5, 1, -1638.1, 41.4 }, { 51.5, 1, -1684, 4.6 }, { 53.5, 1, -1722.8, -26.4 }, { 55.5, 1, -1752.3, -50.1 }, { 59.6, 2991, 1228.5, 569.2 }, { 61.6, 2991, 1297.1, 585.9 }, { 63.6, 2991, 1350.1, 606.4 }, { 65.6, 2991, 1405.1, 631.7 }, { 67.6, 2991, 1463.2, 660.5 }, { 69.6, 2991, 1519.3, 689.4 }, { 71.6, 2991, 1570.9, 716.7 }, { 73.6, 2991, 1626.5, 747.4 }, { 75.6, 2991, 1673.5, 775.1 }, { 77.6, 2991, 1715.6, 801.8 }, { 79.6, 2991, 1756, 828.5 }, { 81.6, 2991, 1795.5, 855.1 }, { 83.6, 2991, 1831.6, 880.1 }, { 85.6, 2991, 1861.9, 901.8 }, { 87.6, 2991, 1885.6, 919.5 }, { 89.6, 2991, 1902.7, 933 }, { 91.6, 2991, 1924.2, 950.6 }, { 93.6, 2991, 1936.9, 962.8 }, { 95.6, 2991, 1941, 974.3 }, { 97.6, 2991, 1940.9, 985.4 }, { 99.6, 2991, 1940.9, 994.6 }, { 101.6, 2991, 1941.2, 1000.3 }, { 102.6, 2991, 1941.4, 1001.5 } } },
     },
   },
-  { n = 12, id = 11398, key = "dalaran-valanaar", kind = "zeppelin", period = 353.74,
+  { n = 12, id = 11398, key = "dalaran-valanaar", kind = "zeppelin", period = 352.49, periodUnsure = 1,
     ft = 13, ftStops = { 2, 1 },
     stops = {
       { name = "Dalaran", map = 0, x = 543.5, y = 429.5, wait = 61.2 },

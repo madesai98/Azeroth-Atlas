@@ -54,6 +54,10 @@ export class MapScene {
     // Set while another map is shown beside this one (see joined.js): which part of a square of
     // open sea is this map's to draw. (xN, yW, size) -> 0 all of it, 1 none, 2 some (it is split).
     this.seaClip = null;
+    // An island in the sky, drawn over the sea of a picture: the height below which its ground
+    // is not drawn (null: all of it is). See float.
+    this.floor = null;
+    this.voids = null;
     this.stats = { nodes: 0, tris: 0, loaded: 0 };
 
     this.nodes = new Map();
@@ -112,6 +116,62 @@ export class MapScene {
   dispose() {
     this.disposed = true;
     for (const n of this.nodes.values()) if (n.res) { this.terrain.destroyNode(n.res); n.res = null; }
+  }
+
+  /**
+   * Make this map an island in the sky, over the sea of a picture (joined.js): its ground is not
+   * drawn below `floor`, nor anywhere in its holes - from far off as well. A coarse level of the
+   * terrain knows of a hole only where a whole tile is missing, and the island's tiles are
+   * mostly holes (the open sky around it), with the ground the game keeps under them lying flat
+   * at the height of the sea and standing up, here and there, in walls hundreds of yards high.
+   * So the holes of all its tiles are read once (the tiles come again from the browser's store
+   * when they are drawn close up), and every coarse level is given them.
+   * (Call before loadRoots.)
+   */
+  float(floor) {
+    this.floor = floor;
+    this.voids ??= this.#readHoles();
+  }
+
+  /** The holes of every tile of the map: Map of "col_row" -> its hole bits (8 bytes a chunk, 256 chunks). */
+  async #readHoles() {
+    const out = new Map(), tiles = [...this.nodes.values()].filter((n) => n.level === 0);
+    let next = 0;
+    const reader = async () => {
+      while (next < tiles.length && !this.disposed) {
+        const n = tiles[next++];
+        try {
+          const bits = sectionView(unpackContainer(await this.#fetch(`t/${n.x}_${n.y}.bin`), 'WFT1'), 4, Uint8Array);
+          if (bits) out.set(`${n.x}_${n.y}`, bits.slice());
+        } catch { /* not known for that tile: from far off it is drawn whole, as before */ }
+      }
+    };
+    await Promise.all(Array.from({ length: MAX_ACTIVE_LOADS }, reader));
+    return out;
+  }
+
+  /**
+   * The holes of a coarse level, as fine as it is drawn (128 x 128 over its tiles): a square is a
+   * hole where its tile is missing, or where every quad of the tile under it is a hole.
+   */
+  #pageHoles(node, voids) {
+    const side = 2 ** node.level, per = 128 / side, quads = 128 / per;
+    const data = new Uint8Array(128 * 128);
+    let any = false;
+    for (let r = 0; r < 128; r++) for (let c = 0; c < 128; c++) {
+      const col = node.x * side + Math.floor(c / per), row = node.y * side + Math.floor(r / per);
+      let hole = !this.nodes.has(`0/${col}_${row}`);
+      const bits = hole ? null : voids.get(`${col}_${row}`);
+      if (bits) {
+        hole = true;
+        const i0 = (c % per) * quads, j0 = (r % per) * quads;
+        for (let j = j0; j < j0 + quads && hole; j++) for (let i = i0; i < i0 + quads; i++) {
+          if (!((bits[((j >> 3) * 16 + (i >> 3)) * 8 + (j & 7)] >> (i & 7)) & 1)) { hole = false; break; }
+        }
+      }
+      if (hole) { data[r * 128 + c] = 255; any = true; }
+    }
+    return any ? { size: 128, data } : null;
   }
 
   /** Start loading the coarsest level; resolves when the whole map is drawable. */
@@ -195,7 +255,7 @@ export class MapScene {
         node.overlayRev = this.overlay.rev;
       } else this.overlayPending = true;
     }
-    this.draws.push({ res: node.res, originRel: [rx, ry, -c[2]], scale: node.size / 256, skirt: cell * 1.5 + 2, mesh, level: node.level, dist: d });
+    this.draws.push({ res: node.res, originRel: [rx, ry, -c[2]], scale: node.size / 256, skirt: cell * 1.5 + 2, mesh, level: node.level, dist: d, floor: this.floor });
   }
 
   #fillerQuad(xN, yW, size) {
@@ -354,6 +414,9 @@ export class MapScene {
       const size = 2 ** node.level;
       holes = { size, data: Uint8Array.from(coverage, (v) => (v ? 0 : 255)) };
     }
+    // (an island in the sky: the holes of its tiles - see float)
+    const voids = this.voids ? await this.voids : null;
+    if (voids) holes = this.#pageHoles(node, voids) ?? holes;
     let water = null, waterGrid = null;
     const wl = sectionView(c, 5, Float32Array), wk = sectionView(c, 6, Uint8Array);
     if (wl) {

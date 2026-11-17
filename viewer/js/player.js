@@ -330,7 +330,7 @@ export class PlayerLink {
       // on a flight path: drawn riding what flies your side's (figure.js), turned as it is
       if (this.flight && this.me?.taxi) out.player.flight = { ...this.flight, faction: s.player.faction };
     } else if (this.me && s.player) {
-      // On the map drawn beside the one in hand (the other continent): the arrow, where the game says you are.
+      // On another map of the picture than the one in hand (the other continent, the island): the arrow, where the game says you are.
       const off = this.app.offsetOf?.(this.me.map), x = this.me.x + (off?.[0] ?? 0), y = this.me.y + (off?.[1] ?? 0);
       if (off) out.player = { x, y, z: this.me.z ?? this.app.camera?.scene?.heightAt(x, y) ?? 0, heading: this.me.heading, dead: s.player.dead, stale: !this.live, beside: true };
     }

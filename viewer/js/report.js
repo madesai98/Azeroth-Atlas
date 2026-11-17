@@ -49,7 +49,7 @@ export function snapshot(app) {
     graphics: part(() => (app.gpu ? { ...app.gpu.info, lost: app.gpu.lost, scale: app.gpu.scale, pixelRatio: app.gpu.pixelRatio, compressedTextures: app.gpu.bc, canvas: [app.gpu.canvas.width, app.gpu.canvas.height] } : null)),
     status: part(() => lean(app.status)),
     addon: part(() => lean(app.addon ?? null)),
-    map: part(() => ({ inHand: app.here ? { id: app.here.id, name: app.scene?.map?.name } : null, beside: app.beside ? { id: app.beside.id, offset: app.besideOff } : null, open: [...app.open.keys()], dataRevision: app.manifest?.revision ?? null, tool: app.manifest?.tool ?? null, scene: lean(app.scene?.stats ?? null), models: lean(app.models?.stats ?? null) })),
+    map: part(() => ({ inHand: app.here ? { id: app.here.id, name: app.scene?.map?.name } : null, beside: (app.beside ?? []).map((o) => ({ id: o.id, offset: app.offs?.get(o.id) ?? null, floor: o.scene?.floor ?? undefined })), open: [...app.open.keys()], dataRevision: app.manifest?.revision ?? null, tool: app.manifest?.tool ?? null, scene: lean(app.scene?.stats ?? null), models: lean(app.models?.stats ?? null) })),
     camera: part(() => (cam ? { at: spot(cam.pos), heading: round(cam.heading), pitch: round(cam.pitch), flying: !!cam.fly || undefined } : null)),
     you: part(() => (P ? {
       asTheServerSaid: lean({ ...P.state, transit: P.state?.transit ? `(${Object.keys(P.state.transit.lines ?? {}).length} lines)` : null }),

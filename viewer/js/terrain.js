@@ -7,8 +7,10 @@ import { textureFromBLP } from './formats.js';
 const NODE_UNIFORM_STRIDE = 256;
 const MAX_DRAWS = 1024;
 
+const NO_FLOOR = -1e9; // (a node's floor where all of its ground is drawn)
+
 const NODE_WGSL = /* wgsl */ `
-struct NodeU { originRel: vec3f, scale: f32, skirt: f32, level: f32, pad0: f32, pad1: f32 };
+struct NodeU { originRel: vec3f, scale: f32, skirt: f32, level: f32, floor: f32, pad1: f32 };
 @group(1) @binding(0) var<uniform> N: NodeU;
 @group(1) @binding(1) var heightTex: texture_2d<f32>;
 @group(1) @binding(2) var normalTex: texture_2d<f32>;
@@ -45,6 +47,8 @@ struct VSOut {
   let gy = dpdy(in.rel);
   let hw = fwidth(in.height);
   if (textureSampleLevel(holeTex, nearestSampler, in.uv, 0.0).r > 0.5) { discard; }
+  // (an island in the sky: nothing of its ground under its floor - see scene.js)
+  if (in.height < N.floor) { discard; }
   if (G.cutOpts.y > 0.5 && cutAway(in.rel, false)) { discard; }
   // (a hill between the camera and you: a hole through it, along the line of sight)
   if (cutSight(in.rel, G.cutLand.x)) { discard; }
@@ -347,7 +351,7 @@ export class TerrainRenderer {
 
   /**
    * Sky + terrain surface.
-   * @param draws [{ res, originRel:[x,y,z], scale, skirt, mesh, level }] sorted near-to-far
+   * @param draws [{ res, originRel:[x,y,z], scale, skirt, mesh, level, floor (null: none) }] sorted near-to-far
    * @param fillerRel camera-relative origin for the open-sea quads
    */
   drawTerrain(pass, draws, fillerRel) {
@@ -358,11 +362,11 @@ export class TerrainRenderer {
     for (let i = 0; i < n; i++) {
       const d = draws[i], o = (i * NODE_UNIFORM_STRIDE) / 4;
       u[o] = d.originRel[0]; u[o + 1] = d.originRel[1]; u[o + 2] = d.originRel[2];
-      u[o + 3] = d.scale; u[o + 4] = d.skirt; u[o + 5] = d.level;
+      u[o + 3] = d.scale; u[o + 4] = d.skirt; u[o + 5] = d.level; u[o + 6] = d.floor ?? NO_FLOOR;
     }
     // Last slot: identity-ish transform for the sea filler (positions are already camera-relative).
     const fo = (n * NODE_UNIFORM_STRIDE) / 4;
-    u[fo] = fillerRel[0]; u[fo + 1] = fillerRel[1]; u[fo + 2] = fillerRel[2]; u[fo + 3] = 1; u[fo + 4] = 0; u[fo + 5] = 0;
+    u[fo] = fillerRel[0]; u[fo + 1] = fillerRel[1]; u[fo + 2] = fillerRel[2]; u[fo + 3] = 1; u[fo + 4] = 0; u[fo + 5] = 0; u[fo + 6] = NO_FLOOR;
     device.queue.writeBuffer(this.uniformBuffer, 0, u, 0, ((n + 1) * NODE_UNIFORM_STRIDE) / 4);
 
     pass.setBindGroup(0, this.gpu.globalsGroup);

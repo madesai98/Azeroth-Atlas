@@ -440,12 +440,26 @@ export class RoutePlanner {
     }
     // doorways between maps, and the tram between the two ends of its tunnel
     const tunnel = [];
+    // (only between maps this game has: the list is another addon's, and it has Northrend's
+    // Dalaran in it - whose two portals, to Stormwind and back, stand on the same spot of a map
+    // that is not here, and so made a free way from the Mage Tower to the middle of Stormwind)
+    const maps = new Set((this.app.manifest?.maps ?? []).map((m) => m.id));
     for (const p of W.portals ?? []) {
+      if (maps.size && !(maps.has(p.from.map) && maps.has(p.to.map))) continue;
       if (this.#hostile(p.from.map, p.from.pos) || this.#hostile(p.to.map, p.to.pos)) continue;
       const a = add({ kind: 'door', map: p.from.map, pos: p.from.pos, name: p.name }), b = add({ kind: 'door', map: p.to.map, pos: p.to.pos, name: p.name });
       link(a, b, { seconds: p.seconds + 3, mode: 'door', name: p.name });
       if (p.from.map === 369) tunnel.push(a);
       if (p.to.map === 369) tunnel.push(b);
+    }
+    // ...and the portals that put you somewhere else on the same map (teleports.json, the ones
+    // with a name for a route's steps: the Mage Tower's, into the Wizard's Sanctum under it and
+    // back out - the only way out of the Sanctum - and the Skyborne Portal from Dalaran to it)
+    for (const t of W.teleports ?? []) {
+      if (!t.door || (maps.size && !maps.has(t.map)) || this.#hostile(t.map, t.from) || this.#hostile(t.map, t.to)) continue;
+      // (walked to on the floor you stand on to go through it: a trigger's own height is its middle)
+      const a = add({ kind: 'door', map: t.map, pos: t.stand ?? t.from, name: t.door }), b = add({ kind: 'door', map: t.map, pos: t.to, name: t.door });
+      link(a, b, { seconds: (t.seconds ?? 2) + 3, mode: 'door', name: t.door });
     }
     const tram = transit?.lines.find((l) => l.kind === 'tram') ?? null;
     for (const a of tunnel) for (const b of tunnel) {

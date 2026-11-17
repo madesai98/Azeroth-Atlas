@@ -45,15 +45,17 @@ const app = {
   dirty: true, opts: { slope: false, contours: false, slopeDeg: 50, figure: true, figureDist: 150 },
   vp: new Float32Array(16), globals: new Float32Array(GLOBALS_SIZE / 4),
   pin: null, lastHover: 0, hoverDirty: true, t0: performance.now(),
-  // The maps on the picture. Mostly one; two where the game's own world map shows two side by
-  // side (the Eastern Kingdoms and Kalimdor: joined.js). `here` is the one in hand - `scene`,
-  // `objects`, `danger` and `zones` are its - and `beside` the other, drawn `besideOff` yards over.
-  open: new Map(), here: null, beside: null, besideOff: [0, 0], layout: new Map(), opening: 0,
+  // The maps on the picture. Mostly one; three on the picture of Azeroth: the Eastern Kingdoms and
+  // Kalimdor, which the game's own world map shows side by side, and Zephras Isle out over the
+  // sea between them (joined.js). `here` is the one in hand - `scene`, `objects`, `danger` and
+  // `zones` are its - and `beside` the others, each drawn where it lies on the picture: `offs`
+  // holds how far each map's origin is from the one in hand's.
+  open: new Map(), here: null, beside: [], offs: new Map(), layout: new Map(), opening: 0,
 };
 window.__app = app; // handy for debugging from the console
 const ZERO = [0, 0];
 /** Where a map's origin lies on the picture, in the coordinates of the map in hand: [x, y], or null for a map not shown. */
-app.offsetOf = (id) => (id === app.here?.id ? ZERO : id === app.beside?.id ? app.besideOff : null);
+app.offsetOf = (id) => app.offs.get(id) ?? null;
 /** The view is being taken somewhere else on purpose (another map, a place searched for): the camera stops following your character. */
 app.letGo = () => app.player?.setFollow(false);
 
@@ -196,12 +198,12 @@ function fillMapSelect() {
   }
 }
 
-/** The maps shown on one picture with a map: itself, and the one the game's world map has beside it (joined.js). */
+/** The maps shown on one picture with a map: itself, and every other map that lies on that picture (joined.js). */
 function shownWith(id) {
   const g = app.layout.get(id);
   if (!g) return [id];
-  const other = [...app.layout].find(([k, v]) => k !== id && v.group === g.group && app.manifest.maps.some((m) => m.id === k));
-  return other ? [id, other[0]] : [id];
+  const others = [...app.layout].filter(([k, v]) => k !== id && v.group === g.group && app.manifest.maps.some((m) => m.id === k));
+  return [id, ...others.map(([k]) => k)];
 }
 
 /** One map, opened: its terrain, what stands on it, its spawn zones and its named zones. */
@@ -221,8 +223,11 @@ async function openScene(entry) {
   const zones = app.world.zones.filter((z) => z.map === entry.id && z.type === 3);
   const s = {
     id: entry.id, entry, map, scene, objects, danger, zones, zoneByArea: new Map(zones.filter((z) => z.area).map((z) => [z.area, z])),
-    at: app.layout.get(entry.id)?.at ?? [0, 0], // where it lies on a picture it shares with another map
+    at: app.layout.get(entry.id)?.at ?? [0, 0], // where it lies on a picture it shares with other maps
   };
+  // (an island in the sky, over the sea of its picture: its ground is drawn down to its floor - joined.js)
+  const floor = app.layout.get(entry.id)?.floor;
+  if (floor !== undefined && !map.ocean) scene.float(floor);
   danger.load(map).catch((err) => console.warn('creature data unavailable', err)).then(() => { if (app.here === s) showDangerSource(); app.dirty = true; });
   objects.load().then(() => { app.dirty = true; }).catch((err) => console.warn('building list unavailable', err));
   s.ready = scene.loadRoots();
@@ -231,25 +236,25 @@ async function openScene(entry) {
 
 /**
  * Take one of the open maps in hand: from here on the page works in its coordinates (your
- * character, the route, the NPCs, the read-out), and the other open map, if there is one, is
+ * character, the route, the NPCs, the read-out), and the other open maps, if there are any, are
  * drawn beside it. The camera goes on looking at the same spot of the picture.
  */
 function takeInHand(s) {
   const was = app.here;
-  const b = [...app.open.values()].find((o) => o !== s) ?? null;
   app.here = s; app.scene = s.scene; app.objects = s.objects; app.danger = s.danger;
   app.zones = s.zones; app.zoneByArea = s.zoneByArea;
-  app.beside = b;
-  app.besideOff = b ? [b.at[0] - s.at[0], b.at[1] - s.at[1]] : [0, 0];
-  shareSea(s.scene, b?.scene ?? null, app.besideOff);
+  app.beside = [...app.open.values()].filter((o) => o !== s);
+  app.offs = new Map([[s.id, ZERO], ...app.beside.map((o) => [o.id, [o.at[0] - s.at[0], o.at[1] - s.at[1]]])]);
+  const others = app.beside.map((o) => ({ scene: o.scene, off: app.offs.get(o.id) }));
+  shareSea([{ scene: s.scene, off: ZERO }, ...others]);
   for (const o of app.open.values()) o.objects.moving.length = 0;
-  app.ground = new Ground(s.scene, b?.scene ?? null, app.besideOff);
+  app.ground = new Ground(s.scene, others);
   app.camera.scene = app.ground;
   if (was && was !== s && app.open.get(was.id) === was) app.camera.shift(was.at[0] - s.at[0], was.at[1] - s.at[1]);
   app.npcUi?.close();
   app.npcs.load(s.map).catch((err) => console.warn('NPC data unavailable', err)).then(() => { app.npcUi?.note(); app.dirty = true; });
   $('map').value = String(s.id);
-  app.labels.setMaps([{ id: s.id, off: ZERO }, ...(b ? [{ id: b.id, off: app.besideOff }] : [])], app.world, app.ground);
+  app.labels.setMaps([...app.offs].map(([id, off]) => ({ id, off })), app.world, app.ground);
   app.route?.setMap(s.map);
   app.trips?.setMap(s.map);
   // (a marker stays where it was dropped as long as its map is on the picture)
@@ -282,7 +287,7 @@ async function openMap(id, view) {
   for (const s of fresh) app.open.set(s.id, s);
   for (const [k, s] of app.open) if (!ids.includes(k)) { s.scene.dispose(); app.open.delete(k); }
   const here = app.open.get(entry.id);
-  const onPicture = !!app.here && app.here !== here && app.open.get(app.here.id) === app.here; // (it was the map beside the one in hand)
+  const onPicture = !!app.here && app.here !== here && app.open.get(app.here.id) === app.here; // (it was on the picture already, beside the one in hand)
   if (app.here !== here || fresh.length) takeInHand(here);
   if (view) {
     app.camera.pos = [view.x, view.y, view.z];
@@ -290,13 +295,15 @@ async function openMap(id, view) {
     app.camera.pitch = view.p ?? -55;
     app.camera.anim = null;
   } else {
-    // (two maps new on the picture: both of them, the sea between included)
+    // (a picture new to the page: all of its maps, the sea between included)
     const b = { ...here.scene.bounds };
     let span = Math.max(b.x1 - b.x0, b.y1 - b.y0);
-    if (app.beside && !onPicture) {
-      const o = app.besideOff, q = app.beside.scene.bounds;
-      b.x0 = Math.min(b.x0, q.x0 + o[0]); b.x1 = Math.max(b.x1, q.x1 + o[0]); b.y0 = Math.min(b.y0, q.y0 + o[1]); b.y1 = Math.max(b.y1, q.y1 + o[1]);
-      // (side by side they are far wider than tall: as near as the window's shape lets both fit)
+    if (app.beside.length && !onPicture) {
+      for (const o of app.beside) {
+        const off = app.offs.get(o.id), q = o.scene.bounds;
+        b.x0 = Math.min(b.x0, q.x0 + off[0]); b.x1 = Math.max(b.x1, q.x1 + off[0]); b.y0 = Math.min(b.y0, q.y0 + off[1]); b.y1 = Math.max(b.y1, q.y1 + off[1]);
+      }
+      // (side by side they are far wider than tall: as near as the window's shape lets all of them fit)
       span = Math.max(b.x1 - b.x0, (b.y1 - b.y0) / Math.max(0.3, app.camera.aspect));
     }
     app.camera.lookAt([(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, here.scene.planeZ ?? 0], span * 1.05 + 400, 0, -62, onPicture);
@@ -376,28 +383,31 @@ function render() {
   viewProj(app.vp, b, camera.fov, gpu.width / gpu.height, near);
   const planes = frustumPlanes(app.vp, near);
   scene.update(camera.pos, planes);
-  // A second map on the picture (the other continent): the same, with the camera where it is
-  // in that map's coordinates. What it gives to draw is counted from the camera, like the first
-  // map's, so the two lists are simply put together.
-  const beside = app.beside, off = app.besideOff;
-  const cam2 = beside ? [camera.pos[0] - off[0], camera.pos[1] - off[1], camera.pos[2]] : null;
+  // The other maps on the picture (the other continent, the island between them): the same, each
+  // with the camera where it is in that map's coordinates. What each gives to draw is counted
+  // from the camera, like the first map's, so the lists are simply put together.
+  const beside = app.beside;
+  const cams = beside.map((o) => { const off = app.offs.get(o.id); return [camera.pos[0] - off[0], camera.pos[1] - off[1], camera.pos[2]]; });
   let draws = scene.draws, sea = scene.filler.subarray(0, scene.fillerCount * 24);
-  if (beside) {
-    beside.scene.update(cam2, planes);
-    draws = scene.draws.concat(beside.scene.draws).sort((a, b) => a.dist - b.dist);
-    const more = beside.scene.filler.subarray(0, beside.scene.fillerCount * 24);
-    if (!app.seaBoth) app.seaBoth = new Float32Array(scene.filler.length + beside.scene.filler.length);
-    app.seaBoth.set(sea);
-    app.seaBoth.set(more, sea.length);
-    sea = app.seaBoth.subarray(0, sea.length + more.length);
+  if (beside.length) {
+    beside.forEach((o, i) => o.scene.update(cams[i], planes));
+    draws = scene.draws.concat(...beside.map((o) => o.scene.draws)).sort((a, b) => a.dist - b.dist);
+    const room = beside.reduce((n, o) => n + o.scene.filler.length, scene.filler.length);
+    if (app.seaAll?.length !== room) app.seaAll = new Float32Array(room);
+    app.seaAll.set(sea);
+    let n = sea.length;
+    for (const o of beside) { const more = o.scene.filler.subarray(0, o.scene.fillerCount * 24); app.seaAll.set(more, n); n += more.length; }
+    sea = app.seaAll.subarray(0, n);
   }
   // The boats, zeppelins and trams that have been timed, each where it is this moment
   // (transit.js). Close up: the game's own model of the craft, placed like any building. From
   // further off, where that would be a speck: a plain shape, enlarged to stay easy to find.
   if (app.transit) {
-    // (the one you are aboard is kept just where the game has it: you are on it)
-    const ride = app.player?.height.ride;
+    // (the one you are aboard is kept just where the game has it: you are on it - and is drawn
+    // under your figure, turned the way you are being carried)
+    const ride = app.player?.height.ride, P = app.player, s = P?.live && P.onThisMap ? P.shown : null, c = P?.height.course;
     app.transit.riding = ride && !ride.flight && ride.path ? app.transit.byId.get(ride.path.id)?.n ?? null : null;
+    app.transit.you = app.transit.riding !== null && s ? { x: s[0], y: s[1], z: s[2], heading: c ? (((Math.atan2(-c[1], c[0]) * 180) / Math.PI) % 360 + 360) % 360 : null } : null;
   }
   const afloat = app.transit && app.opts.transit !== false ? app.transit.onMap(app.offsetOf, mmss) : null;
   const shapes = [];
@@ -414,7 +424,7 @@ function render() {
   app.afloat = afloat?.crafts.length ?? 0;
   app.models.beginFrame();
   app.objects.collect(camera.pos, planes);
-  if (beside) beside.objects.collect(cam2, planes);
+  beside.forEach((o, i) => o.objects.collect(cams[i], planes));
   app.models.endFrame();
 
   const clearance = Math.max(0, camera.clearance());
@@ -446,8 +456,8 @@ function render() {
   });
   app.terrain.drawTerrain(pass, draws, [0, 0, -camera.pos[2]]);
   app.models.drawOpaque(pass);
-  // (the whole journey: its lines on the map beside this one too, each where that map lies on the picture)
-  const layout = `${app.here?.id}|${app.beside?.id}`;
+  // (the whole journey: its lines on the other maps of the picture too, each where that map lies on it)
+  const layout = `${app.here?.id}|${beside.map((o) => o.id).join(',')}`;
   app.trips.draw(pass, camera, app.offsetOf, layout); // (the routes to the other places you could be heading for: trips.js)
   app.questUi.draw(pass, camera, app.offsetOf, layout); // (a quest's own route, plotted from the quest explorer: quests.js)
   app.routeRenderer.draw(pass, app.route, camera, app.offsetOf, layout);
@@ -504,12 +514,12 @@ function render() {
     for (const c of afloat.crafts) app.labels.notes.push({ kind: 'npc', name: c.text, x: c.x, y: c.y, z: c.z, lift: c.line.kind === 'zeppelin' ? 30 : c.line.kind === 'tram' ? 8 : 26, minDist: 0, maxDist: far * 2, prio: 70, color: '#ffe9a3' });
     for (const d of afloat.docks) app.labels.notes.push({ kind: 'npc', name: d.text, x: d.x, y: d.y, z: d.z, lift: 12, minDist: 0, maxDist: far, prio: 60, color: '#bfe6ff' });
   }
-  // the marker you dropped: where it is on the picture (it may be on the map beside the one in hand)
+  // the marker you dropped: where it is on the picture (it may be on another map than the one in hand)
   const pinOff = app.pin ? app.offsetOf(app.pin.map) : null;
   app.labels.pins = !pinOff ? [] : pinOff === ZERO ? [app.pin] : [{ ...app.pin, x: app.pin.x + pinOff[0], y: app.pin.y + pinOff[1] }];
   app.labels.draw(camera.pos, app.vp, clearance);
   let s = scene.stats;
-  if (beside) { const q = beside.scene.stats; s = { nodes: s.nodes + q.nodes, tris: s.tris + q.tris, loaded: Math.min(s.loaded, q.loaded), pending: (s.pending ?? 0) + (q.pending ?? 0) }; }
+  for (const o of beside) { const q = o.scene.stats; s = { nodes: s.nodes + q.nodes, tris: s.tris + q.tris, loaded: Math.min(s.loaded, q.loaded), pending: (s.pending ?? 0) + (q.pending ?? 0) }; }
   const ms = app.models.stats, pending = (s.pending ?? 0) + app.models.pending;
   const text = `${((s.tris + ms.tris) / 1000).toFixed(0)}k tris · ${ms.instances} objects · ${s.nodes + ms.draws} draws${pending ? ` · loading ${pending}` : ''}${gpu.scale < 1 ? ` · ${Math.round(gpu.scale * 100)}% resolution (graphics card busy)` : ''}`;
   if (text !== app.perfText) { app.perfText = text; $('perf').textContent = text; }
@@ -566,16 +576,17 @@ function step(now, seen) {
   // (boats on this map are moving: drawn again some fifteen times a second; their countdowns alone, once a second)
   if (app.transit?.known && now - (app.transitAt ?? 0) > (app.afloat ? 66 : 1000)) { app.transitAt = now; app.dirty = true; }
   if (app.npcs?.meeting) app.npcs.update(app.player?.live ? app.player.me : null, app.player.height);
-  // Two maps on the picture: the one you are looking at is the one in hand (its NPCs, its
-  // places and zones under the cursor, the map routes are worked out on). Not while your
+  // More than one map on the picture: the one you are looking at is the one in hand (its NPCs,
+  // its places and zones under the cursor, the map routes are worked out on). Not while your
   // character is on the one in hand, though: then that one stays, or your route would go.
-  // (Nor from high up, where both are in view and nothing that depends on it can be made out.)
-  if (app.beside && !app.camera.anim && app.camera.pos[2] < SWAP_BELOW && !app.player?.switching && !(app.player?.live && app.player.onThisMap)) {
-    const c = app.camera, f = c.basis().f, o = app.besideOff;
+  // (Nor from high up, where all are in view and nothing that depends on it can be made out.)
+  if (app.beside.length && !app.camera.anim && app.camera.pos[2] < SWAP_BELOW && !app.player?.switching && !(app.player?.live && app.player.onThisMap)) {
+    const c = app.camera, f = c.basis().f;
     // (where the middle of the view meets the sea; looking level or up, where the camera is)
     const t = f[2] < -0.05 && c.pos[2] > 0 ? Math.min(60000, -c.pos[2] / f[2]) : 0;
     const x = c.pos[0] + f[0] * t, y = c.pos[1] + f[1] * t;
-    if (!app.scene.hasTile(x, y) && app.beside.scene.hasTile(x - o[0], y - o[1])) takeInHand(app.beside);
+    const look = app.scene.hasTile(x, y) ? null : app.beside.find((o) => { const off = app.offs.get(o.id); return o.scene.hasTile(x - off[0], y - off[1]); });
+    if (look) takeInHand(look);
   }
   // Under the terrain (a city inside a mountain, a cave)? Then the level you are on is the camera's ground.
   {
@@ -622,10 +633,15 @@ function step(now, seen) {
     // A waypoint from the game is a spot on the map with no height, and a building has several
     // floors under one spot. If someone the map knows stands there, it is them you are heading
     // for, on the floor they are on (worked out once per waypoint, and again when the NPCs change).
-    if (target && target.z === undefined && target.source !== 'marker' && target.map === app.scene.map.id && app.npcs.data) {
+    // Only where that floor is known, though: one that is the map data's guess (the earth under
+    // Stormwind's streets, for a cat in the Trade District) is only a hint to which level is meant
+    // (levels.js), and the earth under a street is never one. A quick waypoint (Shift-click) is a
+    // spot of your own, on the level nearest yours: whoever happens to stand there is no matter.
+    if (target && target.z === undefined && target.source !== 'marker' && !target.quick && target.map === app.scene.map.id && app.npcs.data) {
       const key = `${target.map},${target.x.toFixed(1)},${target.y.toFixed(1)},${app.npcs.rev}`;
       if (app.goal?.key !== key) app.goal = { key, who: app.npcs.at(target.x, target.y) };
-      if (app.goal.who) target = { ...target, z: app.goal.who.z, name: app.goal.who.name, guess: app.goal.who.src <= 1 };
+      const who = app.goal.who;
+      if (who) target = { ...target, name: who.name, ...(who.src >= 2 ? { z: who.z } : { hint: who.z }) };
     }
     // Still no height: which of the levels at that spot is meant (levels.js)? The marker stands on the one chosen.
     const level = app.levels.resolve(target, me);
@@ -693,13 +709,13 @@ function step(now, seen) {
 // ---- read-out ----------------------------------------------------------------------------
 /**
  * Which of the maps on the picture a spot is on, and where on that map: { on (the open map),
- * x, y }. The spot is in the coordinates of the map in hand; it is on the map beside it where
- * that one has land (or sea of its own) and the one in hand has not.
+ * x, y }. The spot ([x, y, z]) is in the coordinates of the map in hand; it is on another map of
+ * the picture where that one has land (or sea of its own) and the one in hand has not - on an
+ * island in the sky, only up on it: the sea under it is not the island's (joined.js: whose).
  */
 function spotOn(p) {
-  const b = app.beside, o = app.besideOff;
-  if (b && !app.scene.hasTile(p[0], p[1]) && b.scene.hasTile(p[0] - o[0], p[1] - o[1])) return { on: b, x: p[0] - o[0], y: p[1] - o[1] };
-  return { on: app.here, x: p[0], y: p[1] };
+  const k = app.ground?.whose(p[0], p[1], p[2] ?? null) ?? 0, on = k ? app.beside[k - 1] : app.here, o = app.offs.get(on.id) ?? ZERO;
+  return { on, x: p[0] - o[0], y: p[1] - o[1] };
 }
 
 function zoneAt(x, y, on = app.here) {
@@ -763,7 +779,7 @@ function updateReadout() {
   $('readout').classList.toggle('on', !!p);
   if (!p) { $('place').textContent = ' '; $('coords').textContent = ' '; $('worldpos').textContent = ' '; zoneInfo.textContent = ''; return; }
   // Which creatures make this spot dangerous (for the groups you have selected).
-  // (the spot may be on the map beside the one in hand: it is read out in that map's own coordinates)
+  // (the spot may be on another map of the picture than the one in hand: it is read out in that map's own coordinates)
   const spot = spotOn(p);
   const zone = spot.on.danger.at(spot.x, spot.y);
   if (zone) {
@@ -778,7 +794,7 @@ function updateReadout() {
   $('coords').textContent = d.coords || ' ';
   const whole = (v) => Math.round(v) || 0; // (never "-0")
   let line = `X ${whole(spot.x)}  Y ${whole(spot.y)}  elevation ${whole(p[2])}`;
-  if (app.beside) line = `${spot.on.map.name}:  ${line}`;
+  if (app.beside.length) line = `${spot.on.map.name}:  ${line}`;
   if (app.pin?.map === spot.on.id) line +=`  ·  ${Math.hypot(spot.x - app.pin.x, spot.y - app.pin.y, p[2] - app.pin.z).toFixed(0)} yd from marker`;
   $('worldpos').textContent = line;
 }
@@ -871,7 +887,7 @@ function search(q) {
   if (m) {
     const a = +m[1], b = +m[2];
     const c = app.camera, center = c.pickAt(c.canvas.clientWidth / 2, c.canvas.clientHeight / 2);
-    // (the numbers are taken as a place on the map you are looking at: with two on the picture, that may be the one beside the one in hand)
+    // (the numbers are taken as a place on the map you are looking at: with several on the picture, that may be another than the one in hand)
     const spot = center ? spotOn(center) : { on: app.here };
     const zone = center ? describe([spot.x, spot.y], spot.on).zone : null;
     const out = [];
@@ -1278,7 +1294,7 @@ function showRoute() {
     const left = r.remaining(), swims = r.route.kinds.some((k, i) => i >= r.route.at && k & 1);
     // (with more than one level at the spot: which one this goes to)
     const levels = app.levels?.choices, level = levels ? `, ${app.levels.describe()[levels.choice].name.toLowerCase()}` : '';
-    const where = (t.name ? `To ${t.name}${t.guess ? ' (which floor is a guess)' : ''}` : t.source === 'marker' ? 'To the marker' : t.source === 'guide' ? "To your guide's step" : t.source === 'journey' ? 'To your Shortest Path destination' : t.source === 'pin' ? 'To your map pin' : t.source === 'quick' ? 'To your quick waypoint' : 'To your waypoint') + level;
+    const where = (t.name ? `To ${t.name}` : t.source === 'marker' ? 'To the marker' : t.source === 'guide' ? "To your guide's step" : t.source === 'journey' ? 'To your Shortest Path destination' : t.source === 'pin' ? 'To your map pin' : t.source === 'quick' ? 'To your quick waypoint' : 'To your waypoint') + level;
     const legs = r.route.legs ?? [];
     if (legs.length > 1) {
       // a quicker way than walking it all: say each part
@@ -1753,7 +1769,7 @@ async function main() {
     // with Shift, a quick marker: no question about which level
     const spot = (m && pickSurface(app, m[0], m[1])) ?? hit;
     if (!spot) return;
-    // (on the map beside the one in hand: the marker is that map's, and a route to it is a journey there)
+    // (on another map of the picture than the one in hand: the marker is that map's, and a route to it is a journey there)
     const s = spotOn(spot);
     setPin([s.x, s.y, spot[2]], null, false, e.shiftKey, s.on);
   };

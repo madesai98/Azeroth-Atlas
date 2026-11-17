@@ -19,8 +19,10 @@ const out = [
   ...data.credit.map((c) => '-- ' + c),
   '--',
   '-- A line: n (its number between the addon and the map), id (the game\'s own number for its',
-  '-- path; none for the tram), period (seconds for one craft\'s whole round), stops (in the order',
-  '-- the craft calls at them: name, map, x and y as the game counts them, wait in seconds), legs',
+  '-- path; none for the tram), period (seconds for one craft\'s whole round), periodUnsure (seconds',
+  '-- that round may be off, given for a line whose round is less well measured than the others;',
+  '-- for the rest the addon has a figure of its own), stops (in the order the craft calls at them:',
+  '-- name, map, x and y as the game counts them, wait in seconds), legs',
   '-- (leg i runs from stop i to the stop after it: trip in seconds, and track, where the craft is',
   '-- so many seconds after leaving: { seconds, map, x, y }; track2 is the tram\'s other track),',
   '-- ft and ftStops (ForeverTransport\'s and Nauticus\' number for the line, and which of our',
@@ -31,7 +33,7 @@ const out = [
   'shared.TransitData = {',
 ];
 for (const l of data.lines) {
-  out.push(`  { n = ${l.n}, ${l.id ? `id = ${l.id}, ` : ''}key = ${str(l.key)}, kind = ${str(l.kind)}, period = ${num(l.period)},${l.rough ? ' rough = true,' : ''}${l.cars ? ` cars = ${l.cars},` : ''}`);
+  out.push(`  { n = ${l.n}, ${l.id ? `id = ${l.id}, ` : ''}key = ${str(l.key)}, kind = ${str(l.kind)}, period = ${num(l.period)},${l.periodUnsure ? ` periodUnsure = ${num(l.periodUnsure)},` : ''}${l.rough ? ' rough = true,' : ''}${l.cars ? ` cars = ${l.cars},` : ''}`);
   out.push(`    ft = ${l.ft.id},${l.ft.id2 ? ` ft2 = ${l.ft.id2},` : ''} ftStops = { ${l.ft.stops.map((s) => s + 1).join(', ')} },`);
   if (l.lanes) out.push(`    lanes = { ${l.lanes.map((a) => `{ name = ${str(a.name)}, x = ${num(a.x)} }`).join(', ')} },`);
   out.push('    stops = {');
