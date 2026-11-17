@@ -36,6 +36,7 @@ export function parseM2(buf) {
     radius: buf.readFloatLE(b + 0xb8),
     positions: new Float32Array(vertices.count * 3), normals: new Float32Array(vertices.count * 3), uvs: new Float32Array(vertices.count * 2),
     textures: [], materials: [], texCombos: [], skinFiles: [], collision: null,
+    colorUnseen: null, weightUnseen: null, weightLookup: null, // (see "what of it is never seen" below)
   };
   for (let i = 0; i < vertices.count; i++) {
     const p = vertices.offset + i * 48;
@@ -52,6 +53,38 @@ export function parseM2(buf) {
   }
   for (let i = 0; i < materials.count; i++) m.materials.push({ flags: buf.readUInt16LE(materials.offset + i * 4), blend: buf.readUInt16LE(materials.offset + i * 4 + 2) });
   for (let i = 0; i < texCombos.count; i++) m.texCombos.push(buf.readUInt16LE(texCombos.offset + i * 2));
+
+  // ---- what of it is never seen ---------------------------------------------------------------
+  // Each part is drawn through a transparency and a colour that the object's animations can
+  // change. That is how one model holds a door whole and the same door broken, an invisible
+  // wall, the carrier of a beam of light: the part that is not to be seen is drawn fully
+  // transparent, which the game takes as "do not draw". An object put down in the world plays
+  // one animation, standing; a part that is fully transparent at every key of that one (or of
+  // a clock of its own that the track runs on) is never seen there.
+  const seqs = arr(0x1c), colors = arr(0x48), weights = arr(0x58), weightLookup = arr(0x90);
+  let stand = -1;
+  if (ok(seqs, 64)) {
+    for (let i = 0; i < seqs.count && stand < 0; i++) if (buf.readUInt16LE(seqs.offset + i * 64) === 0) stand = i;
+    // (its keys are in this file: not in a file of their own, not borrowed from another animation)
+    if (stand >= 0 && (buf.readUInt32LE(seqs.offset + stand * 64 + 12) & 0x60) !== 0x20) stand = -1;
+  }
+  const zeroThroughout = (at) => {
+    if (at < b || at + 20 > end) return 0;
+    const which = buf.readInt16LE(at + 2) >= 0 ? 0 : stand; // (on a clock of its own: one row of keys)
+    const count = buf.readUInt32LE(at + 12), rows = b + buf.readUInt32LE(at + 16);
+    if (which < 0 || which >= count || rows < b || rows + count * 8 > end) return 0;
+    const n = buf.readUInt32LE(rows + which * 8), keys = b + buf.readUInt32LE(rows + which * 8 + 4);
+    if (!n || keys < b || keys + n * 2 > end) return 0; // no keys: the game takes "all there"
+    for (let k = 0; k < n; k++) if (buf.readInt16LE(keys + k * 2) !== 0) return 0;
+    return 1;
+  };
+  m.colorUnseen = new Uint8Array(ok(colors, 40) ? colors.count : 0);
+  for (let i = 0; i < m.colorUnseen.length; i++) m.colorUnseen[i] = zeroThroughout(colors.offset + i * 40 + 20); // (its alpha: after the colour itself)
+  m.weightUnseen = new Uint8Array(ok(weights, 20) ? weights.count : 0);
+  for (let i = 0; i < m.weightUnseen.length; i++) m.weightUnseen[i] = zeroThroughout(weights.offset + i * 20);
+  m.weightLookup = new Uint16Array(ok(weightLookup, 2) ? weightLookup.count : 0);
+  for (let i = 0; i < m.weightLookup.length; i++) m.weightLookup[i] = buf.readUInt16LE(weightLookup.offset + i * 2);
+
   const sfid = chunks.get('SFID');
   const nSkins = u32(0x44);
   if (sfid) for (let i = 0; i < nSkins && i * 4 < sfid.size; i++) m.skinFiles.push(buf.readUInt32LE(sfid.pos + i * 4));
@@ -85,7 +118,15 @@ export function parseSkin(buf) {
     out.push({
       flags: buf[p], section: buf.readUInt16LE(p + 4), material: buf.readUInt16LE(p + 10), layer: buf.readUInt16LE(p + 12),
       textureCount: buf.readUInt16LE(p + 14), textureCombo: buf.readUInt16LE(p + 16),
+      color: buf.readInt16LE(p + 8), weightCombo: buf.readUInt16LE(p + 20), // (which colour and transparency it is drawn through; -1: no colour)
     });
   }
   return { indices, sections, batches: out };
+}
+
+/** A draw batch of a skin that is never seen where the object stands (see parseM2: "what of it is never seen"). */
+export function unseen(m, batch) {
+  if (batch.color >= 0 && m.colorUnseen?.[batch.color]) return true;
+  const w = m.weightLookup?.[batch.weightCombo];
+  return w !== undefined && !!m.weightUnseen?.[w];
 }

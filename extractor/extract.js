@@ -20,7 +20,7 @@ import { TILE_VERSION } from './jobs/tile.js';
 import { PAGE_VERSION, TOP_LEVEL } from './jobs/page.js';
 import { AREAS_VERSION } from './jobs/areas.js';
 import { PLACEMENTS_VERSION } from './jobs/placements.js';
-import { MODEL_VERSION } from './jobs/model.js';
+import { MODEL_VERSION, COLLISION_VERSION } from './jobs/model.js';
 import { TREES_VERSION, isTree } from './trees.js';
 import { CREATURES_VERSION, placeCreatures, placeInns, placeDungeons, writeCreatures } from './jobs/creatures.js';
 import { readQuestieDungeons } from './questie-extras.js';
@@ -285,8 +285,12 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
 
     // ---- navigation: where a character can stand, per tile (for the route planner) ----------
     // Built from the tile and the collision meshes of everything placed on it, so it is rebuilt
-    // when the tile or any of those models changes.
-    const modelSig = { wmo: new Map(wmos.map((e) => [e.fdid, sig(e.sig, e.meta.deps)])), m2: new Map(m2s.map((e) => [e.fdid, sig(e.sig, e.meta.deps)])) };
+    // when the tile or any of those models changes - changes in what the grid is made from, its
+    // collision: a model converted anew for the way it is drawn stands on the grid as it did
+    // (model.js: COLLISION_VERSION). A building that leaves groups out has no ground there, and
+    // counts as another building when the groups it leaves out are others.
+    const collisionSig = (type, e) => (e.meta.left?.length ? sig(sig(COLLISION_VERSION, type, kindSig), e.meta.deps, e.meta.left) : sig(sig(COLLISION_VERSION, type, kindSig), e.meta.deps));
+    const modelSig = { wmo: new Map(wmos.map((e) => [e.fdid, collisionSig('wmo', e)])), m2: new Map(m2s.map((e) => [e.fdid, collisionSig('m2', e)])) };
     const navJobs = [];
     for (const map of maps) {
       map.nav = [];

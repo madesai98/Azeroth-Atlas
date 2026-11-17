@@ -329,6 +329,51 @@ Accuracy checks built into the pipeline:
 Distant terrain uses a quadtree (1, 2×2, 4×4 and 8×8 tile pages) built by exact subsampling, so
 it stays sharp at any altitude while only nearby tiles are loaded at full detail.
 
+### What of a building or an object is not drawn
+
+The game never draws a building whole: it draws the parts ("groups") the camera can see from
+where it is, through the building's doorways. The map draws every group at once - that is how
+you see a town, and the rooms in it, from above. So what the game's files hold and never show
+*where you are looking from* has to be left out by the map tool itself (`extractor/jobs/model.js`):
+
+- **Antiportals.** A slab the game hides what is behind a wall with: flagged as one, or simply
+  named "antiportal". The game never draws it and nobody can get to it. Drawn, it was a bright
+  blue slab through the cathedral of Gilneas. 14 of the game's 964 buildings have one; it is left
+  out whole - not drawn, and no ground to stand on.
+- **Stand-ins.** The streets and squares of Stormwind are, to the game, indoor rooms lit by the
+  sky. Standing in the canals the game does not draw them: it draws a copy of the cathedral made
+  to be seen over the walls, larger than the one on the square and not in the same place (and a
+  second copy for another direction). Drawn together with the square they were three cathedrals
+  in one another. The copies are flagged "nobody can get there" - but so are Darnassus's
+  treetops, the shell of Shadowfang Keep's tower and the mountain Stormwind Keep is built into,
+  which are all there is of those. What tells a stand-in apart is that it is out of reach
+  **and stands over a district that lies under the open sky**. Measured from straight above on
+  a 2-yard grid, the two cathedral copies stand 52% and 91% over Cathedral Square; every other
+  out-of-reach group of every building stands 0% over such a district. The line is drawn at a
+  quarter, for groups of 100 square yards and up. (Neither half of the rule is enough alone.
+  21 buildings have such districts, and 63 groups that can be reached stand a quarter or more
+  over one - upper rooms over an arcade, a bell tower, the roof over a porch: those are the
+  building.) An
+  object that only a left-out group owns goes with it (none does today: the copies share
+  their trees with groups that stay).
+- **Parts of an object that are never seen.** One model holds a door whole and the same door
+  broken, an invisible wall, the shape a beam of light or a column of smoke hangs on: the part
+  that is not to be seen is drawn fully transparent, which the game takes as "do not draw". An
+  object put down in the world plays one animation, standing; a part that is fully transparent
+  at every key of that one is left out (`extractor/formats/m2.js`). 63 of the 6,283 kinds of
+  object have such a part, 31 of them nothing else - the energy trails of the Caverns of Time
+  (up to 520 yards long, and solid), the invisible walls of a battleground, the frames of
+  dungeon portals, chimney smoke. Their collision stays as it is: an invisible wall still is one.
+
+What is left out of a building is written into its file (`left` in its header: which group,
+its name, why), and `partstest.mjs` holds the rules against the game's own files.
+
+The cathedral of Stormwind keeps one oddity that is the game's own: it is bigger inside than
+outside. The front on the square is the only outside it has; its nave, side rooms and crypts
+lie behind and beside that front and are seen there from above, as rooms with no building
+round them (the copies never covered them either). Stormwind Keep has no such trouble: its
+rooms are inside the mountain the game shows for it, towers and all.
+
 ## Spawn zones
 
 **Spawn zones** (in the sidebar) paints the ground where creatures are stationed, so you can
@@ -1958,7 +2003,7 @@ The extractor keeps what a pathfinder needs, in `dataDir`:
 | `maps/<id>/wmos.bin` | Every building placement (position, rotation, scale, world bounds) |
 | `maps/<id>/nav/<col>_<row>.bin` (`WFN1`) | Where a character can stand, per tile, on a 512 x 512 grid (1.04 yd). Sections (each deflated): 2 number of floors per cell, 3 floor heights (uint16, 1/8 yd, +2048, stored as differences), 4 flags per floor (1 swim, 2 lava, 4 terrain, 16 / 32 / 64 / 128 = leads on to the cell east / west / south / north) |
 | `maps/<id>/creatures.bin` (`WFC1`) | Stationed creatures: section 1 JSON (`creatures`: name, `min`/`max` level, `rank`, reaction to Alliance `a` and Horde `h` (0 friendly, 1 neutral, 2 hostile), `est` level estimated, `u` = no side recorded (new to this game: shown only when asked for), `t` = these spawn points are inside a town or city of the Alliance (1) or the Horde (2) and make no zone for that side), 2 spawn points (float32 world x, y), 3 creature index per spawn point, 4 patrol route points, 5 routes (`creature, firstPoint, count`) |
-| `models/wmo/<id>.bin` (`WFM1`) | Section 2 vertices (36-byte stride, position first), 5 collision triangle indices, 6 the game's per-triangle flags (`0x08` collision, `0x20` render, `0x04` detail, `0x02` no-camera-collide), 7 interior object placements, 8/9 interior liquid surfaces |
+| `models/wmo/<id>.bin` (`WFM1`) | Section 1 header (JSON: its groups with the game's flags, box and run of vertices; `left`: the groups left out and why - see "What of a building or an object is not drawn"), 2 vertices (36-byte stride, position first), 5 collision triangle indices, 6 the game's per-triangle flags (`0x08` collision, `0x20` render, `0x04` detail, `0x02` no-camera-collide), 7 interior object placements, 8/9 interior liquid surfaces |
 | `models/m2/<id>.bin` (`WFM1`) | Section 4 collision vertices, 5 collision triangles |
 | `maps/<id>/npcs.bin` (`WFP1`) | Every creature and quest object with somewhere to be: section 1 JSON (`entries`: `id`, name `n`, title `s`, levels `l`, rank `r`, reaction to Alliance `a` and Horde `h`, `u` = side not recorded, job flags `f`, `ct` what kind of thing a creature is (the reference database's number: 1 beast to 9 mechanical), quests started `qs` and ended `qe`; `k: 1` = an object), 2 spawn points (float32 x, y, z; z is NaN where not known), 3 entry index per spawn point, 4 how each height is known (0 not known, 1 likeliest of several, 2 only place to stand, 3 reference database, 4 reference and ground agree). `unplaced` in the JSON names who QuestieDB lists on the map that neither source could place |
 | `quests.json` | Every quest: name `n`, level `l`, from level `m`, side (1 Alliance, 2 Horde, 3 either), who starts (`s` NPCs, `so` objects, `si` items) and ends it (`e`, `eo`), its text `t`, what it asks for (`oc` creatures, `ok` kill credit, `oo` objects, `oi` items), what comes before and after; from the reference database, where it has the quest: `nd` how many of each (`[kind n / o / i, id, count]`), `ty` its type (elite, dungeon, raid...), `tl` its time limit. Plus `items`: those quests ask for, with what drops them (`d` creatures, `o` objects, `v` vendors) and how often (`dc`, `oc`: per source `[per cent, how many at a time]`); `mobs`: every creature a quest has you kill or that drops something wanted (`sp` spawn points, `lv` levels, `rk` rank, `hp` health, `ct` kind, `rs` seconds to come back); and the name and first position of every NPC and object mentioned. `source` and `reference` name the two databases |
