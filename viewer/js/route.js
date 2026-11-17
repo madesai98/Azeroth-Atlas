@@ -495,9 +495,21 @@ export class RoutePlanner {
     // it has to save CHANGE_WORTH on top, or the simpler journey stands. What is weighed is `cost`
     // (the time plus that); what the journey is said to take, and when you would get to a dock,
     // is `real`.
+    //
+    // A craft that leaves at its own moment (a timed boat, the tram) needs one thing more. Two
+    // ways that get you onto the same sailing put you down at the same moment: whatever one of
+    // them saves in getting to the dock is spent standing on it. So the simpler way would always
+    // be "as quick", however much further it has you walk - from Sentinel Hill, a thousand
+    // yards of swimming up the coast to Stormwind Harbor instead of the flight to Stormwind, for
+    // every boat but the one in five that only the flight is in time for; and the route went
+    // from the one to the other and back as the boats came and went. Of two ways onto one
+    // sailing the one that asks less of you stands: `legwork`, the seconds you are on your own
+    // feet, and CHANGE_WORTH for each change as before.
     const N = nodes.length;
     const solve = () => {
       const cost = new Float64Array(2 * N).fill(Infinity), real = new Float64Array(2 * N).fill(Infinity), via = new Array(2 * N).fill(null), done = new Uint8Array(2 * N);
+      // (legwork: see above; sailing: the timed craft that put you at a place, and the moment it left)
+      const legwork = new Float64Array(2 * N), sailing = new Array(2 * N).fill(null);
       cost[S.i] = real[S.i] = 0;
       let goal = -1;
       for (;;) {
@@ -512,8 +524,22 @@ export class RoutePlanner {
           const d = e.at ? e.at(real[u]) : e;
           const ride = RIDES.has(e.mode);
           const v = e.to + (carried || ride ? N : 0);
-          const c = cost[u] + d.seconds + (ride && carried ? CHANGE_WORTH : 0);
-          if (c < cost[v]) { cost[v] = c; real[v] = real[u] + d.seconds; via[v] = { edge: e.at ? { ...e, ...d } : e, from: u }; }
+          const change = ride && carried ? CHANGE_WORTH : 0;
+          const c = cost[u] + d.seconds + change;
+          const asks = legwork[u] + (e.mode === 'walk' ? d.seconds : 0) + change;
+          const leaves = e.at && d.known && Number.isFinite(d.leaves) ? d.leaves : null;
+          const before = sailing[v];
+          if (leaves !== null && before && before.edge === e && Math.abs(before.leaves - leaves) < 1) {
+            // the same sailing, reached another way: the way that asks less of you (and what the
+            // place costs, for weighing it against other ways altogether, is the less of the two)
+            if (asks < legwork[v]) { legwork[v] = asks; via[v] = { edge: { ...e, ...d }, from: u }; }
+            if (c < cost[v]) cost[v] = c;
+            return;
+          }
+          if (c < cost[v]) {
+            cost[v] = c; real[v] = real[u] + d.seconds; via[v] = { edge: e.at ? { ...e, ...d } : e, from: u };
+            legwork[v] = asks; sailing[v] = leaves === null ? null : { edge: e, leaves };
+          }
         };
         for (const e of edges[at]) if (!(noHearth && e.mode === 'hearth')) relax(e);
         const a = nodes[at];

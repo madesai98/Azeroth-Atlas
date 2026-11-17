@@ -941,6 +941,19 @@ one missed car costs, and seven steps for it. From nearer the tram's entrance, w
 a minute and a half, the tram it is. (A flight is one thing to take however many flight
 points it passes.)
 
+**Two ways onto the same boat.** A boat that leaves at its own moment makes ways of different
+length come in together: what one of them saves in getting to the dock is spent standing on
+it. So the simpler way would always be "as quick", however much further it has you walk or
+swim. From the fields by Sentinel Hill to Darkshore the boat leaves Stormwind Harbor every 247
+seconds; the flight to Stormwind and the walk to the harbor take 301 seconds, walking north and
+swimming a thousand yards up the coast 353. For four boats in five both are in time for the
+same one - and until version 0.4.1 the map then sent you swimming, and said fly for the fifth:
+standing still, the route went from the one to the other and back as the boats came and went.
+Of two ways onto one sailing the one that asks less of you stands: the seconds you are on your
+own feet, with a minute for each change as before. The journey takes what it was said to
+take either way; you stand on the dock the longer. (Only for a craft whose moment is known,
+and only between ways onto the same sailing: nothing else is weighed differently.)
+
 Walks that were worked out are remembered, and a long search that found no way is not repeated
 from the same spot for a minute, so keeping the route current costs very little while you move.
 
