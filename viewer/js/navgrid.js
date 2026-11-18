@@ -12,7 +12,7 @@
 // A tile that has not been fetched yet answers "not known" (null) and is fetched; nothing waits.
 
 const TILE = 1600 / 3, N = 512, CELL = TILE / N;
-const F_SWIM = 1, F_TERRAIN = 4;
+const F_SWIM = 1, F_TERRAIN = 4, F_STEEP = 8; // (steep: ground too steep to stand on, kept for the route search's ways down it - nothing to stand on)
 const OPEN_EAST = 16, OPEN_WEST = 32, OPEN_SOUTH = 64, OPEN_NORTH = 128;
 const KEEP = 12;     // tiles kept in hand (about 2 MB each)
 const REACH = 1.6;   // yards above or below a height within which a floor is "the floor at that height"
@@ -89,7 +89,7 @@ export class NavGrid {
     const c = this.#cell(x, y);
     if (!c) return null;
     const [t, cell] = c, out = [];
-    for (let k = t.offs[cell]; k < t.offs[cell + 1]; k++) out.push({ z: t.z[k], terrain: !!(t.flags[k] & F_TERRAIN), swim: !!(t.flags[k] & F_SWIM) });
+    for (let k = t.offs[cell]; k < t.offs[cell + 1]; k++) if (!(t.flags[k] & F_STEEP)) out.push({ z: t.z[k], terrain: !!(t.flags[k] & F_TERRAIN), swim: !!(t.flags[k] & F_SWIM) });
     return out.sort((a, b) => a.z - b.z);
   }
 
@@ -121,7 +121,7 @@ export class NavGrid {
     if (Math.abs(east) > 1 || Math.abs(south) > 1) return null; // (further than a step: nothing said)
     if (!east && !south) return true;
     let floor = -1, best = REACH;
-    for (let k = ta.offs[ca]; k < ta.offs[ca + 1]; k++) { const d = Math.abs(ta.z[k] - z); if (d <= best) { best = d; floor = k; } }
+    for (let k = ta.offs[ca]; k < ta.offs[ca + 1]; k++) { const d = Math.abs(ta.z[k] - z); if (d <= best && !(ta.flags[k] & F_STEEP)) { best = d; floor = k; } }
     if (floor < 0) return null;
     const f = ta.flags[floor];
     const sideways = east > 0 ? OPEN_EAST : east < 0 ? OPEN_WEST : 0, along = south > 0 ? OPEN_SOUTH : south < 0 ? OPEN_NORTH : 0;

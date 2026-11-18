@@ -19,6 +19,7 @@ import { Transit } from './transit.js';
 import { TransitRenderer, CRAFT_LENGTH, CRAFT_MIN_PX } from './transitview.js';
 import { FigureRenderer } from './figure.js';
 import { RoutePlanner, RouteRenderer } from './route.js';
+import { fallsSaid } from './falls.js';
 import { Trips, ROUTES, kindOf } from './trips.js';
 import { InGameRoute } from './ingame.js';
 import { LevelChooser } from './levels.js';
@@ -1308,6 +1309,9 @@ function showRoute() {
         : l.wait > 0 ? `hearthstone (ready in ${clock(l.wait)})` : 'use your hearthstone');
       msg = `${where}, about ${clock(left.seconds)}: ${legs.map(part).join(', then ')}${r.route.walking ? `. On foot all the way: ${clock(r.route.walking)}` : ''}`;
     } else msg = `${where}: ${Math.round(left.yards)} yd, about ${clock(left.seconds)}${swims ? ', part of it swimming' : ''}`;
+    // (falls on the way that cost health: said, so that they are yours to take or not - the line is red where you come down)
+    const falls = fallsSaid(r.fallsAhead());
+    if (falls) msg += `. It has ${falls[0]}: about ${Math.max(1, Math.round(falls[1] * 100))}% of your full health${/^\d/.test(falls[0]) ? ' in all' : ''}`;
   } else if (r.status) msg = `Route: ${r.status}`;
   else msg = app.player?.live || app.routeFrom ? 'Working out the route…' : 'Route: waiting for your position from the game';
   $('routeMsg').textContent = msg;

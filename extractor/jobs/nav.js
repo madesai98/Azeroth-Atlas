@@ -4,11 +4,15 @@
 // of the buildings and objects placed on it. Per grid cell that gives a stack of solid spans
 // (bottom, top, and whether the top is level enough to walk on). A place to stand ("floor") is
 // the top of a walkable span with a character's height of free space above it. So a cell can
-// have several floors (under and on a bridge, the storeys of a building), walls, tree trunks
-// and steep ground leave none, and a low branch closes the ground under it.
+// have several floors (under and on a bridge, the storeys of a building), walls and tree trunks
+// leave none, and a low branch closes the ground under it.
 // Water too deep to stand in becomes a floor at the surface, marked as one you swim on.
 //
-// The route planner connects neighbouring cells whose floors are within a step of each other.
+// Ground too steep to walk on is kept too, marked as such: nobody stands on it or climbs it,
+// but the game lets you slide and fall down it, and a way down a mountainside is a way.
+//
+// The route planner connects neighbouring cells whose floors are within a step of each other,
+// and, one way only, the places you can drop from to whatever lies under them.
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -17,19 +21,36 @@ import { MAP_HALF, TILE_SIZE } from '../formats/chunked.js';
 import { SEC, parseLiquidSection } from './tile.js';
 import { MSEC } from './model.js';
 
-export const NAV_VERSION = 4;
-export const NSEC = { META: 1, COUNTS: 2, HEIGHTS: 3, FLAGS: 4 };
+export const NAV_VERSION = 6;
+// LINKS: per surface, four bits for each of east, west, south, north (in that order from the
+// lowest): 0 it leads nowhere that way; 1-14 it leads on to that surface of the next cell
+// (counted from 1, lowest first); LINK_EDGE the next cell is on the next tile, and this surface
+// is open on that side.
+// EDGES: the room over each surface of the cells along the tile's four edges (see the end of buildNav).
+export const NSEC = { META: 1, COUNTS: 2, HEIGHTS: 3, FLAGS: 4, LINKS: 5, EDGES: 6 };
+export const LINK_EDGE = 15;
 export const NAV_N = 512;                 // cells per tile side
 export const NAV_CELL = TILE_SIZE / NAV_N; // 1.0417 yd
-// floor flags; EAST..NORTH = you can walk on to the neighbouring cell on that side
-export const FLOOR = { SWIM: 1, LAVA: 2, TERRAIN: 4, EAST: 16, WEST: 32, SOUTH: 64, NORTH: 128 };
-export const STEP_UP = 1.3;   // yards you can step up from one cell to the next (a 50 degree slope, a kerb)
-export const STEP_DOWN = 3;   // yards you will drop from one cell to the next
+// surface flags; STEEP = ground too steep to stand on (slid and fallen down, never walked);
+// EAST..NORTH = a floor you can walk on from to the neighbouring cell on that side
+export const FLOOR = { SWIM: 1, LAVA: 2, TERRAIN: 4, STEEP: 8, EAST: 16, WEST: 32, SOUTH: 64, NORTH: 128 };
+// Yards you can step up from one cell to the next. Ground at 50 degrees, the steepest the
+// game lets you walk, rises 1.24 a cell; heights are kept to an eighth of a yard, which can
+// make that 1.375 between two of them. (It was 1.3: the search, which sees only the heights
+// as kept, lost some of the steps the builder had found.) It is also about the ledge you
+// can hop up on to.
+export const STEP_UP = 1.375;
+export const STEP_DOWN = 3;   // yards you will drop from one cell to the next and call it walking
 const HEIGHT = 1.7;                       // free space a character needs above a floor
 const SWIM_ROOM = 1.0;                    // free space needed above water to swim there
 const WADE = 1.5;                         // water deeper than this over the ground: swim
 const SLOPE = Math.cos((50 * Math.PI) / 180); // steeper than 50 degrees cannot be walked
 const MAX_FLOORS = 7;
+const MAX_STEEP = 7;                      // (seven floors and seven stretches of steep ground a cell: fourteen surfaces, the most a link can name)
+const FLOOR_JOIN = 0.8;                   // yards between the floors of two sub-cells of a cell, one after the other in height, for them to be one floor
+const STEEP_JOIN = 2;                     // ...and between two pieces of steep ground
+const EDGE = 0.3;                         // yards over the floor you step off that what you step on to may be
+const SLIDE = 0.3;                        // yards steep ground has to fall, half a yard on, for you to slide that way (a slide goes downhill, not along the face)
 const DEG = Math.PI / 180;
 
 // ---- placement transform (same convention as the viewer, verified against the game's bounds) ----
@@ -229,16 +250,22 @@ export function buildNav(job) {
     }
   }
 
-  // ---- floors ----
-  // Worked out per half-yard sub-cell first. A cell has a floor wherever any of its four
-  // sub-cells has one (those within a step of each other are the same floor), and for each floor
-  // it is recorded which of the four neighbouring cells you can walk on to: only where a free
-  // sub-cell of this one touches a free sub-cell of that one. So a wall thinner than a cell
-  // still separates the cells on either side of it, while a stairway or doorway only a yard
-  // wide stays open, which sampling whole cells would have closed.
+  // ---- what there is to be on ----
+  // Worked out per half-yard sub-cell first, from its stack of solid spans. The top of a span
+  // with a character's height of free space over it is somewhere to be: a floor where it is
+  // level enough to walk on, steep ground where it is not - nowhere to stand and no way up, but
+  // you slide or fall down it. The spans themselves are kept until the end: whether you can step
+  // off an edge depends on what is in the way over there, not only on what there is to land on.
+  const SUBS = N * N;
   const lo = [], hi = [], fl = [];
-  // Floors of one sub-cell, appended to fz / ff / fw (height, flags, which sub-cell).
-  const subFloors = (sub, which, fz, ff, fw) => {
+  const subOff = new Uint32Array(SUBS + 1);
+  let spCap = 1 << 21, spN = 0;
+  let spLo = new Float32Array(spCap), spHi = new Float32Array(spCap), spKind = new Uint8Array(spCap), spSurf = new Int8Array(spCap);
+  const subSwim = new Uint8Array(SUBS);            // water to swim on in this sub-cell: 1, or 2 for lava
+  const subSwimSurf = new Int8Array(SUBS).fill(-1); // ...and which of its cell's surfaces that is
+  const waterOf = (sub) => water[(((sub / N) | 0) >> 3) * 128 + ((sub % N) >> 3)];
+  for (let sub = 0; sub < SUBS; sub++) {
+    subOff[sub] = spN;
     lo.length = 0; hi.length = 0; fl.length = 0;
     for (let s = head[sub]; s >= 0; s = sNext[s]) {
       // insertion sort by bottom
@@ -254,6 +281,11 @@ export function buildNav(job) {
         else if (hi[k] > hi[n - 1] - 0.3) { fl[n - 1] |= fl[k]; if (hi[k] > hi[n - 1]) hi[n - 1] = hi[k]; }
       } else { lo[n] = lo[k]; hi[n] = hi[k]; fl[n] = fl[k]; n++; }
     }
+    if (spN + n > spCap) {
+      spCap *= 2;
+      const g = (old, T) => { const a = new T(spCap); a.set(old); return a; };
+      spLo = g(spLo, Float32Array); spHi = g(spHi, Float32Array); spKind = g(spKind, Uint8Array); spSurf = g(spSurf, Int8Array);
+    }
     const q = (((sub / N) | 0) >> 3) * 128 + ((sub % N) >> 3);
     const w = water[q], wet = !Number.isNaN(w);
     // Water: the highest solid top under the surface (how deep it is), and the lowest solid
@@ -266,77 +298,271 @@ export function buildNav(job) {
         else under = Infinity;
       }
       const top = hi[k], room = (k + 1 < n ? lo[k + 1] : Infinity) - top;
-      if (wet && top < w - WADE) continue;             // under deep water: nowhere to stand
-      if ((fl[k] & 1) && room >= HEIGHT) { fz.push(top); ff.push(fl[k] & 2 ? FLOOR.TERRAIN : 0); fw.push(which); }
+      // kind: 1 a floor, 2 steep ground, 0 neither (no room over it, or under deep water: nowhere to be); 4: it is the terrain
+      const kind = (wet && top < w - WADE) || room < HEIGHT ? 0 : (fl[k] & 1 ? 1 : 2) | (fl[k] & 2 ? 4 : 0);
+      spLo[spN] = lo[k]; spHi[spN] = top; spKind[spN] = kind; spSurf[spN] = -1; spN++;
     }
-    if (wet && n > 0 && under < w - WADE && over - w >= SWIM_ROOM) { fz.push(w); ff.push(FLOOR.SWIM | (waterKind[q] === 3 ? FLOOR.LAVA : 0)); fw.push(which); }
-  };
+    if (wet && n > 0 && under < w - WADE && over - w >= SWIM_ROOM) subSwim[sub] = waterKind[q] === 3 ? 2 : 1;
+  }
+  subOff[SUBS] = spN;
+
+  // A cell has a surface wherever any of its four sub-cells has one. Those of its sub-cells
+  // that follow on from each other in height are one surface of the cell: sorted by height,
+  // each within a step of the one before. (Not: each within a step of the lowest. On ground
+  // that climbs cornerwise at 48 to 50 degrees - the steepest the game lets you walk - the
+  // highest quarter of a cell is more than that above the lowest, the cell fell into two
+  // floors, and neither led on uphill: whole hillsides the game has you run straight up were
+  // cut off from the valley below them.) Floors and steep ground are kept apart.
   const C = NAV_N;
   const counts = new Uint8Array(C * C);
-  const cellZ = [], cellF = [], cellM = []; // per floor: height, flags, which sub-cells it is made of
-  const fz = [], ff = [], fw = [], order = [];
-  let total = 0, swim = 0;
+  const cellZ = [], cellF = [], cellM = [], cellTop = []; // per surface: height, flags, the sub-cells it is made of, its height in each of the four (NaN where it is not)
+  const ez = [], ef = [], ew = [], es = [], order = [], groups = [];
+  const subAt = (cj, ci, k) => (cj * 2 + (k >> 1)) * N + ci * 2 + (k & 1);
+  let total = 0, swim = 0, steep = 0;
   for (let cj = 0; cj < C; cj++) for (let ci = 0; ci < C; ci++) {
-    fz.length = 0; ff.length = 0; fw.length = 0;
+    ez.length = 0; ef.length = 0; ew.length = 0; es.length = 0;
     // sub-cells: 1 north-west, 2 north-east, 4 south-west, 8 south-east
-    for (let k = 0; k < 4; k++) subFloors((cj * 2 + (k >> 1)) * N + ci * 2 + (k & 1), 1 << k, fz, ff, fw);
-    if (!fz.length) continue;
-    order.length = 0;
-    for (let k = 0; k < fz.length; k++) order.push(k);
-    order.sort((a, b) => fz[a] - fz[b]);
-    let c = 0;
-    for (let a = 0; a < order.length && c < MAX_FLOORS; ) {
-      // floors of the sub-cells within a step of each other are one floor of the cell
-      let b = a, mask = 0, top = -Infinity, flags = FLOOR.SWIM | FLOOR.TERRAIN, lava = 0;
-      while (b < order.length && fz[order[b]] - fz[order[a]] <= 0.8) {
-        const k = order[b];
-        mask |= fw[k]; if (fz[k] > top) top = fz[k];
-        flags &= ff[k]; lava |= ff[k] & FLOOR.LAVA;
-        b++;
+    for (let k = 0; k < 4; k++) {
+      const sub = subAt(cj, ci, k);
+      for (let s = subOff[sub]; s < subOff[sub + 1]; s++) {
+        const kind = spKind[s];
+        if (!(kind & 3)) continue;
+        ez.push(spHi[s]); ef.push((kind & 2 ? FLOOR.STEEP : 0) | (kind & 4 ? FLOOR.TERRAIN : 0)); ew.push(k); es.push(s);
       }
-      // (two sub-cells that only meet at a corner are not one place to stand)
-      if (mask !== 9 && mask !== 6) { cellZ.push(top); cellF.push(flags | lava); cellM.push(mask); if (flags & FLOOR.SWIM) swim++; c++; }
-      a = b;
+      if (subSwim[sub]) { ez.push(waterOf(sub)); ef.push(FLOOR.SWIM | (subSwim[sub] === 2 ? FLOOR.LAVA : 0)); ew.push(k); es.push(-1 - sub); }
     }
-    counts[cj * C + ci] = c;
-    total += c;
+    if (!ez.length) continue;
+    groups.length = 0;
+    for (const want of [0, FLOOR.STEEP]) {
+      order.length = 0;
+      for (let k = 0; k < ez.length; k++) if ((ef[k] & FLOOR.STEEP) === want) order.push(k);
+      order.sort((a, b) => ez[a] - ez[b]);
+      const join = want ? STEEP_JOIN : FLOOR_JOIN, most = want ? MAX_STEEP : MAX_FLOORS;
+      let kept = 0;
+      for (let a = 0; a < order.length && kept < most; ) {
+        let b = a, mask = 0, top = -Infinity, flags = FLOOR.SWIM | FLOOR.TERRAIN, lava = 0;
+        // (one height a sub-cell: a second surface of the same sub-cell begins the next one)
+        while (b < order.length && (b === a || ez[order[b]] - ez[order[b - 1]] <= join) && !(mask & (1 << ew[order[b]]))) {
+          const k = order[b];
+          mask |= 1 << ew[k]; if (ez[k] > top) top = ez[k];
+          flags &= ef[k]; lava |= ef[k] & FLOOR.LAVA;
+          b++;
+        }
+        // (two sub-cells that only meet at a corner are not one place to be)
+        if (mask !== 9 && mask !== 6) { groups.push({ top, flags: flags | lava | want, mask, order: order.slice(a, b) }); kept++; }
+        a = b;
+      }
+    }
+    groups.sort((p, q) => p.top - q.top);
+    for (let g = 0; g < groups.length; g++) {
+      const G = groups[g], at = cellZ.length;
+      cellZ.push(G.top); cellF.push(G.flags); cellM.push(G.mask);
+      cellTop.push(NaN, NaN, NaN, NaN);
+      for (const k of G.order) {
+        cellTop[at * 4 + ew[k]] = ez[k];
+        if (es[k] >= 0) spSurf[es[k]] = g; else subSwimSurf[-1 - es[k]] = g;
+      }
+      if (G.flags & FLOOR.STEEP) steep++; else if (G.flags & FLOOR.SWIM) swim++;
+    }
+    counts[cj * C + ci] = groups.length;
+    total += groups.length;
   }
-  // Which neighbours each floor connects to (bits 16 east, 32 west, 64 south, 128 north).
+
+  // Heights are kept to an eighth of a yard, and which surface leads on to which is worked out
+  // on the heights as they are kept: the route search then sees the very numbers this did.
+  const outZ = cellZ.map((v) => Math.max(0, Math.min(65535, Math.round((v + 2048) * 8))));
+  const UPQ = Math.round(STEP_UP * 8), DOWNQ = Math.round(STEP_DOWN * 8);
   const offs = new Uint32Array(C * C + 1);
   for (let c = 0; c < C * C; c++) offs[c + 1] = offs[c] + counts[c];
-  // per direction: [dx, dy, bit, my sub-cells on that side with the neighbour's sub-cells they touch]
-  const SIDES = [[1, 0, 16, [[2, 1], [8, 4]]], [-1, 0, 32, [[1, 2], [4, 8]]], [0, 1, 64, [[4, 1], [8, 2]]], [0, -1, 128, [[1, 4], [2, 8]]]];
+
+  // Where you come down in a sub-cell you move into at height h: the highest solid top at or
+  // under it (`slack` over it still counts; under 0, it has to be that much lower) - the number
+  // of that surface in its cell, with landT its height - or -1: something solid stands in the
+  // way of a body at that height, or there is nothing under it to come down on, or what there
+  // is is no place to fall on to.
+  let landT = 0;
+  const landing = (sub, h, slack) => {
+    const a = subOff[sub], b = subOff[sub + 1];
+    let m = -1;
+    for (let s = a; s < b && spHi[s] <= h + slack; s++) m = s;
+    const next = m < 0 ? a : m + 1; // (the span over that one: it reaches above h)
+    if (next < b && spLo[next] < h + HEIGHT) return -1;
+    if (subSwim[sub]) {
+      const w = waterOf(sub);
+      if (w <= h + slack && (m < 0 || spHi[m] < w)) { landT = w; return subSwimSurf[sub]; }
+    }
+    if (m < 0 || !(spKind[m] & 3)) return -1;
+    // Not on to ground that has something built over it. The game leaves the earth in place
+    // under a town, forty yards under Stormwind's streets, and the buildings nobody goes into
+    // are hollow shells standing over it: past any low wall of theirs there is a clear drop to
+    // that earth, which is nowhere anyone gets to and has no way back up. Ground you can fall
+    // on to has the sky over it. (Walking on to ground under a roof is another matter.)
+    if ((spKind[m] & 7) === 5 && m + 1 < b) return -1;
+    landT = spHi[m];
+    return spSurf[m];
+  };
+
+  // What each surface leads on to, east, west, south and north. A floor leads on to the floor
+  // of the next cell within a step up or a short drop down, where a free sub-cell of this one
+  // touches a free sub-cell of that one: so a wall thinner than a cell still separates the
+  // cells on either side of it, while a stairway or doorway only a yard wide stays open, which
+  // sampling whole cells would have closed. (The highest such floor that it touches. It used
+  // to be the highest such floor, if it touched: a ledge in the far half of the next cell shut
+  // the way on to the ground in its near half.) Where it leads on to no floor, it may still be
+  // left that way by dropping: on to whatever lies under the edge, a floor further down or
+  // steep ground. Steep ground leads only downhill.
+  const links = new Uint16Array(total);
+  // per direction: [dx, dy, bit, my sub-cells on that side with the neighbour's sub-cells they touch (by number: 0 north-west, 1 north-east, 2 south-west, 3 south-east)]
+  const SIDES = [[1, 0, FLOOR.EAST, [[1, 0], [3, 2]]], [-1, 0, FLOOR.WEST, [[0, 1], [2, 3]]], [0, 1, FLOOR.SOUTH, [[2, 0], [3, 1]]], [0, -1, FLOOR.NORTH, [[0, 2], [1, 3]]]];
   for (let cj = 0; cj < C; cj++) for (let ci = 0; ci < C; ci++) {
     const cell = cj * C + ci;
     for (let k = offs[cell]; k < offs[cell + 1]; k++) {
-      const z = cellZ[k], mask = cellM[k];
-      for (const [dx, dy, bit, pairs] of SIDES) {
+      const mask = cellM[k], isSteep = cellF[k] & FLOOR.STEEP;
+      for (let d = 0; d < 4; d++) {
+        const [dx, dy, bit, pairs] = SIDES[d];
         const ni = ci + dx, nj = cj + dy;
         if (ni < 0 || nj < 0 || ni >= C || nj >= C) {
           // the neighbour is on the next tile: open on this side; that tile says the same for its side
-          if (pairs.some(([mine]) => mask & mine)) cellF[k] |= bit;
+          if (pairs.some(([mine]) => mask & (1 << mine))) { links[k] |= LINK_EDGE << (d * 4); if (!isSteep) cellF[k] |= bit; }
           continue;
         }
         const nc = nj * C + ni;
-        let best = -1;
-        for (let q = offs[nc]; q < offs[nc + 1]; q++) { const dz = cellZ[q] - z; if (dz <= STEP_UP && dz >= -STEP_DOWN) best = q; }
-        if (best >= 0 && pairs.some(([mine, theirs]) => (mask & mine) && (cellM[best] & theirs))) cellF[k] |= bit;
+        let to = -1;
+        if (!isSteep) {
+          for (let q = offs[nc]; q < offs[nc + 1]; q++) {
+            if (cellF[q] & FLOOR.STEEP) continue;
+            const dz = outZ[q] - outZ[k];
+            if (dz <= UPQ && dz >= -DOWNQ && pairs.some(([mine, theirs]) => (mask & (1 << mine)) && (cellM[q] & (1 << theirs)))) to = q;
+          }
+          if (to >= 0) cellF[k] |= bit;
+        }
+        if (to < 0) {
+          // (a floor to land on before steep ground to slide on down; of two alike, the higher)
+          let best = -Infinity;
+          for (const [mine, theirs] of pairs) {
+            if (!(mask & (1 << mine))) continue;
+            const li = landing(subAt(nj, ni, theirs), cellTop[k * 4 + mine], isSteep ? -SLIDE : EDGE);
+            if (li < 0) continue;
+            const q = offs[nc] + li, rank = landT + (cellF[q] & FLOOR.STEEP ? 0 : 1e6);
+            // (never up, by the heights as they are kept)
+            if (rank <= best || outZ[q] > outZ[k]) continue;
+            best = rank; to = q;
+          }
+        }
+        if (to >= 0) links[k] |= (to - offs[nc] + 1) << (d * 4);
       }
     }
   }
-  const outZ = cellZ.map((v) => Math.max(0, Math.min(65535, Math.round((v + 2048) * 8)))), outF = cellF;
+  // Within a cell. Where ground you can stand on meets ground you cannot, the line between
+  // them runs through cells: half of such a cell is floor and half is steep, and each half
+  // touches the next cell only on its own side. Going down across that line - off the floor on
+  // to the steep half, off the steep half on to the floor - is a move inside the cell, which
+  // links (cell to cell) cannot say. So a surface that leads nowhere on one side, but from
+  // which you come down on to another surface of its own cell, leads where that one leads:
+  // without this every slide ended half a yard short of the floor at the foot of the bank.
+  const INSIDE = [[0, 1], [1, 0], [0, 2], [2, 0], [1, 3], [3, 1], [2, 3], [3, 2]]; // sub-cells of a cell that share a side: from, to
+  const direct = links.slice();
+  for (let cj = 0; cj < C; cj++) for (let ci = 0; ci < C; ci++) {
+    const cell = cj * C + ci;
+    if (offs[cell + 1] - offs[cell] < 2) continue;
+    for (let k = offs[cell]; k < offs[cell + 1]; k++) {
+      const mask = cellM[k], isSteep = cellF[k] & FLOOR.STEEP;
+      for (let d = 0; d < 4; d++) {
+        if ((direct[k] >> (d * 4)) & 15) continue;
+        const nc = cell + SIDES[d][0] + SIDES[d][1] * C;
+        let best = -1, value = 0;
+        for (const [a, b] of INSIDE) {
+          if (!(mask & (1 << a)) || mask & (1 << b)) continue;
+          const li = landing(subAt(cj, ci, b), cellTop[k * 4 + a], isSteep ? -SLIDE : EDGE);
+          if (li < 0) continue;
+          const x = offs[cell] + li, v = (direct[x] >> (d * 4)) & 15;
+          if (x === k || outZ[x] >= outZ[k] || !v || outZ[x] <= best) continue;
+          if (v !== LINK_EDGE && outZ[offs[nc] + v - 1] > outZ[k]) continue; // (never up)
+          best = outZ[x]; value = v;
+        }
+        if (value) links[k] |= value << (d * 4);
+      }
+    }
+  }
 
-  // Heights are stored as the difference from the floor before (in cell order): neighbouring
+  // Steep ground is worth keeping only where it is part of a way down: somewhere a floor leads
+  // on to (straight off its edge, or by way of more steep ground) that in turn leads down to a
+  // floor. The rest - most of it, in a town or a dungeon: the outside of every roof and wall
+  // from above - is nowhere anyone gets to or comes back from, and is left out. (The edge of
+  // the tile counts as both: what lies beyond it is the next tile's to say.)
+  const DC = [1, -1, C, -C]; // the cell east, west, south, north of a cell
+  const cellOfSurf = new Int32Array(total);
+  for (let c = 0; c < C * C; c++) for (let k = offs[c]; k < offs[c + 1]; k++) cellOfSurf[k] = c;
+  const target = (k, d) => { const v = (links[k] >> (d * 4)) & 15; return v === 0 || v === LINK_EDGE ? -1 : offs[cellOfSurf[k] + DC[d]] + v - 1; };
+  const atEdge = (k) => { for (let d = 0; d < 4; d++) if (((links[k] >> (d * 4)) & 15) === LINK_EDGE) return true; return false; };
+  const reached = new Uint8Array(total), leads = new Uint8Array(total), queue = new Int32Array(total);
+  let qn = 0;
+  for (let k = 0; k < total; k++) if (!(cellF[k] & FLOOR.STEEP) || atEdge(k)) { reached[k] = 1; queue[qn++] = k; }
+  for (let q = 0; q < qn; q++) for (let d = 0; d < 4; d++) { const t = target(queue[q], d); if (t >= 0 && !reached[t]) { reached[t] = 1; queue[qn++] = t; } }
+  // (backwards: who leads on to each surface)
+  const inN = new Uint32Array(total + 1);
+  for (let k = 0; k < total; k++) for (let d = 0; d < 4; d++) { const t = target(k, d); if (t >= 0) inN[t + 1]++; }
+  for (let k = 0; k < total; k++) inN[k + 1] += inN[k];
+  const inOf = new Int32Array(inN[total]), fill = new Uint32Array(total);
+  for (let k = 0; k < total; k++) for (let d = 0; d < 4; d++) { const t = target(k, d); if (t >= 0) inOf[inN[t] + fill[t]++] = k; }
+  qn = 0;
+  for (let k = 0; k < total; k++) if (!(cellF[k] & FLOOR.STEEP) || atEdge(k)) { leads[k] = 1; queue[qn++] = k; }
+  for (let q = 0; q < qn; q++) { const t = queue[q]; for (let e = inN[t]; e < inN[t + 1]; e++) { const k = inOf[e]; if (!leads[k]) { leads[k] = 1; queue[qn++] = k; } } }
+  const keep = (k) => reached[k] && leads[k];
+  const newAt = new Int32Array(total).fill(-1); // where each surface that is kept comes in its cell
+  let kept = 0;
+  for (let c = 0; c < C * C; c++) { let n = 0; for (let k = offs[c]; k < offs[c + 1]; k++) if (keep(k)) newAt[k] = n++; counts[c] = n; kept += n; }
+  const outZ2 = new Uint16Array(kept), outF = new Uint8Array(kept), outL = new Uint16Array(kept);
+  for (let k = 0, at = 0; k < total; k++) {
+    if (newAt[k] < 0) continue;
+    let l = 0;
+    for (let d = 0; d < 4; d++) {
+      const v = (links[k] >> (d * 4)) & 15, t = target(k, d);
+      if (v === LINK_EDGE) l |= LINK_EDGE << (d * 4);
+      else if (t >= 0 && newAt[t] >= 0) l |= (newAt[t] + 1) << (d * 4);
+    }
+    outZ2[at] = outZ[k]; outF[at] = cellF[k]; outL[at] = l; at++;
+  }
+  steep -= total - kept;
+
+  // At the tile's four edges: how much free space there is over each surface on that side.
+  // What a surface leads on to across the edge is in the next tile, which is built without
+  // this one: each tile can only say how its own side of the edge stands. For a step that is
+  // enough - both sides say they are open, at heights a step apart. For a fall it is not: the
+  // search has to know that nothing solid lies between the surface it would land on and the
+  // height it comes in at. (Without this, wherever the seam of two tiles ran through a town,
+  // the street was something to fall through, on to the earth the town was built over.)
+  // Per edge (east, west, south, north), per cell along it, per surface of that cell: the
+  // room over it in eighths of a yard (65535: open sky), 0 where it does not touch that edge.
+  const roomOver = (sub, top) => {
+    for (let s = subOff[sub]; s < subOff[sub + 1]; s++) if (spHi[s] > top + 1e-3) return spLo[s] - top;
+    return Infinity;
+  };
+  const SIDE_SUBS = [[1, 3], [0, 2], [2, 3], [0, 1]]; // the sub-cells of a cell on its east, west, south, north side
+  const edgeRoom = [];
+  for (let d = 0; d < 4; d++) for (let a = 0; a < C; a++) {
+    const ci = d === 0 ? C - 1 : d === 1 ? 0 : a, cj = d === 2 ? C - 1 : d === 3 ? 0 : a, cell = cj * C + ci;
+    for (let k = offs[cell]; k < offs[cell + 1]; k++) {
+      if (newAt[k] < 0) continue;
+      let room = 0;
+      for (const m of SIDE_SUBS[d]) if (cellM[k] & (1 << m)) room = Math.max(room, roomOver(subAt(cj, ci, m), cellTop[k * 4 + m]));
+      edgeRoom.push(room === Infinity ? 65535 : Math.max(0, Math.min(65534, Math.floor(room * 8))));
+    }
+  }
+
+  // Heights are stored as the difference from the surface before (in cell order): neighbouring
   // ground is nearly level, so the differences are tiny and compress far better.
-  const z = new Uint16Array(outZ.length), f = new Uint8Array(outF);
-  for (let i = 0, prev = 0; i < outZ.length; i++) { z[i] = (outZ[i] - prev) & 0xffff; prev = outZ[i]; }
+  const z = new Uint16Array(kept), f = outF;
+  for (let i = 0, prev = 0; i < kept; i++) { z[i] = (outZ2[i] - prev) & 0xffff; prev = outZ2[i]; }
   const pack = (a) => zlib.deflateRawSync(Buffer.from(a.buffer, a.byteOffset, a.byteLength), { level: 6 });
-  const meta = { n: C, floors: total, swim, placed };
+  const meta = { n: C, floors: kept - steep, swim, steep, placed };
   writeFileAtomic(job.out, packContainer('WFN1', NAV_VERSION, [
     { id: NSEC.META, data: Buffer.from(JSON.stringify(meta)) },
     { id: NSEC.COUNTS, data: pack(counts) },
     { id: NSEC.HEIGHTS, data: pack(z) },
     { id: NSEC.FLAGS, data: pack(f) },
+    { id: NSEC.LINKS, data: pack(outL) },
+    { id: NSEC.EDGES, data: pack(new Uint16Array(edgeRoom)) },
   ]));
   return meta;
 }

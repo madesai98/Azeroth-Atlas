@@ -4,10 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { unpackContainer } from './container.js';
-import { FLOOR } from './jobs/nav.js';
+import { FLOOR, STEP_UP } from './jobs/nav.js';
 
 const TILE = 1600 / 3, N = 512, CELL = TILE / N;
-const STEP = 1.3;    // yards you can step up or down between neighbouring cells and back again
+const STEP = STEP_UP; // yards you can step up or down between neighbouring cells and back again
 const OPEN_GROUND = 4000; // floors joined together into a stretch this big are open ground (a roof or a ledge is smaller)
 
 /**
@@ -89,6 +89,7 @@ export class NavReader {
       if (t.offs[cell + 1] > t.offs[cell] && !t.parts) t.parts = stretches(t);
       for (let k = t.offs[cell]; k < t.offs[cell + 1]; k++) {
         const f = t.flags[k];
+        if (f & FLOOR.STEEP) continue; // (ground too steep to stand on: kept for the ways down it, and nothing to stand on)
         out.push({ z: t.z[k], terrain: !!(f & FLOOR.TERRAIN), swim: !!(f & FLOOR.SWIM), built: !(f & (FLOOR.TERRAIN | FLOOR.SWIM)), open: !!t.parts.open[k], part: `${t.key}:${t.parts.id[k]}`, d: Math.hypot(di, dj) * CELL });
       }
     }

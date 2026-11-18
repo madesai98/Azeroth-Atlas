@@ -3,17 +3,41 @@
 // extractor/jobs/nav.js). Runs in a worker so a long search never stalls the map.
 //
 // Each floor records which of its four neighbouring cells it leads on to (worked out at half-yard
-// precision when the data is built, so thin walls separate and narrow doorways connect); the
-// floor it leads to there is the one within a step up, or a short drop down. The cost of a move is the time it takes: distance over your run
-// speed, or your swim speed on water.
+// precision when the data is built, so thin walls separate and narrow doorways connect), and
+// which floor there: the one within a step up, or a short drop down. The cost of a move is the
+// time it takes: distance over your run speed, or your swim speed on water.
+//
+// The game also lets you go where you cannot walk back: off a ledge, down a bank too steep to
+// stand on. The data has those too - what lies under each edge, and the steep ground itself,
+// which leads only downhill - and a route takes them where the fall is one you walk away from
+// (see FALL_MOST): you land where you land, and a long way round is not the only way down.
+import { FELL, FALL_SPEED, fallCost as hurt } from './falls.js';
 
 const TILE = 1600 / 3, N = 512, CELL = TILE / N;
-const UP = 1.3;          // yards you can step up from one cell to the next (a 50 degree slope, a kerb)
-const DOWN = 3;          // yards you will drop from one cell to the next
-const F_SWIM = 1, F_LAVA = 2, F_TERRAIN = 4;
+const UP = 1.375;        // yards you can step up from one cell to the next (a 50 degree slope, a kerb): as extractor/jobs/nav.js has it
+const UP_OLD = 1.3;      // ...as it was in the data built before links were kept (see hop)
+const DOWN = 3;          // yards you will drop from one cell to the next and call it walking
+const F_SWIM = 1, F_LAVA = 2, F_TERRAIN = 4, F_STEEP = 8;
 const OPEN = [16, 32, 64, 128];     // floor flag: open toward east, west, south, north (as DX / DY below)
 const BACK = [32, 16, 128, 64];     // the same edge seen from the other cell
+const LINK_EDGE = 15;    // a link that says: open on this side, and the next cell is on the next tile
 const LAVA_COST = 60;
+// Falls. The game takes nothing for a fall of up to about 14.5 yards and, beyond that, about
+// 1.8% of your full health a yard (falls.js: hurt): 69 yards kills from full health. A route
+// never asks for more than FALL_MOST, which costs a little over half of it, nor for several
+// falls that cost more than that between them (HURT_MOST) -
+// the map is not told how much health you have just now, and its heights are good to a yard or
+// so - and a fall that hurts counts as that much longer a way, so that a safe way round that
+// is nearly as quick is the one shown. Into water deep enough to swim in there is no harm at all.
+// Sliding down ground too steep to stand on is falling, to the game: what counts is the height
+// from where you left your feet to where you get them back.
+const FALL_MOST = 45;    // yards: no route has you fall further than this
+const HURT_MOST = 57;    // hundredths of your full health: all the falls of a route together cost no more than this (what one fall of FALL_MOST does)
+const FALL_HURT = 60;    // seconds a fall counts for, per whole health bar it takes (what it costs to get that health back)
+const SLIDE_ON = 0.5;    // yards lower the steep ground on the next tile has to be for a slide to go on to it
+const HEAD = 1.7;        // yards of free space a character needs over their feet (as extractor/jobs/nav.js has it)
+const OPEN_SKY = 65535;  // the room over a surface at a tile's edge, where nothing at all is over it
+const PACK_BITS = 22, PACK = 1 << PACK_BITS, PACK_MASK = PACK - 1; // a surface is named by its tile's slot and its number in the tile, in one number
 // How hard the search leans toward the goal: 1 would be strictly the shortest way, and slow to
 // find. Close by it stays near that; over a long distance it leans harder, giving up a little
 // length for a search that stays in a corridor instead of flooding half a continent.
@@ -47,6 +71,7 @@ const SUNK_SIDES = 6;    // ...in this many of the eight directions
 const STUCK = 40000;     // floors: a search that ran out this soon never left the ledge it began on
 // Where the way found has another level over or under it (see findRoute)
 const STACKED = 16;      // kind bit of a point: another level lies over or under this place
+const FELL_SHOWN = 6;    // yards a fall has to be, from the floor left to the floor landed on, for its points to be marked so
 const STACK_REACH = 7;   // cells to each side that are looked at
 const STACK_GAP = 2.5;   // yards above or below that make another level
 const STACK_ISLAND = 600; // floors: a surface with fewer than this to walk about on is not a level (a roof, an awning, a tree top)
@@ -56,7 +81,7 @@ const DX = [1, -1, 0, 0, 1, 1, -1, -1], DY = [0, 0, 1, -1, 1, -1, 1, -1];
 
 let ctx = { map: -1, rev: '', have: new Set() }; // the map the search in hand is on
 const maps = new Map();  // map id -> { map, rev, have } as last described by the page
-const tiles = new Map(); // "map/col_row" -> tile | null, most recently used last
+const tiles = new Map(); // "map/rev/col_row" -> tile | null, most recently used last
 
 async function inflate(bytes) {
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
@@ -64,7 +89,8 @@ async function inflate(bytes) {
 }
 
 async function loadTile(col, row) {
-  const name = `${col}_${row}`, key = `${ctx.map}/${name}`;
+  // (kept by the revision of the map's data too: after the map has been built again, a tile of the old build is not one of the new)
+  const name = `${col}_${row}`, key = `${ctx.map}/${ctx.rev}/${name}`;
   if (tiles.has(key)) { const t = tiles.get(key); tiles.delete(key); tiles.set(key, t); return t; }
   let tile = null;
   if (ctx.have.has(name)) {
@@ -75,13 +101,27 @@ async function loadTile(col, row) {
         const dv = new DataView(buf);
         const sections = new Map();
         for (let i = 0, n = dv.getUint32(8, true); i < n; i++) sections.set(dv.getUint32(12 + i * 12, true), new Uint8Array(buf, dv.getUint32(16 + i * 12, true), dv.getUint32(20 + i * 12, true)));
-        const [counts, zb, flags] = await Promise.all([inflate(sections.get(2)), inflate(sections.get(3)), inflate(sections.get(4))]);
+        // (links: which surface each one leads on to, each way. Data built before they were kept has none: see hop)
+        const [counts, zb, flags, lb, eb] = await Promise.all([inflate(sections.get(2)), inflate(sections.get(3)), inflate(sections.get(4)), sections.has(5) ? inflate(sections.get(5)) : null, sections.has(6) ? inflate(sections.get(6)) : null]);
         const q = new Uint16Array(zb.buffer, zb.byteOffset, zb.byteLength >> 1);
         const z = new Float32Array(q.length);
         for (let i = 0, acc = 0; i < q.length; i++) { acc = (acc + q[i]) & 0xffff; z[i] = acc / 8 - 2048; } // stored as differences
         const offs = new Uint32Array(N * N + 1);
         for (let c = 0; c < N * N; c++) offs[c + 1] = offs[c] + counts[c];
-        tile = { col, row, xN: (32 - row) * TILE, yW: (32 - col) * TILE, offs, z, flags, nodes: z.length };
+        const links = lb && lb.byteLength >> 1 === z.length ? new Uint16Array(lb.buffer, lb.byteOffset, z.length) : null;
+        // (edge: along the tile's four edges, the room over each surface on that side - see fall; edgeAt: where each edge cell's surfaces begin in it)
+        let edge = null;
+        const edgeAt = new Int32Array(4 * N);
+        if (links && eb) {
+          let at = 0;
+          for (let d = 0; d < 4; d++) for (let a = 0; a < N; a++) {
+            const cell = (d === 2 ? N - 1 : d === 3 ? 0 : a) * N + (d === 0 ? N - 1 : d === 1 ? 0 : a);
+            edgeAt[d * N + a] = at - offs[cell]; // (so that a surface's own number in the tile can be added)
+            at += offs[cell + 1] - offs[cell];
+          }
+          if (eb.byteLength >> 1 === at) edge = new Uint16Array(eb.buffer, eb.byteOffset, at);
+        }
+        tile = { col, row, xN: (32 - row) * TILE, yW: (32 - col) * TILE, offs, z, flags, links, edge, edgeAt, nodes: z.length };
       }
     } catch { /* treated as a tile with nowhere to stand */ }
   }
@@ -127,8 +167,8 @@ class Heap {
 /**
  * @param req { from: [x, y, z|null], to: [x, y, z|null], run, swim }
  * @returns { ok, reason?, points: Float32Array (x, y, z per point), kinds: Uint8Array (per point:
- *            1 swim, 16 another level lies over or under it),
- *            length (yards), seconds, expanded }
+ *            1 swim, 2 come to by a fall (FELL), 16 another level lies over or under it),
+ *            length (yards), seconds, expanded, fall (yards: the furthest fall on the way), hurt (the part of your full health the falls on the way cost) }
  */
 async function findRoute(req) {
   const began = performance.now();
@@ -139,9 +179,10 @@ async function findRoute(req) {
     let s = slotOf.get(key);
     if (s !== undefined) return s;
     const t = slots.length < MAX_TILES ? await loadTile(col, row) : null;
-    if (!t || t.nodes >= 1048576) { slotOf.set(key, -1); return -1; }
+    if (!t || t.nodes >= PACK) { slotOf.set(key, -1); return -1; }
     s = slots.length;
     slots.push(t);
+    // (closed: 1 once a surface has been looked at; the rest of the byte, the health the falls of the way there have cost, in hundredths of a full bar)
     state.push({ g: new Float32Array(t.nodes).fill(Infinity), parent: new Int32Array(t.nodes).fill(-1), closed: new Uint8Array(t.nodes) });
     slotOf.set(key, s);
     return s;
@@ -158,6 +199,7 @@ async function findRoute(req) {
       const i = Math.min(N - 1, Math.max(0, Math.floor((t.yW - y) / CELL))), j = Math.min(N - 1, Math.max(0, Math.floor((t.xN - x) / CELL)));
       const cell = j * N + i;
       for (let k = t.offs[cell]; k < t.offs[cell + 1]; k++) {
+        if (t.flags[k] & F_STEEP) continue;        // nowhere to stand
         if (land && t.flags[k] & F_SWIM) continue; // a boat's stop is out on the water: the pier beside it
         const dz = p[2] === null || p[2] === undefined ? 0 : land ? Math.max(0, Math.abs(t.z[k] - p[2]) - DOCK_LEVEL) * 2 : Math.abs(t.z[k] - p[2]) * 2;
         out.push({ slot: s, cell, node: k, d: Math.hypot(di * CELL, dj * CELL) + dz });
@@ -181,10 +223,55 @@ async function findRoute(req) {
       tt = slots[ts]; ni = (ni + N) % N; nj = (nj + N) % N; border = true;
     }
     const nc = nj * N + ni, z = t.z[n];
+    hopSlot = ts; hopCell = nc;
+    // (the data says which floor: the highest within a step that this one touches)
+    if (t.links && !border) return t.offs[nc] + ((t.links[n] >> (d * 4)) & 15) - 1;
     let best = -1;
-    for (let k = tt.offs[nc], e = tt.offs[nc + 1]; k < e; k++) { const dz = tt.z[k] - z; if (dz <= UP && dz >= -DOWN) best = k; }
-    // across a tile edge each side only knows its own half of the way through
+    if (t.links && tt.links) {
+      // across a tile edge each side only knows its own half of the way through: the highest floor within a step that is open on its side
+      for (let k = tt.offs[nc], e = tt.offs[nc + 1]; k < e; k++) { const dz = tt.z[k] - z; if (dz <= UP && dz >= -DOWN && tt.flags[k] & BACK[d]) best = k; }
+      return best;
+    }
+    // Data built before links were kept: the highest floor within a step, as the builder of that data took it.
+    for (let k = tt.offs[nc], e = tt.offs[nc + 1]; k < e; k++) { const dz = tt.z[k] - z; if (dz <= UP_OLD && dz >= -DOWN && !(tt.flags[k] & F_STEEP)) best = k; }
     if (best >= 0 && border && !(tt.flags[best] & BACK[d])) return -1;
+    return best;
+  };
+  // Where you come down going one cell that way off a surface that leads on to no floor there:
+  // off the edge of a floor, or on down steep ground - its index (hopSlot, hopCell say where),
+  // -1 if there is no going that way, -2 if the tile over there has not been loaded yet.
+  // One way only: there is no coming back up.
+  const fall = (s, cell, n, d) => {
+    const t = slots[s];
+    if (!t.links) return -1;
+    const v = (t.links[n] >> (d * 4)) & 15;
+    if (!v) return -1;
+    const ni = (cell % N) + DX[d], nj = ((cell / N) | 0) + DY[d];
+    if (v !== LINK_EDGE) {
+      if (t.flags[n] & OPEN[d]) return -1; // (it leads on to a floor: that is walking - hop)
+      hopSlot = s; hopCell = nj * N + ni;
+      return t.offs[hopCell] + v - 1;
+    }
+    // Across a tile edge: the first surface under you over there - no higher than this one (steep
+    // ground only leads on to what is lower still), and with nothing solid between it and your
+    // head as you come in: that tile says how much room there is over each of its surfaces on
+    // this side. A floor to land on before steep ground to slide on down; of two alike, the higher.
+    hopCol = t.col + (ni < 0 ? -1 : ni >= N ? 1 : 0); hopRow = t.row + (nj < 0 ? -1 : nj >= N ? 1 : 0);
+    const ts = slotOf.get(hopCol * 128 + hopRow);
+    if (ts === undefined) return -2;
+    if (ts < 0) return -1;
+    const tt = slots[ts];
+    if (!tt.edge) return -1;
+    const mi = (ni + N) % N, mj = (nj + N) % N, nc = mj * N + mi, b = d ^ 1;
+    const z = t.z[n], top = z - (t.flags[n] & F_STEEP ? SLIDE_ON : 0), room = tt.edgeAt[b * N + (b < 2 ? mj : mi)];
+    let best = -1, rank = -Infinity;
+    for (let k = tt.offs[nc], e = tt.offs[nc + 1]; k < e && tt.z[k] <= top; k++) {
+      if (tt.edge[room + k] < (z - tt.z[k] + HEAD) * 8) continue;
+      // (and not on to ground with something built over it: as the builder has it, within a tile)
+      if ((tt.flags[k] & (F_TERRAIN | F_STEEP)) === F_TERRAIN && tt.edge[room + k] !== OPEN_SKY) continue;
+      const r = tt.z[k] + (tt.flags[k] & F_STEEP ? 0 : 1e6);
+      if (r > rank) { rank = r; best = k; }
+    }
     hopSlot = ts; hopCell = nc;
     return best;
   };
@@ -202,12 +289,16 @@ async function findRoute(req) {
   };
   const strict = !!req.levels && !req.drops;
   const step = strict ? hopBack : hop;
+  // Falls are for a way somewhere, not for saying which levels a spot has (those are walked to, and back from).
+  const falls = !req.levels && !req.noFalls;
   // True if a floor is shut in: everything you can get to from it is a small pocket (the ground
   // under a building's floor, the inside of a rock) that the other end is not in.
-  const pocket = new Set(); // floors already found to be shut in
-  const enclosed = async (c, other) => {
-    if (pocket.has(c.slot * 1048576 + c.node)) return true;
-    const seen = new Set([c.slot * 1048576 + c.node]), queue = [[c.slot, c.cell, c.node]];
+  // `leaving`: for where a way begins - a ledge you can drop off is not shut in, though no step leads off it.
+  const pocketIn = new Set(), pocketLeft = new Set(); // floors already found to be shut in
+  const enclosed = async (c, other, leaving = false) => {
+    const pocket = leaving && falls ? pocketLeft : pocketIn;
+    if (pocket.has(c.slot * PACK + c.node)) return true;
+    const seen = new Set([c.slot * PACK + c.node]), queue = [[c.slot, c.cell, c.node]];
     for (let q = 0; q < queue.length; q++) {
       if (queue.length > 2500) return false;
       const [s, cell, n] = queue[q];
@@ -215,8 +306,12 @@ async function findRoute(req) {
       for (let d = 0; d < 4; d++) {
         let k = hop(s, cell, n, d);
         if (k === -2) { await getSlot(hopCol, hopRow); k = hop(s, cell, n, d); }
+        if (k < 0 && leaving && falls) {
+          k = fall(s, cell, n, d);
+          if (k === -2) { await getSlot(hopCol, hopRow); k = fall(s, cell, n, d); }
+        }
         if (k < 0) continue;
-        const id = hopSlot * 1048576 + k;
+        const id = hopSlot * PACK + k;
         if (!seen.has(id)) { seen.add(id); queue.push([hopSlot, hopCell, k]); }
       }
     }
@@ -227,7 +322,7 @@ async function findRoute(req) {
   // great hall's floor. The game leaves that ground in place and it can join up with open land
   // somewhere, but it is not where anyone stands; an awning or a branch overhead does not count.
   const built = (t, cell, z) => {
-    for (let k = t.offs[cell]; k < t.offs[cell + 1]; k++) if (!(t.flags[k] & (F_TERRAIN | F_SWIM)) && t.z[k] > z + 1.5) return true;
+    for (let k = t.offs[cell]; k < t.offs[cell + 1]; k++) if (!(t.flags[k] & (F_TERRAIN | F_SWIM | F_STEEP)) && t.z[k] > z + 1.5) return true;
     return false;
   };
   const covered = (c) => {
@@ -247,7 +342,7 @@ async function findRoute(req) {
   // knows the ground under a roof or inside a wall, where nothing walkable is overhead.)
   const sunkMemo = new Map();
   const sunk = async (slot, cell, node) => {
-    const id = slot * 1048576 + node;
+    const id = slot * PACK + node;
     if (sunkMemo.has(id)) return sunkMemo.get(id);
     const t = slots[slot];
     let out = false;
@@ -262,7 +357,7 @@ async function findRoute(req) {
           if (s2 < 0) continue;
           const t2 = slots[s2];
           const c2 = Math.min(N - 1, Math.max(0, Math.floor((t2.xN - wx) / CELL))) * N + Math.min(N - 1, Math.max(0, Math.floor((t2.yW - wy) / CELL)));
-          for (let q = t2.offs[c2]; q < t2.offs[c2 + 1]; q++) if (!(t2.flags[q] & (F_TERRAIN | F_SWIM)) && t2.z[q] > h) { over = true; break; }
+          for (let q = t2.offs[c2]; q < t2.offs[c2 + 1]; q++) if (!(t2.flags[q] & (F_TERRAIN | F_SWIM | F_STEEP)) && t2.z[q] > h) { over = true; break; }
         }
         if (over) sides++;
       }
@@ -302,7 +397,7 @@ async function findRoute(req) {
       if (!open) continue;
       g.sunk = covered(g.members[0]) || (await sunk(g.members[0].slot, g.members[0].cell, g.members[0].node));
       if (!g.sunk) realCount++;
-      for (const c of g.members) levelOf.set(c.slot * 1048576 + c.node, levels.length);
+      for (const c of g.members) levelOf.set(c.slot * PACK + c.node, levels.length);
       levels.push(g);
     }
     realLeft = realCount;
@@ -346,14 +441,14 @@ async function findRoute(req) {
   for (const c of starts.slice(0, 400)) {
     if (seeds.length && (!loose || c.d > seeds[0].d + 1.6)) break;
     if (slots[c.slot].z[c.node] > over) continue;
-    if (!(await enclosed(c, goals[0] ?? spare[0] ?? { slot: -1, node: -1 }))) seeds.push(c);
+    if (!(await enclosed(c, goals[0] ?? spare[0] ?? { slot: -1, node: -1 }, true))) seeds.push(c);
   }
   if (!seeds.length) return { ok: false, reason: 'no way out of where you are on foot' };
   // Buried ground counts as that much further away, at either end: the floor built over it is
   // the one meant unless only the ground can be reached. (So do the spare floors at the spot.)
-  const goalSet = new Set([...goals, ...spare].map((c) => c.slot * 1048576 + c.node));
-  const buried = new Set([...goals.filter(covered), ...spare].map((c) => c.slot * 1048576 + c.node));
-  const spares = new Set(spare.map((c) => c.slot * 1048576 + c.node));
+  const goalSet = new Set([...goals, ...spare].map((c) => c.slot * PACK + c.node));
+  const buried = new Set([...goals.filter(covered), ...spare].map((c) => c.slot * PACK + c.node));
+  const spares = new Set(spare.map((c) => c.slot * PACK + c.node));
   const plain = goals.length - goals.filter(covered).length; // goals that are not buried ground
   let goalId = -1, goalCost = Infinity, goalAt = 0;
   const gx = req.to[0], gy = req.to[1];
@@ -363,10 +458,25 @@ async function findRoute(req) {
   for (const c of seeds) {
     const g0 = seeds.length > 1 && covered(c) ? COVERED : 0;
     state[c.slot].g[c.node] = g0;
-    heap.push(g0, c.slot * 1048576 + c.node, c.cell);
+    heap.push(g0, c.slot * PACK + c.node, c.cell);
   }
   let expanded = 0, found = false;
-  const nb = new Int32Array(8), nbSlot = new Int32Array(8), nbCell = new Int32Array(8);
+  const nb = new Int32Array(8), nbSlot = new Int32Array(8), nbCell = new Int32Array(8), nbFell = new Uint8Array(8);
+  // One cell on from a surface: walking where it leads on to a floor, else - where falls count -
+  // dropping (as hop and fall answer; fell says which it was).
+  let fell = 0;
+  const go = (s, cell, n, d) => {
+    fell = 0;
+    let k = step(s, cell, n, d);
+    if (k !== -1 || !falls) return k;
+    k = fall(s, cell, n, d);
+    if (k >= 0) fell = 1;
+    return k;
+  };
+  // Steep ground reached so far -> the height at which the fall that got there began. (What a
+  // fall costs is its whole height, from the floor you left to the floor you land on, however
+  // far you slide between the two.)
+  const fellFrom = new Map();
 
   while (heap.n > 0) {
     // an end has been reached (buried ground): stop once nothing left could beat it. (The search
@@ -374,9 +484,9 @@ async function findRoute(req) {
     if (found && (heap.key[0] >= goalCost * WEIGHT || expanded > goalAt + EXTRA)) break;
     const id = heap.id[0], cell = heap.cell[0];
     heap.pop();
-    const s = id >>> 20, n = id & 1048575, st = state[s];
-    if (st.closed[n]) continue;
-    st.closed[n] = 1;
+    const s = id >>> PACK_BITS, n = id & PACK_MASK, st = state[s];
+    if (st.closed[n] & 1) continue;
+    st.closed[n] |= 1;
     if (levels) {
       const li = levelOf.get(id);
       if (li !== undefined && !levels[li].reached) {
@@ -404,38 +514,61 @@ async function findRoute(req) {
     const g = st.g[n], lean = WEIGHT * (1 + expanded / HURRY);
     // the four cells beside this one that its floor leads on to
     for (let d = 0; d < 4; d++) {
-      let k = step(s, cell, n, d);
-      if (k === -2) { await getSlot(hopCol, hopRow); k = step(s, cell, n, d); }
-      nb[d] = k; nbSlot[d] = hopSlot; nbCell[d] = hopCell;
+      let k = go(s, cell, n, d);
+      if (k === -2) { await getSlot(hopCol, hopRow); k = go(s, cell, n, d); }
+      nb[d] = k; nbSlot[d] = hopSlot; nbCell[d] = hopCell; nbFell[d] = fell;
     }
     // a diagonal only where both ways round the corner lead to the same floor
     for (let d = 4; d < 8; d++) {
       nb[d] = -1;
       const dx = DX[d] > 0 ? 0 : 1, dy = DY[d] > 0 ? 2 : 3;
       if (nb[dx] < 0 || nb[dy] < 0) continue;
-      let k1 = step(nbSlot[dx], nbCell[dx], nb[dx], dy);
-      if (k1 === -2) { await getSlot(hopCol, hopRow); k1 = step(nbSlot[dx], nbCell[dx], nb[dx], dy); }
-      const s1 = hopSlot, c1 = hopCell;
-      let k2 = step(nbSlot[dy], nbCell[dy], nb[dy], dx);
-      if (k2 === -2) { await getSlot(hopCol, hopRow); k2 = step(nbSlot[dy], nbCell[dy], nb[dy], dx); }
-      if (k1 >= 0 && k1 === k2 && s1 === hopSlot) { nb[d] = k1; nbSlot[d] = s1; nbCell[d] = c1; }
+      let k1 = go(nbSlot[dx], nbCell[dx], nb[dx], dy);
+      if (k1 === -2) { await getSlot(hopCol, hopRow); k1 = go(nbSlot[dx], nbCell[dx], nb[dx], dy); }
+      const s1 = hopSlot, c1 = hopCell, f1 = fell;
+      let k2 = go(nbSlot[dy], nbCell[dy], nb[dy], dx);
+      if (k2 === -2) { await getSlot(hopCol, hopRow); k2 = go(nbSlot[dy], nbCell[dy], nb[dy], dx); }
+      if (k1 >= 0 && k1 === k2 && s1 === hopSlot) { nb[d] = k1; nbSlot[d] = s1; nbCell[d] = c1; nbFell[d] = nbFell[dx] | nbFell[dy] | f1 | fell; }
     }
     const t = slots[s], z = t.z[n];
+    const from = t.flags[n] & F_STEEP ? fellFrom.get(id) ?? z : z; // the height a fall from here began at
+    const lost = st.closed[n] >> 1;                                 // the health the falls on the way here have cost, in hundredths
     for (let d = 0; d < 8; d++) {
       const k = nb[d];
       if (k < 0) continue;
       const ts = nbSlot[d], tt = slots[ts], sn = state[ts];
-      if (sn.closed[k]) continue;
+      if (sn.closed[k] & 1) continue;
       const dz = tt.z[k] - z, flat = d < 4 ? CELL : CELL * 1.41421356;
       const f = tt.flags[k];
-      let cost = Math.sqrt(flat * flat + dz * dz) / (f & F_SWIM ? swim : run);
+      let cost, losing = lost;
+      if (!nbFell[d]) cost = Math.sqrt(flat * flat + dz * dz) / (f & F_SWIM ? swim : run);
+      else {
+        // a fall: no further than you walk away from (into water: as far as you like), and one that hurts is that much longer a way
+        const far = from - tt.z[k];
+        if (far > FALL_MOST && !(f & F_SWIM)) continue;
+        // Not on to the earth a town is built over. The data lets no fall end on ground with
+        // something built over it; but a town's canals are open to the sky, their water is the
+        // town's own and not in this data, and to the search they are dry trenches down to that
+        // earth: nowhere anyone lands, with no way back up, and a way out under the town to the
+        // open country that nobody could take.
+        if (f & F_TERRAIN && !(f & F_STEEP) && (covered({ slot: ts, cell: nbCell[d], node: k }) || (await sunk(ts, nbCell[d], k)))) continue;
+        cost = flat / run + Math.max(0, -dz) / FALL_SPEED;
+        if (!(f & (F_STEEP | F_SWIM))) {
+          // (the falls of one way add up: two you would each walk away from are not two you walk away from)
+          losing += Math.round(hurt(far) * 100);
+          if (losing > HURT_MOST) continue;
+          cost += hurt(far) * FALL_HURT;
+        }
+      }
       const x = tt.xN - (((nbCell[d] / N) | 0) + 0.5) * CELL, y = tt.yW - ((nbCell[d] % N) + 0.5) * CELL;
       if (f & F_LAVA) cost *= LAVA_COST;
       const ng = g + cost;
       if (ng < sn.g[k]) {
         sn.g[k] = ng;
         sn.parent[k] = id;
-        heap.push(ng + (Math.hypot(x - gx, y - gy) / vmax) * lean, ts * 1048576 + k, nbCell[d]);
+        sn.closed[k] = losing << 1;
+        if (f & F_STEEP) fellFrom.set(ts * PACK + k, from);
+        heap.push(ng + (Math.hypot(x - gx, y - gy) / vmax) * lean, ts * PACK + k, nbCell[d]);
       }
     }
   }
@@ -464,12 +597,27 @@ async function findRoute(req) {
   // ---- the path: cells from the goal back to the start ----
   const cellOf = (t, node) => { let lo = 0, hi = N * N - 1; while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (t.offs[mid] <= node) lo = mid; else hi = mid - 1; } return lo; };
   const raw = [];
-  for (let id = goalId; id >= 0; id = state[id >>> 20].parent[id & 1048575]) {
-    const s = id >>> 20, n = id & 1048575, t = slots[s], c = cellOf(t, n);
+  for (let id = goalId; id >= 0; id = state[id >>> PACK_BITS].parent[id & PACK_MASK]) {
+    const s = id >>> PACK_BITS, n = id & PACK_MASK, t = slots[s], c = cellOf(t, n);
     const [x, y] = pos(s, c);
-    raw.push({ x, y, z: t.z[n], kind: (t.flags[n] & F_SWIM ? 1 : 0), slot: s, cell: c, node: n });
+    raw.push({ x, y, z: t.z[n], kind: (t.flags[n] & F_SWIM ? 1 : 0), steep: !!(t.flags[n] & F_STEEP), slot: s, cell: c, node: n });
   }
   raw.reverse();
+  // Which of its places are come to by a fall (off an edge, or down steep ground), not by a
+  // step: each fall from the floor left to the floor landed on. One of a few yards - a bank a
+  // little too steep to stand on, a ledge you hop down - is not worth the name: it is drawn and
+  // told like the walking either side of it. And the furthest fall of the way, water not
+  // counted (there is no harm in it).
+  let furthest = 0, costs = 0;
+  for (let i = 1, from = 0, first = 0; i < raw.length; i++) {
+    const a = raw[i - 1], b = raw[i];
+    b.fell = a.steep || b.steep || a.z - b.z > DOWN;
+    if (!b.fell) continue;
+    if (!a.steep) { from = a.z; first = i; }
+    if (b.steep && i < raw.length - 1) continue;
+    if (from - b.z < FELL_SHOWN) for (let k = first; k <= i; k++) raw[k].fell = false;
+    else if (!(b.kind & 1)) { furthest = Math.max(furthest, from - b.z); costs += hurt(from - b.z); }
+  }
 
   // ---- straighten: the grid path zig-zags; pull it tight wherever a straight line is as walkable ----
   // Floors along a straight line from a to b, or null if it is blocked or leaves the kind of ground a and b share.
@@ -506,7 +654,7 @@ async function findRoute(req) {
       }
       const tt = slots[s], f = tt.flags[n];
       const kind = (f & F_SWIM ? 1 : 0);
-      if (kind !== a.kind || kind !== b.kind || f & F_LAVA) return null;
+      if (kind !== a.kind || kind !== b.kind || f & (F_LAVA | F_STEEP)) return null;
       out.push({ x, y, z: tt.z[n], kind, slot: s, cell, node: n });
     }
     return s === b.slot && n === b.node ? out : null;
@@ -523,8 +671,14 @@ async function findRoute(req) {
       probe = Math.min(probe - 1, anchor + step);
     }
     if (seg) { for (let k = 3; k < seg.length - 1; k += 4) pts.push(seg[k]); } // keep points along it, to follow the ground
-    pts.push(raw[far]);
+    // (a straight line is walked: whatever the grid path did to get there, this did not fall)
+    pts.push(seg ? { ...raw[far], fell: false } : raw[far]);
     anchor = far;
+  }
+  // (a slide down steep ground: every third place of it will do for a line)
+  for (let i = pts.length - 2, run = 0; i > 0; i--) {
+    run = pts[i].steep && pts[i + 1].steep && pts[i - 1].steep ? run + 1 : 0;
+    if (run % 3) pts.splice(i, 1);
   }
   // begin where you stand, and finish at the asked spot itself when it is right by the last place to stand
   pts[0] = { ...pts[0], x: req.from[0], y: req.from[1] };
@@ -552,14 +706,14 @@ async function findRoute(req) {
       }
       const t = slots[s], cell = j * N + i;
       for (let k = t.offs[cell]; k < t.offs[cell + 1]; k++) {
-        if (Math.abs(t.z[k] - z0) <= STACK_GAP) continue;
+        if (Math.abs(t.z[k] - z0) <= STACK_GAP || t.flags[k] & F_STEEP) continue;
         if (t.flags[k] & F_TERRAIN && t.z[k] < z0 && covered({ slot: s, cell, node: k })) continue;
-        suspects.push(s * 1048576 + k);
+        suspects.push(s * PACK + k);
       }
     }
     if (!suspects.length) return false;
     // the ground this place is part of: what can be walked to, and back from, without leaving the neighbourhood
-    const seen = new Set([p.slot * 1048576 + p.node]), queue = [[p.slot, p.cell, p.node, 0, 0]];
+    const seen = new Set([p.slot * PACK + p.node]), queue = [[p.slot, p.cell, p.node, 0, 0]];
     for (let q = 0; q < queue.length; q++) {
       const [s, cell, n, oi, oj] = queue[q];
       for (let d = 0; d < 4; d++) {
@@ -568,7 +722,7 @@ async function findRoute(req) {
         let k = hopBack(s, cell, n, d);
         if (k === -2) { await getSlot(hopCol, hopRow); k = hopBack(s, cell, n, d); }
         if (k < 0) continue;
-        const id = hopSlot * 1048576 + k;
+        const id = hopSlot * PACK + k;
         if (!seen.has(id)) { seen.add(id); queue.push([hopSlot, hopCell, k, ni, nj]); }
       }
     }
@@ -583,7 +737,7 @@ async function findRoute(req) {
   const island = new Map(); // floor -> true if it is part of a level, false if not
   const standable = async (id) => {
     if (island.has(id)) return island.get(id);
-    const s0 = Math.floor(id / 1048576), n0 = id % 1048576, c0 = cellOf(slots[s0], n0);
+    const s0 = Math.floor(id / PACK), n0 = id % PACK, c0 = cellOf(slots[s0], n0);
     const seen = new Set([id]), queue = [[s0, c0, n0]];
     let real = null;
     for (let q = 0; q < queue.length && real === null; q++) {
@@ -592,7 +746,7 @@ async function findRoute(req) {
         let k = hopBack(s, cell, n, d);
         if (k === -2) { await getSlot(hopCol, hopRow); k = hopBack(s, cell, n, d); }
         if (k < 0) continue;
-        const next = hopSlot * 1048576 + k;
+        const next = hopSlot * PACK + k;
         // (the same surface as one already looked at: it is whatever that was)
         if (island.has(next)) { real = island.get(next); break; }
         if (!seen.has(next)) { seen.add(next); queue.push([hopSlot, hopCell, k]); }
@@ -624,7 +778,7 @@ async function findRoute(req) {
     }
   }
   for (const p of pts) {
-    if (p.stack) continue;
+    if (p.stack || p.steep) continue; // (nobody stands on steep ground to be on one level or another)
     // (a route so long that this would hold it up: the rest counts as marked, which only makes its follower more careful)
     p.stack = performance.now() - stackBegan > STACK_MS ? true : await stacked(p);
   }
@@ -632,10 +786,15 @@ async function findRoute(req) {
   let length = 0, seconds = 0;
   const points = new Float32Array(pts.length * 3), kinds = new Uint8Array(pts.length);
   pts.forEach((p, i) => {
-    points[i * 3] = p.x; points[i * 3 + 1] = p.y; points[i * 3 + 2] = p.z; kinds[i] = p.kind | (p.stack ? STACKED : 0);
-    if (i > 0) { const d = Math.hypot(p.x - pts[i - 1].x, p.y - pts[i - 1].y, p.z - pts[i - 1].z); length += d; seconds += d / (p.kind & 1 ? swim : run); }
+    points[i * 3] = p.x; points[i * 3 + 1] = p.y; points[i * 3 + 2] = p.z; kinds[i] = p.kind | (p.fell ? FELL : 0) | (p.stack ? STACKED : 0);
+    if (i > 0) {
+      const q = pts[i - 1], d = Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z);
+      length += d;
+      seconds += p.fell ? Math.hypot(p.x - q.x, p.y - q.y) / run + Math.max(0, q.z - p.z) / FALL_SPEED : d / (p.kind & 1 ? swim : run);
+    }
   });
-  return { ok: true, points, kinds, length, seconds, expanded, tiles: slots.length };
+  // (fall: the furthest you fall on the way, in yards, and hurt: the part of your full health its falls cost between them - 0 where none hurts)
+  return { ok: true, points, kinds, length, seconds, expanded, tiles: slots.length, fall: furthest, hurt: Math.min(1, costs) };
 }
 
 let chain = Promise.resolve();

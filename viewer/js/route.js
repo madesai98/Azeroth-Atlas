@@ -3,6 +3,7 @@
 import { note, changed } from './log.js';
 import { GLOBALS_WGSL, targets, depthState, ALPHA_BLEND } from './gpu.js';
 import { wayOf, nearestOn } from './transit.js';
+import { FELL, FALL_SPEED, fallsOf } from './falls.js';
 
 const REPLAN_OFF = 10;      // yards off the route before a new one is worked out
 const REPLAN_EVERY = 20000; // ms: refresh while travelling even if nothing seems to have changed
@@ -32,6 +33,7 @@ const FAIL_FOR = 60000;     // ms: ...for this long
 const FAIL_COST = 200000;   // floors a failed search looked at before it counts as a long one
 const SPEED_KEY = 'wfmap.flightSpeed';
 const whole = (v) => (Number.isFinite(v) ? Math.round(v) : null);
+
 
 export class RoutePlanner {
   /**
@@ -243,15 +245,22 @@ export class RoutePlanner {
     }).then(() => { if (this.asked === asked) this.#said(); });
   }
 
-  /** Seconds from the start to each point of a route (walking, swimming and flying at their speeds). */
+  /** Seconds from the start to each point of a route (walking, swimming and flying at their speeds; a fall, at the speed you come down). */
   #times(points, kinds) {
     const run = this.speeds?.run || 7, swim = this.speeds?.swim || run * 0.67;
     const t = new Float32Array(points.length / 3);
     for (let i = 1; i < t.length; i++) {
-      const d = Math.hypot(points[i * 3] - points[i * 3 - 3], points[i * 3 + 1] - points[i * 3 - 2], points[i * 3 + 2] - points[i * 3 - 1]);
-      t[i] = t[i - 1] + d / (kinds[i] & 4 ? this.flightSpeed : kinds[i] & 1 ? swim : run);
+      const dx = points[i * 3] - points[i * 3 - 3], dy = points[i * 3 + 1] - points[i * 3 - 2], dz = points[i * 3 + 2] - points[i * 3 - 1];
+      if (kinds[i] & FELL && !(kinds[i] & 4)) { t[i] = t[i - 1] + Math.hypot(dx, dy) / run + Math.max(0, -dz) / FALL_SPEED; continue; }
+      t[i] = t[i - 1] + Math.hypot(dx, dy, dz) / (kinds[i] & 4 ? this.flightSpeed : kinds[i] & 1 ? swim : run);
     }
     return t;
+  }
+
+  /** The falls still ahead on the route shown: how far each is, in yards (see falls.js). */
+  fallsAhead() {
+    const r = this.route;
+    return r ? fallsOf(r.points, r.kinds, r.at) : [];
   }
 
   /** What the route worker needs to search a map: { map, rev, tiles } (null if it has no walking data). */
@@ -724,14 +733,15 @@ export class RoutePlanner {
    * How far along the route (index of the nearest point) a position is, and how far off it.
    * Height counts, and for more than distance does: under the gallery the route ends on, or
    * under a bridge it crosses, you are not on that part of it, however near it looks from above.
-   * (Not along water, where you may be well below the surface the route runs on.)
+   * (Not along water, where you may be well below the surface the route runs on; nor down a
+   * fall, where you are somewhere between its top and its foot for as long as it lasts.)
    */
   #progress(x, y, z) {
     const r = this.route, p = r.points, kinds = r.kinds;
     const tall = Number.isFinite(z);
     let best = r.at, bestD = Infinity;
     for (let i = Math.max(0, r.at - 4); i < Math.min(p.length / 3, r.at + 60); i++) {
-      const dz = tall && !(kinds[i] & 1) ? (p[i * 3 + 2] - z) * LEVEL_WEIGH : 0;
+      const dz = tall && !(kinds[i] & (1 | FELL)) ? (p[i * 3 + 2] - z) * LEVEL_WEIGH : 0;
       const d = Math.hypot(p[i * 3] - x, p[i * 3 + 1] - y, dz);
       if (d < bestD) { bestD = d; best = i; }
     }
@@ -942,8 +952,9 @@ export class RouteRenderer {
 
   /**
    * The colour of this route ('#rrggbb'). What is walked is that colour; what is flown, a light
-   * tint of it; what is swum leans toward the blue of water, and a crossing by boat or zeppelin
-   * toward lilac - so each kind of going can still be told, and each route from the others.
+   * tint of it; what is swum leans toward the blue of water, a crossing by boat or zeppelin
+   * toward lilac, and what you fall or slide down toward red - so each kind of going can still
+   * be told, and each route from the others.
    */
   setColor(hex) {
     if (hex === this.hex) return;
@@ -951,7 +962,7 @@ export class RouteRenderer {
     const base = rgb(hex), mix = (to, t) => base.map((v, i) => v + (to[i] - v) * t);
     this.data.set(base, 8);
     this.data.set(mix(rgb('#5cc8ff'), 0.55), 12);
-    this.data.set(base, 16);
+    this.data.set(mix(rgb('#ff4a2e'), 0.65), 16);
     this.data.set(mix(rgb('#ffffff'), 0.62), 20);
     this.data.set(mix(rgb('#c39bff'), 0.5), 24);
   }

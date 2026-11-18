@@ -6,6 +6,7 @@
 // (server/mail.js explains how something gets into a running game at all).
 
 import { note, changed } from './log.js';
+import { fallsOf, fallsSaid } from './falls.js';
 
 const TOLERANCE = 0.6;   // yards a point may lie off the line through its neighbours and be left out
 const POINT_BUDGET = 1800; // points in one delivery; past that the track is thinned further
@@ -21,7 +22,12 @@ const Z_TOLERANCE = 1;   // yards a point's height may differ from the line thro
 const THERE = 10;        // yards from the waypoint within which you are at it (as the addon's ARRIVE)...
 const LEVEL = 2.5;       // ...when you are also within this of its height
 
-/** What kind of going a piece of route is, as the addon colours it: 0 on foot, 1 swimming, 2 no longer used (it was "through a danger zone"), 3 in the air, 4 carried by a boat or zeppelin. */
+/**
+ * What kind of going a piece of route is, as the addon colours it: 0 on foot, 1 swimming, 2 a
+ * fall (off an edge, down ground too steep to stand on: the addon has had this kind, and its
+ * red, since it meant "through a danger zone", which is no longer sent), 3 in the air, 4 carried
+ * by a boat or zeppelin.
+ */
 const going = (k) => (k & RIDE ? 4 : k & 4 ? 3 : k & 2 ? 2 : k & 1 ? 1 : 0);
 
 /**
@@ -134,9 +140,12 @@ const mmss = (s) => { const t = Math.max(0, Math.round(s)); return `${Math.floor
  * @param goal  what the waypoint is called ("your map pin")
  */
 export function stepsOf(route, ends, goal) {
-  return (route.legs ?? []).map((l, i) => {
+  return (route.legs ?? []).map((l, i, legs) => {
     const through = (name) => (/^Portal/.test(name) ? `Portal to ${name.replace(/^Portal to /, '')}` : `Go through to ${name.replace(/^Passage to /, '')}`);
-    const text = l.mode === 'walk' ? `Walk to ${l.to ?? goal}`
+    // (a walk with a fall in it that costs health says so: the line is red where you come down)
+    const before = legs.slice(0, i).map((o) => o.end).filter((v) => v !== undefined).pop() ?? 0;
+    const falls = l.mode === 'walk' && l.end !== undefined ? fallsSaid(fallsOf(route.points, route.kinds, before, l.end)) : null;
+    const text = l.mode === 'walk' ? `Walk to ${l.to ?? goal}${falls ? ` (${falls[0]} on the way)` : ''}`
       : l.mode === 'fly' ? (l.learn ? `Learn the flight point, then fly to ${l.to}` : `Fly to ${l.to}`)
       : l.mode === 'boat' ? `Boat to ${l.to}`
       : l.mode === 'zeppelin' ? `Zeppelin to ${l.to}`

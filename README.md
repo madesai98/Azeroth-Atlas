@@ -876,6 +876,57 @@ half-yard precision, so thin walls separate and doorways a yard wide stay open. 
 step is the time it takes at **your** speeds: the addon reports your current run speed (mounted
 or not) and swim speed.
 
+**How steep is too steep** is the game's own rule: ground whose face tilts more than 50 degrees
+cannot be walked up, and anything up to that can. A good many of the game's hillsides are built
+right at that limit, 48 to 50 degrees all the way up, and guides send you straight up them.
+(Until 0.5.1 the map lost those: where such a slope climbs cornerwise across the grid, a yard
+of it came out as two half-floors that led on to nothing uphill, and a hill you had just run up
+in twenty seconds was shown as a mile's walk round the mountain.)
+
+**Down is not up.** The game lets you go where you cannot walk back: off a ledge, and down
+ground too steep to stand on, which you slide down. The map's data has both: what lies under
+every edge you can step off, and the steep ground itself, as somewhere you only ever go
+downhill. A route takes such a way where it is quicker, within what the game charges for
+falling:
+
+| The fall, from where your feet leave the ground to where they are on it again | What the game takes | What the route does |
+|---|---|---|
+| up to about 14.5 yd | nothing | takes it freely |
+| more, up to 45 yd | about 1.8% of your full health a yard beyond that (30 yd: a third; 45 yd: a little over half) | takes it if the way round is longer by more than the health is worth (a full bar counts as a minute), and says so: "It has a fall of 31 yd: about 32% of your full health" |
+| more than 45 yd | most or all of your health (69 yd kills from full health) | never |
+| several on one way | each its own share, and they add up | never more between them than one fall of 45 yd costs: two you would each walk away from are not two you walk away from. Said as "It has 2 falls that cost health, the furthest 31 yd: about 47% of your full health in all" |
+| into water deep enough to swim in, from any height | nothing | takes it freely |
+
+A slide down a steep bank and the drop at its end are counted as one fall, from where you leave
+your feet to where you get them back: that is the most the game can charge for it, so where
+the game is kinder (you find your feet for a moment half way down) the route was only more
+careful than it had to be. The map is not told how much health you have: 45 yards is a fall
+you walk away from with full health and some to spare, and it is yours to decline if you are
+hurt. A fall of 6 yards or more is drawn in red, here and on the game's own map (a hop down a
+ledge is drawn like the walking either side of it), and one that costs health is in the
+game's step too: "Walk to Grund Drokda (a fall of 31 yd on the way)". Which levels a waypoint
+has is still worked out by walking alone (see "Which level"): a place you can only drop into
+is not somewhere to send you.
+
+Two things a fall never does:
+
+- **land on ground with something built over it.** The game leaves the earth in place under a
+  town (forty yards under Stormwind's streets), and the buildings nobody goes into are hollow
+  shells standing over it: past any low wall of theirs the data has a clear drop to that earth,
+  which is nowhere anyone gets to and has no way back up. Ground you can fall on to has the sky
+  over it. (Floors of buildings, bridges and ledges are another matter, and so is walking.)
+- **pass through anything**: a drop is taken only where nothing solid stands between the edge
+  and the landing, at the height you come in at - checked to the half yard, and across the
+  seams between the map's tiles as well (each tile records, along its edges, how much room
+  there is over everything on that side).
+
+Not known: water that belongs to a building and not to the land (Stormwind's canals) is not
+in this data, so to the route a canal is a dry trench, open to the sky, down to the earth
+under the town. No fall ends there either (ground sunk among a town's built floors is the
+same earth, and is not somewhere to land), so a route does not have you jump into a canal -
+neither to swim across it, which you could, nor to walk out under the town, which you could
+not.
+
 Routes take the quickest way and pay no heed to where creatures are stationed (see "Spawn
 zones" for why going round them was taken out).
 
@@ -2014,7 +2065,7 @@ The extractor keeps what a pathfinder needs, in `dataDir`:
 | `maps/<id>/t/<col>_<row>.bin` (`WFT1`) | Per tile: section 1 heights (129×129 corner + 128×128 centre, float32), 2 normals, 4 holes (per chunk, 8 rows × 8 bits), 5 chunk flags + area id (flag `0x2` = impassable), 6 liquid layers (type, level, per-quad existence, per-vertex heights), 7 object placements |
 | `maps/<id>/areas.bin` | Area id per terrain chunk for the whole map |
 | `maps/<id>/wmos.bin` | Every building placement (position, rotation, scale, world bounds) |
-| `maps/<id>/nav/<col>_<row>.bin` (`WFN1`) | Where a character can stand, per tile, on a 512 x 512 grid (1.04 yd). Sections (each deflated): 2 number of floors per cell, 3 floor heights (uint16, 1/8 yd, +2048, stored as differences), 4 flags per floor (1 swim, 2 lava, 4 terrain, 16 / 32 / 64 / 128 = leads on to the cell east / west / south / north) |
+| `maps/<id>/nav/<col>_<row>.bin` (`WFN1`) | Where a character can stand, and what can only be slid or fallen down, per tile, on a 512 x 512 grid (1.04 yd). Sections (each deflated): 2 number of surfaces per cell (at most 14, lowest first), 3 their heights (uint16, 1/8 yd, +2048, stored as differences), 4 flags per surface (1 swim, 2 lava, 4 terrain, 8 steep ground: nowhere to stand, only a way down; 16 / 32 / 64 / 128 = a floor you walk on from to the cell east / west / south / north), 5 links per surface (uint16: four bits each for east, west, south, north, lowest first: 0 leads nowhere that way, 1 to 14 the surface of the next cell it leads on to, counted from 1, by a step where the flag for that side is set and by a fall where it is not, 15 open on that side at the edge of the tile), 6 the room over each surface along the tile's four edges (uint16, 1/8 yd, 65535 open sky, 0 not open on that side: for the east, west, south and north edge in turn, each cell along it, each surface of that cell - what a fall across the seam of two tiles is checked against). Steep ground is kept only where it is part of a way from a floor down to a floor. Tiles built before 0.5.1 have sections 2 to 4 only and are still read |
 | `maps/<id>/creatures.bin` (`WFC1`) | Stationed creatures: section 1 JSON (`creatures`: name, `min`/`max` level, `rank`, reaction to Alliance `a` and Horde `h` (0 friendly, 1 neutral, 2 hostile), `est` level estimated, `u` = no side recorded (new to this game: shown only when asked for), `t` = these spawn points are inside a town or city of the Alliance (1) or the Horde (2) and make no zone for that side), 2 spawn points (float32 world x, y), 3 creature index per spawn point, 4 patrol route points, 5 routes (`creature, firstPoint, count`) |
 | `models/wmo/<id>.bin` (`WFM1`) | Section 1 header (JSON: its groups with the game's flags, box and run of vertices; `left`: the groups left out and why - see "What of a building or an object is not drawn"), 2 vertices (36-byte stride, position first), 5 collision triangle indices, 6 the game's per-triangle flags (`0x08` collision, `0x20` render, `0x04` detail, `0x02` no-camera-collide), 7 interior object placements, 8/9 interior liquid surfaces |
 | `models/m2/<id>.bin` (`WFM1`) | Section 4 collision vertices, 5 collision triangles |
