@@ -1,7 +1,7 @@
 // The NPC panel: the switches for who is shown, the card for the NPC you click, and the line
 // that says what was learned when you talk to someone in the game. (The data and the drawing
 // are in npcs.js.)
-import { KINDS, GROUPS, RANKS, TYPES, HEIGHT_HOW, SEEN, iconStyle, kindIcon, searchText } from './npcs.js';
+import { KINDS, GROUPS, RANKS, TYPES, HEIGHT_HOW, SEEN, FOUGHT, iconStyle, kindIcon, searchText } from './npcs.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...children) => {
@@ -110,8 +110,8 @@ export function bindNpcs(app, sheet) {
     else if (!layer.data) text = app.scene?.map.npcs ? 'Loading…' : 'No NPCs recorded for this map.';
     else {
       const h = layer.heights(), total = layer.data.n, pct = (c) => `${Math.round((c / Math.max(1, total)) * 100)}%`;
-      const sure = h[4] + h[3] + h[SEEN];
-      text = !total ? `Nobody could be placed on this map (${layer.data.source}).` : `${layer.count.toLocaleString()} shown of ${total.toLocaleString()} (${layer.data.source}). Heights: ${pct(sure)} known${h[SEEN] ? ` (${h[SEEN]} seen by you)` : ''}, ${pct(h[2])} the only place to stand, ${pct(h[1] + h[0])} a best guess.`;
+      const mine = h[SEEN] + h[FOUGHT], sure = h[4] + h[3] + mine;
+      text = !total ? `Nobody could be placed on this map (${layer.data.source}).` : `${layer.count.toLocaleString()} shown of ${total.toLocaleString()} (${layer.data.source}). Heights: ${pct(sure)} known${mine ? ` (${mine} seen by you)` : ''}, ${pct(h[2])} the only place to stand, ${pct(h[1] + h[0])} a best guess.`;
       const lost = layer.data.unplaced.length;
       if (lost) text += ` ${lost}${total ? ' more' : ''} ${lost === 1 ? 'is' : 'are'} known to be on this map, but not where (${layer.data.unplaced.slice(0, 4).join(', ')}${lost > 4 ? ', …' : ''}).`;
     }

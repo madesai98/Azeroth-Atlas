@@ -733,17 +733,22 @@ end
 -- trainer, a flight map, the bank - you are standing next to it. Its id goes to the map, which
 -- then knows where it stands, height included: yours. Only the id of a creature or an object is
 -- read; never a player or a pet, and nothing the game marks as restricted.
+-- (object: 0 a creature whose window you opened, 1 an object, 2 a creature you fought - see Fought)
 local talk = { id = 0, object = 0, seq = 0, at = -100 }
-local function WhoIs(unit)
-  if not UnitGUID then return nil end
-  local ok, guid = pcall(UnitGUID, unit)
-  guid = ok and text(guid) or nil
+-- Who a unit is - or, with no unit, who the game's own name for something (its GUID) says it is.
+local function WhoIs(unit, guid)
+  if unit then
+    if not UnitGUID then return nil end
+    local ok, got = pcall(UnitGUID, unit)
+    guid = ok and got or nil
+  end
+  guid = text(guid)
   if not guid then return nil end
   local kind, _, _, _, _, id = strsplit("-", guid)
   if kind ~= "Creature" and kind ~= "Vehicle" and kind ~= "GameObject" then return nil end
   id = tonumber(id)
   if not id or id <= 0 or id > 16777215 then return nil end
-  if kind ~= "GameObject" and UnitPlayerControlled then
+  if unit and kind ~= "GameObject" and UnitPlayerControlled then
     -- (someone's pet or guardian is a creature too, but not one that stands anywhere)
     local ok2, theirs = pcall(UnitPlayerControlled, unit)
     if not ok2 or secret(theirs) or theirs then return nil end
@@ -751,13 +756,61 @@ local function WhoIs(unit)
   return id, kind == "GameObject" and 1 or 0
 end
 local messagesAt = -100
+
+-- ---- who you are fighting -----------------------------------------------------------------------
+-- A creature you fight opens no window, and the map guesses which level of a cave or a
+-- building it is on as it does for anyone. But there are moments when you are as surely beside
+-- it as beside someone you talk to: while you loot it; when it lies dead within the game's ten
+-- yards of you as the fight ends; and while it is on you (you are what it is after) that near.
+-- Then its id goes to the map too, marked as fought. That counts for less than a talk - a
+-- creature is fought where it was chased to, ten yards is not arm's reach - and the map only
+-- lets it move someone whose level was the map's own guess (viewer/js/npcs.js).
+-- @param looting  true: only what you are looting; false: only what you have targeted
+local function Fought(looting)
+  if looting then
+    if not (GetNumLootItems and GetLootSourceInfo) then return nil end
+    local ok, n = pcall(GetNumLootItems)
+    n = ok and plain(n) or 0
+    for slot = 1, n do
+      local ok2, guid = pcall(GetLootSourceInfo, slot)
+      local id, object = WhoIs(nil, ok2 and guid or nil)
+      if id and object == 0 then return id end
+    end
+    return nil
+  end
+  -- (how near something is, the game does not say in every version while a fight is on: then this
+  -- says nothing until the fight is over, or you loot)
+  if not (UnitExists and CheckInteractDistance) then return nil end
+  local ok, there = pcall(UnitExists, "target")
+  if not (ok and yes(there)) then return nil end
+  local id, object = WhoIs("target")
+  if not id or object ~= 0 then return nil end
+  local okN, near = pcall(CheckInteractDistance, "target", 3)
+  if not (okN and yes(near)) then return nil end
+  local okD, dead = pcall(UnitIsDead, "target")
+  if okD and yes(dead) then return id end
+  local okA, foe = pcall(UnitCanAttack, "player", "target")
+  local okT, onYou = pcall(UnitIsUnit, "targettarget", "player")
+  if okA and yes(foe) and okT and yes(onYou) then return id end
+  return nil
+end
+
 local function Talking()
-  local id, object = WhoIs("npc")
-  if not id then id, object = WhoIs("questnpc") end
+  -- (what you are looting first: the game may well call that "npc" too, and it is no talk)
+  local id, object = Fought(true), 2
+  if not id then
+    id, object = WhoIs("npc")
+    if not id then id, object = WhoIs("questnpc") end
+    if not id then id, object = Fought(false), 2 end
+  end
   if not id then return end
   local now = GetTime()
+  if object == 2 then
+    -- (a fight goes on for a while and ends in looting: all of it one meeting. And it does not take
+    -- the place of a window you opened a moment ago)
+    if (id == talk.id and talk.object == 2 and now - talk.at < 20) or (talk.object ~= 2 and now - talk.at < 5) then return end
   -- (one conversation often opens several windows in a row: that is still one meeting)
-  if id == talk.id and object == talk.object and now - talk.at < 5 then talk.at = now; return end
+  elseif id == talk.id and object == talk.object and now - talk.at < 5 then talk.at = now; return end
   talk.id, talk.object, talk.at = id, object, now
   talk.seq = talk.seq % 255 + 1
   messagesAt = -100 -- send it in the next round
@@ -766,6 +819,8 @@ local TALK_EVENTS = {
   GOSSIP_SHOW = true, QUEST_GREETING = true, QUEST_DETAIL = true, QUEST_PROGRESS = true, QUEST_COMPLETE = true,
   MERCHANT_SHOW = true, TRAINER_SHOW = true, BANKFRAME_OPENED = true, AUCTION_HOUSE_SHOW = true,
   PET_STABLE_SHOW = true, GUILD_REGISTRAR_SHOW = true, PETITION_SHOW = true, BATTLEFIELDS_SHOW = true,
+  -- (and the moments of a fight: see Fought)
+  LOOT_OPENED = true, LOOT_READY = true, PLAYER_REGEN_ENABLED = true, PLAYER_REGEN_DISABLED = true, PLAYER_TARGET_CHANGED = true,
 }
 
 -- ---- your quests --------------------------------------------------------------------------------
@@ -940,7 +995,7 @@ local function BuildMessages()
       for _, r in ipairs(reports) do list[#list + 1] = { T_TALK, r[1], r[2] } end
     end
   end
-  -- the NPC you just met (and how many seconds ago), repeated for half a minute so that it is sure to arrive
+  -- the NPC you just met, or the creature you just fought (and how many seconds ago), repeated for half a minute so that it is sure to arrive
   if talk.id > 0 and GetTime() - talk.at < 30 then
     list[#list + 1] = { T_TALK, 0, Byte3(talk.id) .. strchar(talk.seq) .. strchar(talk.object) .. strchar(clamp(GetTime() - talk.at, 255)) }
   end

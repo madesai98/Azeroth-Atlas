@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: Azeroth Atlas
 ## Notes: Shows the local 3D map where you are (a tiny coded strip in a corner of the game window; /atlas turns it on or off), shows the 3D map's routes in the game (on the world map and minimap, as an arrow and as a list of steps), and routes to the step your leveling guide has you on (Guidelime or RestedXP: /atlas guide). Shift-click the world map for a quick waypoint. Options: Esc > Options > AddOns.
-## Version: 24
+## Version: 25
 ## Group: AzerothAtlas
 ## OptionalDeps: ShortestPathForever, QuestieDB, AzerothAtlas_Clock
 ## SavedVariables: AzerothAtlasDB

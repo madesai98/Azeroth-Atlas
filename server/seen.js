@@ -1,5 +1,5 @@
 // What you have seen for yourself in the game: where an NPC (or a quest object) really stands,
-// noted when you talk to it. Kept in <dataDir>/user/npcs-seen.json, apart from everything the
+// noted when you talk to it - and which level a creature is on, noted when you fight it. Kept in <dataDir>/user/npcs-seen.json, apart from everything the
 // map update writes, so it survives every rebuild; the map lays these over the extracted data.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,15 +34,18 @@ export class SeenStore {
   all() { this.#sync(); return { version: 1, seen: this.list }; }
 
   /**
-   * Note a sighting: { map, id, object (true for a quest object), x, y, z (where it stands), px, py (where you stood), was (the height the map had before) }.
+   * Note a sighting: { map, id, object (true for a quest object), x, y, z (where it stands), px, py (where you stood), was (the height the map had before),
+   *   fight (true where you did not talk to it but fought it: the map says so of that height, and believes it less) }.
    * @returns the stored record
    */
   add(input) {
     const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 100) / 100 : null);
     const rec = { map: input.map, id: input.id, object: !!input.object, x: num(input.x), y: num(input.y), z: num(input.z), px: num(input.px), py: num(input.py), was: num(input.was), at: new Date().toISOString() };
+    if (input.fight === true && !rec.object) rec.fight = true;
     if (!this.#valid(rec)) throw new Error('not a sighting');
     this.#sync();
-    this.list = this.list.filter((r) => !(r.map === rec.map && r.id === rec.id && !!r.object === rec.object && Math.hypot(r.x - rec.x, r.y - rec.y) < SAME));
+    // (what a fight says does not take the place of what a talk said of the same NPC near by: the map lays both over, and believes the talk)
+    this.list = this.list.filter((r) => !(r.map === rec.map && r.id === rec.id && !!r.object === rec.object && Math.hypot(r.x - rec.x, r.y - rec.y) < SAME && !(rec.fight && !r.fight)));
     this.list.push(rec);
     this.#save();
     return rec;

@@ -70,6 +70,8 @@ export async function gather(cfg, dataDir) {
     const r2 = (v) => Math.round(v * 100) / 100;
     for (const s of d.seen ?? []) {
       if (!Number.isInteger(s.map) || !Number.isInteger(s.id) || s.id <= 0 || ![s.x, s.y, s.z].every((v) => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) < 40000)) continue;
+      // (what a fight settled stays on this disk: a sighting sent is "this NPC stands here", from someone who stood beside them and talked)
+      if (s.fight) continue;
       found.seen.push([s.object ? 'o' : 'n', s.id, s.map, r2(s.x), r2(s.y), r2(s.z)]);
     }
   } catch { /* nothing seen yet */ }

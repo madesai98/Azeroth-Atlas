@@ -611,6 +611,38 @@ floor at their spot nearest the height it has followed you to, notes it on that 
 - This, and your quests, need version 5 of the addon: press **Update addon** on the page, then
   `/reload` in game.
 
+**A creature you fight** opens no window, so until 0.5.2 a fight put nothing right: Nimsy, in
+the Fargodeep Mine, stayed on the lowest of the three levels the map found at his spot (a
+guess) however often he was fought on the middle one. From version 25 the addon also says who
+you fought, at the moments you are surely beside them:
+
+| When | How near |
+|---|---|
+| you loot it | you are standing over it |
+| the fight ends with it dead and still your target | within ten yards, by the game's own measure |
+| it is your target, a foe, and after you | within ten yards |
+
+A fight says less than a talk (a creature is fought where it was chased to, and ten yards can
+be the floor above), so the map lets it settle one thing only: **which level** a creature is
+on, where that was the map's own guess.
+
+- Of that creature's spawn points within 30 yards of you: if one is on your level already,
+  nothing is touched (it may well be the one you fought).
+- Otherwise the nearest whose height the map guessed is put on the floor **at its own spot**
+  that is on your level, if there is one there and no other floor at that spot is about as
+  near your height. It is then marked "seen in game: you fought them on this level", and the
+  map says what it did ("Nimsy: you fought them on this level. Height corrected from 5.4 to
+  28.2 yd (it was a guess).").
+- Nobody is added for a fight; nobody the reference database places, or you have talked to,
+  is moved; your own height is never put right by one; and nothing happens unless the map is
+  sure of your own height.
+- What a fight settled is kept in the same file on your disk and laid over the data each time
+  the map loads. It is **not** sent to the shared database: a sighting sent there says "this
+  NPC stands here", from someone who stood beside them and talked.
+- In a game that will not tell an addon how near a creature is while you fight, only looting
+  says it. Either way it needs version 25 of the addon (**Check for updates** installs it;
+  then `/reload` in game).
+
 ## Quests
 
 The **Quests** section of the sidebar is the whole quest database, to search and to look into:

@@ -9,7 +9,9 @@
 // It also keeps the heights honest: when the game says you have opened an NPC's window you
 // are standing next to it, so its height is yours. That is noted on the spawn point (source
 // "seen in game"), sent to the server to keep (user/npcs-seen.json, which outlives every map
-// update), and laid over the extracted data from then on.
+// update), and laid over the extracted data from then on. A creature you fight says less - it is
+// fought where it was chased to - but enough to settle which level of a cave it is on, where
+// that was the map's own guess (see #fought).
 import { GLOBALS_WGSL, targets } from './gpu.js';
 import { unpackContainer, sectionView } from './formats.js';
 import { project } from './math.js';
@@ -22,8 +24,9 @@ export const HEIGHT_HOW = [
   'from the reference database',
   'from the reference database, and the ground agrees',
   'seen in game: you talked to them here',
+  'seen in game: you fought them on this level',
 ];
-export const SEEN = 5;
+export const SEEN = 5, FOUGHT = 6;
 
 // What an NPC does, as the game's own flag bits (QuestieDB passes them on): these are certain.
 const FLAG = { VENDOR: 4, FLIGHT: 8, TRAINER: 16, SPIRIT: 32 | 64, INN: 128, BANK: 256, PETITION: 512, TABARD: 1024, BATTLE: 2048, AUCTION: 4096, STABLE: 8192, REPAIR: 16384 };
@@ -114,6 +117,10 @@ const ICON_WAITING = 14; // where a quest in your log is handed in, once it is f
 const GREY = 7;          // a quest this many levels under you is no longer worth doing
 const RANK = ['', 'elite', 'rare elite', 'boss', 'rare'];
 const SAME = 40;         // yards: the spawn point of an NPC this close to where you met it is the one you met
+const FIGHT_REACH = 30;  // yards: a creature you fought has its spawn point within this far of where you stood
+const FIGHT_LEVEL = 3;   // yards above or below your own height that are still your level, where you stand...
+const FIGHT_SLOPE = 0.15; // ...and this much more for each yard further off (the floor of a cave slopes)
+const FIGHT_CLEAR = 3;   // yards nearer your height the floor on your level has to be than any other at that spot
 const KEY = 'wfmap.npcs';
 const STRIDE = 6;        // floats per marker: position (from the layer's origin), sign, shown at any distance, size
 const SIZE = [1, 1.25, 1.3, 1.6, 1.1]; // how big a figure is, by rank: ordinary, elite, rare elite, boss, rare
@@ -249,8 +256,8 @@ export class NpcLayer {
     const d = this.data;
     let e = d.index.get((r.object ? 'o' : 'n') + r.id);
     if (e === undefined) {
-      // someone the database has nowhere on this map: known from now on
-      if (d.entries.length >= d.mask.length) return -1;
+      // someone the database has nowhere on this map: known from now on (not for a fight: see #fought)
+      if (r.fight || d.entries.length >= d.mask.length) return -1;
       const known = this.quests?.[r.object ? 'objects' : 'npcs']?.[r.id];
       e = d.entries.length;
       d.entries.push(r.object ? { id: r.id, k: 1, n: known?.[0] ?? `Object ${r.id}` } : { id: r.id, n: known?.[0] ?? `NPC ${r.id}`, a: 2, h: 2, u: 1 });
@@ -258,12 +265,14 @@ export class NpcLayer {
     }
     let i = this.#nearest(e, r.x, r.y, SAME);
     if (vet && i >= 0 && Number.isFinite(d.z[i]) && ((d.src[i] >= 3 && d.src[i] <= 4 && Math.abs(r.z - d.z[i]) > 6) || r.z - d.z[i] > 60)) { this.rejected++; return -1; }
+    // (a fight adds nobody, and moves nobody the reference database places or you have talked to)
+    if (r.fight && (i < 0 || (d.src[i] >= 3 && d.src[i] <= SEEN))) return -1;
     if (i < 0) {
       if (d.n >= d.owner.length) return -1;
       i = d.n++;
       d.x[i] = r.x; d.y[i] = r.y; d.owner[i] = e;
     }
-    d.z[i] = r.z; d.src[i] = SEEN;
+    d.z[i] = r.z; d.src[i] = r.fight ? FOUGHT : SEEN;
     return i;
   }
 
@@ -802,17 +811,19 @@ export class NpcLayer {
 
   /** How the heights of this map are known: counts by source. */
   heights() {
-    const out = [0, 0, 0, 0, 0, 0];
+    const out = HEIGHT_HOW.map(() => 0);
     if (this.data) for (let i = 0; i < this.data.n; i++) out[this.data.src[i]]++;
     return out;
   }
 
   // ---- seen in game --------------------------------------------------------------------------
 
-  /** The game says you have opened this NPC's window: you are standing next to it. */
+  /** The game says you have opened this NPC's window: you are standing next to it. (Or, with talk.fight, that you fought this creature and were beside it.) */
   meet(talk, me) {
     if (!this.data || !me || me.map !== this.data.map) return;
-    this.meeting = { id: talk.id, object: !!talk.object, x: me.x, y: me.y, at: performance.now() };
+    // (a fight does not take the place of a talk still being settled)
+    if (talk.fight && this.meeting && !this.meeting.fight) return;
+    this.meeting = { id: talk.id, object: !!talk.object, fight: !!talk.fight && !talk.object, x: me.x, y: me.y, at: performance.now() };
   }
 
   /**
@@ -828,6 +839,7 @@ export class NpcLayer {
     if (tracker.z === null || tracker.z === undefined) return;
     if (!tracker.sure && age < 4000) return; // (give the height a moment to be sure of itself)
     this.meeting = null;
+    if (m.fight) { this.#fought(m, me, tracker); return; }
     const key = (m.object ? 'o' : 'n') + m.id;
     const e = d.index.get(key);
     const i = e === undefined ? -1 : this.#nearest(e, m.x, m.y, SAME);
@@ -869,6 +881,51 @@ export class NpcLayer {
       : was === null ? `${name}: height noted, ${z.toFixed(1)} yd.`
       : Math.abs(was - z) > 1.5 ? `${name}: height corrected from ${was.toFixed(1)} to ${z.toFixed(1)} yd (it was ${HEIGHT_HOW[wasSrc].split(':')[0]}).`
       : `${name}: height confirmed (${z.toFixed(1)} yd).`, { spawn: at, corrected: was !== null && Math.abs(was - z) > 1.5 });
+  }
+
+  /**
+   * You fought a creature and were beside it: the addon says so when you loot it, or when it is
+   * within ten yards of you, dead or on you. That is worth less than a talk - a creature is
+   * fought where it was chased to, and ten yards can be the floor above - so it settles one
+   * thing only: which LEVEL a creature is on, where that was the map's own guess.
+   *  - Of its spawn points within FIGHT_REACH of you: if one is on your level already, nothing
+   *    is touched (that may well be the one you fought).
+   *  - Otherwise the nearest of them whose height the map guessed (or an earlier fight set) is
+   *    put on the floor at its own spot that is on your level - if there is one there, and no
+   *    other floor at that spot is nearly as near your height.
+   *  - Nobody is added; nobody the reference database places, or you have talked to, is moved;
+   *    your own height is never put right by it; and it waits for the map to be sure of that.
+   * Nothing is said, or kept, unless something was put right.
+   */
+  #fought(m, me, tracker) {
+    const d = this.data, e = d.index.get('n' + m.id);
+    if (e === undefined || !tracker.sure) return;
+    // (the game says you are indoors, yet your height is the open top of everything here: the map has lost you)
+    const mine = tracker.standableAt?.(me.x, me.y) ?? [];
+    if (me.indoors && mine.length > 1 && Math.abs(tracker.z - mine[mine.length - 1]) < 1.5) return;
+    const mineZ = tracker.z, level = (dist) => FIGHT_LEVEL + FIGHT_SLOPE * dist;
+    let pick = -1, pickD = Infinity, pickZ = 0;
+    for (let i = 0; i < d.n; i++) {
+      if (d.owner[i] !== e) continue;
+      const dist = Math.hypot(d.x[i] - m.x, d.y[i] - m.y);
+      if (dist > FIGHT_REACH) continue;
+      if (Number.isFinite(d.z[i]) && Math.abs(d.z[i] - mineZ) <= level(dist)) return;
+      if ((d.src[i] > 2 && d.src[i] !== FOUGHT) || dist >= pickD) continue;
+      const floors = (tracker.standableAt?.(d.x[i], d.y[i]) ?? []).slice().sort((a, b) => Math.abs(a - mineZ) - Math.abs(b - mineZ));
+      if (!floors.length || Math.abs(floors[0] - mineZ) > level(dist)) continue;
+      if (floors.length > 1 && Math.abs(floors[1] - mineZ) - Math.abs(floors[0] - mineZ) < FIGHT_CLEAR) continue;
+      pick = i; pickD = dist; pickZ = floors[0];
+    }
+    if (pick < 0) return;
+    const was = Number.isFinite(d.z[pick]) ? d.z[pick] : null, wasSrc = d.src[pick];
+    const rec = { map: d.map, id: m.id, object: false, fight: true, x: d.x[pick], y: d.y[pick], z: Math.round(pickZ * 100) / 100, px: m.x, py: m.y, was, sure: true };
+    if (this.#overlay(rec) < 0) return;
+    (this.seen ??= []).push(rec);
+    fetch('/api/npcs/seen', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(rec) }).catch(() => { /* kept for this session only */ });
+    this.rebuild();
+    const name = d.entries[e].n;
+    this.onNote(was === null ? `${name}: you fought them on this level. Height noted, ${pickZ.toFixed(1)} yd.`
+      : `${name}: you fought them on this level. Height corrected from ${was.toFixed(1)} to ${pickZ.toFixed(1)} yd (it was ${HEIGHT_HOW[wasSrc].split(':')[0]}).`, { spawn: pick, corrected: true });
   }
 }
 

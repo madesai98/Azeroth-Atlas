@@ -244,14 +244,17 @@ export class NameCache {
   }
 
   /**
-   * The NPC (or quest object) whose window you last opened in the game, or null:
-   * { id, seq (goes up by one with each new meeting), object (true for a quest object), age (seconds since, as the game counted) }
+   * The NPC (or quest object) whose window you last opened in the game, or the creature you
+   * last fought (an addon of version 25 or later says that too), or null:
+   * { id, seq (goes up by one with each new meeting), object (true for a quest object), fight
+   *   (true for a creature you fought: you looted it, or it was within ten yards of you, dead
+   *   or on you), age (seconds since, as the game counted) }
    */
   talk() {
     const b = this.raw.get(`${TEXT_KIND.TALK}:0`);
     if (!b || b.length < 6) return null;
     const id = b[0] * 65536 + b[1] * 256 + b[2];
-    return id > 0 && b[3] > 0 ? { id, seq: b[3], object: !!b[4], age: b[5] } : null;
+    return id > 0 && b[3] > 0 ? { id, seq: b[3], object: b[4] === 1, fight: b[4] === 2, age: b[5] } : null;
   }
 
   /**

@@ -67,7 +67,7 @@ export class PlayerTracker {
     this.pending = null;
     this.state = { status: 'off', reason: null, window: null, capture: null, player: null, party: [], target: null, travel: null, transit: null, talk: null, quests: null, mail: null };
     this.mail = opts.mail ?? null; // the route's way into the game (mail.js), told what the addon says of it
-    this.talk = null; // the last NPC you met in the game, with when this server first heard of it
+    this.talk = null; // the last NPC you met in the game (or creature you fought), with when this server first heard of it
     this.quests = { rev: 0, log: null, done: null }; // your quest log and the quests you have done (see /api/player/quests)
     this.questSig = '';
     this.sent = '';
@@ -272,7 +272,7 @@ export class PlayerTracker {
     }
     // who you are talking to (the addon repeats it for half a minute; a new meeting has a new number)
     const met = this.names.talk();
-    if (met && (!this.talk || this.talk.seq !== met.seq || this.talk.id !== met.id || this.talk.object !== met.object)) { this.talk = { id: met.id, seq: met.seq, object: met.object, at: Date.now() - met.age * 1000 }; note('game', `you opened the window of ${met.object ? 'object' : 'NPC'} ${met.id}`); }
+    if (met && (!this.talk || this.talk.seq !== met.seq || this.talk.id !== met.id || this.talk.object !== met.object || !!this.talk.fight !== met.fight)) { this.talk = { id: met.id, seq: met.seq, object: met.object, fight: met.fight, at: Date.now() - met.age * 1000 }; note('game', met.fight ? `you fought creature ${met.id}, and were beside it` : `you opened the window of ${met.object ? 'object' : 'NPC'} ${met.id}`); }
     this.#noteGame(d, player);
     this.#set({
       status: 'live', reason: null, player, talk: this.talk, heads: this.names.heads(),
