@@ -72,12 +72,13 @@ in turn, and leaves alone whatever is already up to date:
 2. **The map's data**: builds again what has changed - a new game patch, a newer QuestieDB, a
    map tool that builds some of it differently. (The first time, this is the whole map.)
 3. **The addon in the game**: installs it, or updates it to the one that came with this version.
-4. **Your guide packs**: converts any made for Guidelime that the addon cannot run yet.
+4. **Your guide addons**: Guidelime and RestedXP are each taught to ask the addon which floor
+   you are on - again, where one was updated since (see "Guides in the game").
 
 Each is reported in a line under the button, with what is left for you to do in the game
 (`/reload`, or a restart). The page may load itself again in the middle (after an update of
 itself, or a new map): it carries on from where it was. The separate buttons further up - Update
-map, Update addon, Convert guide packs - do the same things one at a time.
+map, Update addon, Teach (a guide addon) - do the same things one at a time.
 
 **The map tool also keeps itself up to date without being asked.** When it starts, and every six hours while it runs, it
 looks whether there is a newer version where it came from, and if so puts it in by itself: the
@@ -758,8 +759,8 @@ section, where each also says how long it is:
 
 **Where you are heading** is read from the game by the addon. Three things can say so:
 
-- the step your guide has you on: the addon's own guide window (see "Guides in the game"), or,
-  while the Guidelime addon is switched on, the step Guidelime's arrow points at;
+- the step your guide has you on: the guide addon you run, Guidelime or RestedXP (see "Guides
+  in the game");
 - a **quick waypoint**: **Shift-click** the game's world map. It is the addon's own (the game's
   map pin is left alone), it is marked on the map at once, and it stays yours through a
   `/reload`;
@@ -1285,9 +1286,10 @@ What it does not do:
 - Whether you are on the waypoint's level rests on the route in the game and, behind it, on the
   3D map's reckoning of your height. With the 3D map not running there is no route and no
   height: a pin is then taken off when you reach its spot on the map, whatever floor you are on.
-- While the Guidelime addon itself is switched on, a step of its guide is ticked off by
-  Guidelime, by its own rule (how near you are on the map): it can move on while you are a floor
-  below the step. The addon's own guide window does not (see "Guides in the game").
+- A step of your guide that is only "go to this spot" is ticked off by the guide addon itself,
+  by its own rule (how near you are on the map). Taught to, it asks the addon first, and waits
+  until you are on the spot's floor; not taught, it can move on while you are a floor below
+  (see "Guides in the game").
 
 ### Boats, zeppelins and the tram, live
 
@@ -1453,97 +1455,84 @@ the game is closed, for as long as its server runs.
 
 ### Guides in the game
 
-The addon follows **leveling guides written for Guidelime** in a window of its own, so that
-Guidelime is not needed: the same guide packs, installed and updated as ever. The reason to have
-it here is the step that sends you to a spot. Guidelime counts such a step as reached when you
-are near the spot on the map, whatever floor you are on. Here the step is your waypoint, the 3D
-map routes to it, and it is reached **where that route ends, on the level it ends on** (see "One
-level over another"): standing under the quest giver's balcony does not tick the step off, and
-the way up stays shown.
+The addon has no guide of its own. It follows **the guide addon you run** - Guidelime or
+RestedXP - and the step that addon has you on is your waypoint: the 3D map routes to it, the
+route is shown in the game, and it moves on by itself as the guide does
+(`addon/AzerothAtlas/GuideSources.lua`). Other guide addons are not followed yet.
 
-**Convert guide packs.** A guide pack names Guidelime in its `.toc` file as the addon it needs,
-and the game loads no addon whose needed addon is missing or switched off. So with Guidelime
-switched off or removed, a pack as its maker wrote it does not load at all. The 3D map's page
-sees such packs in the game's AddOns folder and offers **Convert guide packs**. That changes
-the one line (`server/addon.js`):
+(Until version 0.4.1 the addon ran guides written for Guidelime in a window of its own, and the
+page changed a line of each guide pack so that it loaded without Guidelime. That is gone: a
+pack is as its maker wrote it, and needs Guidelime. A pack that was converted back then still
+hands its guides to Guidelime where both Guidelime and Azeroth Atlas are switched on; with
+Guidelime switched off it has nobody to hand them to, and the game reports an error for it.
+Installing the pack again, or putting the line of its `.toc` back - the pack keeps it, after
+"Before:" - makes it its maker's own again.)
 
-```
-## RequiredDeps: Guidelime, QuestieDB        becomes        ## RequiredDeps: AzerothAtlas, QuestieDB
-                                                             ## OptionalDeps: Guidelime
-                                                             ## X-AzerothAtlas-Converted: by the 3D map. Before: RequiredDeps: Guidelime, QuestieDB
-```
+**Where the step is read.** Each guide addon points an arrow of its own at the spot its step
+sends you to, and the thing that arrow points at says where that is:
 
-The pack then needs Azeroth Atlas, and names Guidelime only as an addon to load after if it
-is there. Nothing else of a pack is touched: its guides are the files its maker wrote. Restart
-the game afterwards (leave it altogether: which addon needs which is read when it starts). A
-pack you install or update later is as its maker wrote it again; the page offers it again
-(it looks every half minute), and in the game the addon says when you log in that a pack did
-not load.
+| Guide addon | Read from | |
+| --- | --- | --- |
+| Guidelime | `GuidelimeArrow.element` | The arrow is a frame anyone can see; Guidelime's own tables are private. With Guidelime's window shut it follows nothing, and neither does the route |
+| RestedXP | `RXP.arrowFrame.element` | `RXP` is its addon table, in the open. Only an element of a step RestedXP has you on counts: it never clears what its arrow pointed at last |
 
-**Who runs the guides** is then set in the game's addon list, per character:
+It is looked at as often as your waypoint is, several times a second. Nothing of theirs is
+written to.
 
-- Guidelime **switched off, or removed**: the addon's own guide window.
-- Guidelime **switched on**: Guidelime, as before (a converted pack hands its guides to it), and
-  the route goes to the step its arrow points at. The guide Guidelime has open, what it has
-  ticked and how it is set are copied to the addon's own settings as you play, so the addon's
-  window goes on from there on the day you switch Guidelime off. The other way round nothing is
-  copied (Guidelime's saved file is its own): back in Guidelime, the steps the game itself can
-  tell are done are done, and a step you ticked by hand in the addon's window is not.
-
-A converted pack needs Azeroth Atlas switched on, also for Guidelime to get its guides.
-
-**The window** (`addon/AzerothAtlas/GuideWindow.lua`): the steps of the guide, the ones you are
-on bright and scrolled into view, with what a quest still asks for listed under its step. Each
-step has a box: tick a step off yourself, or take a tick away. Drag the window by its title and
-size it by its corner. **Guides** in its title opens the list of every guide the installed packs
-bring (the ones for your character; click one to follow it), and at the end of a guide the one
-that comes next is offered. Beside the window are buttons to target who the step is about and to
-use the item it names; keys can be bound to the first of each, and to showing the window
-(Options > Keybindings > AddOns). The game allows such buttons to change only outside a fight.
+**Which of them** is set in the addon's options ("Your guide"), or typed in the game:
 
 | In the game | |
 | --- | --- |
-| `/atlas guide` | the window, shown or hidden (`/lime` does the same while Guidelime is not switched on) |
-| `/atlas guides` | the list of guides, and the settings |
-| `/atlas guide skip` | tick off the steps you are on |
-| `/atlas guide reset` | take every tick of this guide away |
-| `/atlas guide lock` | the window stays where it is (again: it can be moved) |
+| `/atlas guide` | which guide addon is followed, and how that is set |
+| `/atlas guide auto` | Automatic: the one that has a guide open and a step to go to; with both, the one whose step changed last |
+| `/atlas guide guidelime`, `/atlas guide restedxp` | that one, whatever the other does |
 
-**What a step is, and when it is done** (`GuideBook.lua` reads the guides, `GuideSteps.lua`
-follows them). Every code Guidelime knows is read the way Guidelime reads it, and the rules are
-Guidelime's, so a guide behaves as its writer saw it behave:
+It is kept for each character.
 
-| A step with | is done when |
-| --- | --- |
-| `[QA]` accept, `[QC]` do (also one goal of a quest: `[QC123,2]`), `[QT]` hand in | the game says so: the quest is in your log, its goals are met, it is handed in |
-| `[XP]` a level (or so much of one), `[SK]` a skill worked up, `[LE]` a skill or spell learned, `[REP]` a standing, `[CI]` items to have | you have it |
-| `[G]` a spot, and nothing else to do | you are there: at the end of the route to it, on its level |
-| `[V]` vendor, `[R]` repair, `[T]` trainer, `[S]` set your hearthstone, `[P]` a new flight point | that window opens, the hearthstone is set, the flight point is yours - or you tick it |
-| `[F]` fly, `[H]` hearthstone, `[SP]` a spell to cast | you take off, the hearthstone is used, the spell is cast (with a spot named as well: also on getting there) |
-| plain words | you tick it |
+**A step is open for as long as the guide has you on it** - not for as long as its spot is
+"not reached". Both guide addons count a spot as reached when you are near it on the flat map,
+whatever floor you are on. A step with something to do there (a quest to take or hand in)
+still waits for that, so the addon goes on leading you to the spot: standing under the quest
+giver's balcony, the way up stays shown. The spot is done with when you are at the end of the
+route to it, on the level it ends on (see "One level over another"), and it is your waypoint
+again if you walk off without doing what the step asks. With the 3D map not running there is
+nothing to tell the level by, and the guide addon's own word decides.
 
-You are on the first step that is not done, and on every optional one (`[O]`, `[OC]`) before
-it. A step for another class, race or faction (`[A ...]`, or a quest only they can have) is left
-out. A quest whose earlier quests you have not done, or which you do not have and no step has
-you take, is out of reach: its steps are shown greyed with what they wait for, and passed over.
-A step that names no spot sends you where it is done: the quest's giver or taker, the thick of
-what the quest asks for, the NPC it names. Those places, quest names, and which quest needs
-which come from the **QuestieDB** addon, the same data the 3D map is built from. **In the game
-that addon has to be installed and switched on** (every guide pack names it as an addon it
-needs): the game loads only what is in its own AddOns folder, so the copy of QuestieDB the map
-fetches for itself is of no use there.
+**A step that is only a spot** ("go here", and nothing else to do) the guide addon ticks off
+by itself, on the flat map, and moves on - a floor below it, too. **The page teaches the guide
+addon to ask first** (`server/guidepatch.js`): one line of its own file is changed, so that the
+spot is ticked off only when the addon does not say "not yet".
 
-**Done for you**, as set in the list of guides (taken over from Guidelime's settings the first
-time the addon sees Guidelime switched on): quests accepted and handed in at the NPC - none,
-those of the step you are on, any the guide speaks of, or every quest - and, if you set it so,
-the flight a step names taken. A reward to choose is always yours to choose, and holding Shift
-at an NPC does nothing for you.
+| Guide addon | File | The line, and what is added to it |
+| --- | --- | --- |
+| Guidelime | `CurrentGuide.lua` | `element.completed = (D.wx - element.wx) * ... <= radius` **`and not (AzerothAtlas and AzerothAtlas.Arrived and AzerothAtlas.Arrived(element) == false)`** |
+| RestedXP | `map.lua` | `if dist <= element.radius and objectiveCheck` **`and not (AzerothAtlas and AzerothAtlas.Arrived and AzerothAtlas.Arrived(element) == false)`** `then` |
 
-Not there: Guidelime's guide editor, its import of other guide formats, its recording of steps
-as you play, notes on steps, markers on the map for every place a quest can be done (the route
-goes to one), training skills for you, and custom code in guides (none of the installed packs
-uses any). A guide whose text was changed after you ticked steps in it keeps the ticks of the
-lines that still read the same.
+- The line is found by its exact words. A guide addon whose line reads otherwise - its makers
+  changed it - is left alone, and the page says so.
+- It stays one line: every line of the file keeps its number, so an error the guide addon
+  reports names the line it always did. A comment at its end says why it is as it is.
+- What is added asks the addon only if it is there, and only once the guide addon itself has
+  found you near the spot. `AzerothAtlas.Arrived` answers "not yet" while you are led to that
+  spot and are not at the end of the route to it, on its level; in every other case it has
+  nothing to say, and the guide addon decides exactly as it did - with Azeroth Atlas switched
+  off or removed, with the 3D map not running, with a waypoint of your own leading.
+- Guidelime looks at a spot once, as you cross into its reach. Told "not yet" then, it is asked
+  to look again when you have arrived (its own two lines for "your experience changed", which
+  do nothing else). RestedXP looks by itself, several times a second.
+- Updating the guide addon puts its own file back. **Check for updates** teaches it again, the
+  page says when there is one to teach (it looks every half minute), and a `/reload` in the
+  game brings the change in.
+- **It is on unless you switch it off**: the box "Guide addons ask the addon which floor you
+  are on" under the addon's button on the page (`"guidePatches": false` in `config.json`).
+  Switched off, every such line is put back as its makers wrote it.
+
+Nothing relies on it: a guide addon that has not been taught ticks such a step off on the flat
+map, as it always has, and the route goes on to the next step.
+
+**Two arrows.** The guide addon's own arrow is left as you have it, so with the addon's arrow
+on there are two: the guide's points straight at the spot, the addon's along the route to it.
+Either can be switched off in its own settings.
 
 ## Live player link
 
@@ -2180,9 +2169,8 @@ and without a connection, or with `"database": false`, the addon is what is read
 The same data in either place is the same data: a map built from the addon is not asked to be
 built again the day the fetched copy of that version arrives.
 
-**In the game, nothing changes.** Addons that use QuestieDB there - Questie, guide packs, this
-addon's own guide window for steps that name no spot - need the addon in the game's AddOns
-folder: the game loads nothing from anywhere else.
+**In the game, nothing changes.** Addons that use QuestieDB there - Questie, guide packs - need
+the addon in the game's AddOns folder: the game loads nothing from anywhere else.
 
 **What is refused.** A release whose data file is laid out in a way this version of the map
 cannot read stays in the database and is not fetched (the copy in use goes on being used, and
@@ -2374,7 +2362,7 @@ The map is built from your own installed game. What else it draws on, and where 
 | The layout of the game's data tables | **WoWDBDefs** (wowdev) | Each definition is fetched the first time it is needed, kept in `extractor/dbd/`. Not included |
 | The doorways between maps (`extractor/doorways.json`) | **ShortestPathForever** by cjber, `Data/Portals.lua` (GPL-3.0-or-later) | Included; the addon's own, newer list is read instead where it is installed |
 | The timetables of boats, zeppelins and the tram (`viewer/transit.json`, `addon/AzerothAtlas/TransitData.lua`) | **DockWatch** by Wyveryx (MIT), recorded in the game; **NauticusClassicResurrected** (MIT) by way of **ForeverTransport** by Stilo | Included |
-| Guides in the game | Guide packs written for **Guidelime** | Read from your game's AddOns folder. Not included |
+| Guides in the game | **Guidelime** and **RestedXP**, whichever you run, with the guides you have for them | Followed as they run in your game. Not included. One line of each is changed in your own copy, unless you switch that off (see "Guides in the game") |
 | How an item's stats, armor and damage are worked out, and where the game keeps its recipes | **forever-ref** by alcaras (github.com/alcaras/forever-ref), which found that this game uses the formulas TrinityCore worked out for the client, and checked its results against Wowhead | The method only. The code is this project's own; its results were held against forever-ref's |
 | Auction prices | **Blizzard Entertainment**'s game data (its API for developers) | Read hourly by a scheduled function of the database's own; in the database for 30 days, not in the download |
 | How often and how fast an item sells; a second opinion on its price | **TradeSkillMaster**'s public price files (tradeskillmaster.com) | Fetched by each copy for itself. Not included |

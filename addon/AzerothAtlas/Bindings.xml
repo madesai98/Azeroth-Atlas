@@ -1,7 +1,4 @@
 <Bindings>
 	<Binding name="CLICK AzerothAtlasClearButton:LeftButton" header="BINDING_HEADER_AZEROTHATLAS" category="ADDONS"/>
 	<Binding name="CLICK AzerothAtlasFetchButton:LeftButton" category="ADDONS"/>
-	<Binding name="CLICK AzerothAtlasGuideToggle:LeftButton" category="ADDONS"/>
-	<Binding name="CLICK AzerothAtlasGuideTarget1:LeftButton" category="ADDONS"/>
-	<Binding name="CLICK AzerothAtlasGuideItem1:LeftButton" category="ADDONS"/>
 </Bindings>

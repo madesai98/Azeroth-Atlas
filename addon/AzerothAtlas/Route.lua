@@ -756,7 +756,7 @@ local function Reached(t)
   return true
 end
 
--- For the guide (GuideSteps.lua): are you at the spot its step names - a place `reach` yards
+-- For the guide (GuideSources.lua): are you at the spot its step names - a place `reach` yards
 -- wide at map, north, west? true or false when the route in the game can tell: you are there on
 -- the last yards of the route to it, on the level it ends on. nil when there is nothing to tell
 -- by (another waypoint leads, or the 3D map is not sending routes): the map alone decides then.
@@ -1282,7 +1282,7 @@ function shared.Command(word, rest)
     say("/atlas pin (the list of routes pinned under Questie's quest list, or free: drag it with the mouse where you want it)   A click on \"Routes\", or on a route's name, folds its steps away.")
     say("/atlas hearth (your hearthstone: used in routes, or left out)   /atlas strip (where the coded strip is: /atlas strip topright 0 40)")
     say("/atlas boats (when the boats, zeppelins and tram leave, as far as known)   /atlas boats listen (other players' sightings: taken or not)")
-    say("/atlas guide (the guide's window, shown or hidden)   /atlas guides (pick a guide)   /atlas guide skip   /atlas guide reset")
+    say("/atlas guide (which guide addon the route follows: Guidelime or RestedXP)   /atlas guide auto, /atlas guide guidelime, /atlas guide restedxp (set it)")
     say("Shift-click the world map: a quick waypoint.   Ctrl-click: a pin, and you are asked which level where there are several.")
   end
 end

@@ -302,9 +302,8 @@ shared.player, shared.target = player, target
 --   quick  a quick waypoint of this addon's own: a Shift-click on the world map (Guide.lua). It
 --          is yours until you reach it, clear it, or something newer takes its place;
 --   pin    a pin you put on the game's map yourself (Ctrl-click);
---   guide  the step your guide has you on: this addon's own guide (GuideSteps.lua), or, while
---          Guidelime is switched on, the step its arrow points at - when Shortest Path is not
---          following the guide for you.
+--   guide  the step your guide has you on: the guide addon you run - Guidelime or RestedXP -
+--          as GuideSources.lua reads it, when Shortest Path is not following the guide for you.
 -- Two of them are places of your own choosing, and there is only ever one such waypoint: a
 -- quick waypoint takes the place of a pin, a pin of a quick waypoint (and a marker dropped on
 -- the 3D map of either: Route.lua takes it up as a quick waypoint). A waypoint of your own
@@ -479,29 +478,16 @@ local function QuestProgress(id)
   return state, n, done, kinds
 end
 
--- The guide's step: where it is, and the three numbers that name the place. This addon's own
--- guide says so itself. Guidelime shows it as the arrow it draws from: its "wx" runs west and
--- its "wy" north (its map library's convention). The name is the one Shortest Path gives the
--- step - its map and its position to a tenth of a percent - so a step Shortest Path would not
--- plan to again is not a new one here either.
+-- The guide's step: where it is, and the three numbers that name the place. It is the step the
+-- guide addon you run has you on (GuideSources.lua: Guidelime or RestedXP, read from the arrow
+-- each points at its step's spot). The name is the one Shortest Path gives a step - its map and
+-- its position to a tenth of a percent - so a step Shortest Path would not plan to again is not
+-- a new one here either.
 local function GuideStep()
-  if shared.GuideGoal then
-    local ok, map, north, west, a, b, c = shared.Try("guide goal", shared.GuideGoal)
-    if ok and map ~= false then
-      if map and north and west then return map, north, west, a, b, c end
-      return nil
-    end
-  end
-  local arrow = GuidelimeArrow
-  local e = type(arrow) == "table" and arrow.element
-  if type(e) ~= "table" or e.completed then return nil end
-  local north, west, map = plain(e.wy), plain(e.wx), plain(e.instance)
-  if not (north and west and map) then return nil end
-  local zone, x, y = plain(e.mapID), plain(e.x), plain(e.y)
-  if zone and x and y then
-    return map, north, west, zone, floor(x * 10 + 0.5), floor(y * 10 + 0.5)
-  end
-  return map, north, west, map, floor(north + 0.5), floor(west + 0.5)
+  if not shared.GuideGoal then return nil end
+  local ok, map, north, west, a, b, c = shared.Try("guide goal", shared.GuideGoal)
+  if ok and map and north and west then return map, north, west, a, b, c end
+  return nil
 end
 
 -- The pin on the game's own map, unless Shortest Path put it there: while it leads you it moves

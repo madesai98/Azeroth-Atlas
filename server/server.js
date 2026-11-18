@@ -10,7 +10,7 @@ import { DATA_STAMP } from '../extractor/stamp.js';
 import { installedBuild } from '../extractor/casc/casc.js';
 import { findQuestieDb, builtFromQuestie } from '../extractor/questie.js';
 import { PlayerTracker } from './tracker.js';
-import { addonStatus, installAddon, convertGuides, flavourFolder, addonsDir } from './addon.js';
+import { addonStatus, installAddon, teachGuideAddons, flavourFolder, addonsDir } from './addon.js';
 import { SeenStore } from './seen.js';
 import { RouteMail, NAME as ADDON } from './mail.js';
 import { OLD as OLD_ADDON, legacyInstalled } from './legacy.js';
@@ -282,7 +282,8 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (p === '/api/addon' || p === '/api/addon/install' || p === '/api/addon/guides') {
-    // (/guides: "Convert guide packs", see addon.js)
+    // (/guides: the guide addons the addon follows are taught about floors, or put back as their
+    // makers wrote them - guidepatch.js. ?teach=1 or 0 switches that on or off first, for good.)
     const install = p.endsWith('/install'), guides = p.endsWith('/guides');
     if (install || guides) {
       if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
@@ -290,15 +291,25 @@ const server = http.createServer((req, res) => {
       if (origin && new URL(origin).host !== req.headers.host) { res.writeHead(403); res.end(); return; }
     }
     try {
-      const st = install ? installAddon(cfg, { gameSeen: ['live', 'minimized', 'nosignal'].includes(tracker.state.status) }) : guides ? convertGuides(cfg) : addonStatus(cfg);
+      if (guides && url.searchParams.has('teach')) {
+        const on = url.searchParams.get('teach') === '1';
+        let file = {};
+        try { file = readConfigFile(configFile); } catch { /* a new one */ }
+        // (on is how it is unless said otherwise: only "off" is written down)
+        if (on) delete file.guidePatches; else file.guidePatches = false;
+        fs.writeFileSync(configFile, JSON.stringify(file, null, 2) + '\n');
+        if (on) delete cfg.guidePatches; else cfg.guidePatches = false;
+        note('addon', on ? 'guide addons are to be taught about floors' : 'guide addons are to be left as their makers wrote them');
+      }
+      const st = install ? installAddon(cfg, { gameSeen: ['live', 'minimized', 'nosignal'].includes(tracker.state.status) }) : guides ? teachGuideAddons(cfg) : addonStatus(cfg);
       if (install) mail.use(ADDON);
       if (install) note('addon', `the addon was installed in the game's folder: version ${st.installedVersion ?? '?'}`, { restartNeeded: st.restart, carriedOver: st.carried ?? undefined, current: st.current, mailboxes: st.mail });
-      else if (guides) note('addon', 'guide packs were converted', { done: st.done });
+      else if (guides) note('addon', st.taught ? 'guide addons taught about floors' : 'guide addons put back as their makers wrote them', { changed: st.done, asTheyAre: st.guides?.addons });
       else if (changedAddon(st)) note('addon', 'the addon in the game\'s folder', { installed: st.installed, version: st.installedVersion, brought: st.version, current: st.current, mailboxes: st.mail, oldCopy: st.legacy || undefined, guides: st.guides, why: st.reason });
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(st));
     } catch (err) {
-      note('addon', install ? 'the addon could not be installed' : guides ? 'guide packs could not be converted' : 'the addon could not be looked at', { error: err.message });
+      note('addon', install ? 'the addon could not be installed' : guides ? 'the guide addons could not be changed' : 'the addon could not be looked at', { error: err.message });
       res.writeHead(500, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
     }

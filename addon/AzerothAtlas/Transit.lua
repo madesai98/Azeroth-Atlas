@@ -443,7 +443,6 @@ end
 
 local function Changed()
   T.rev = T.rev + 1
-  if shared.Guide then shared.Guide.rev = (shared.Guide.rev or 0) + 1 end
 end
 
 -- What came in from other players since it was last noted, and what became of it (for the

@@ -299,8 +299,9 @@
         <button id="btnAddon" style="display:none"></button>
         <div id="addonMsg" class="dim small"></div>
         <div id="guideMsg" class="dim small"></div>
+        <label class="row" id="guideTeachRow" style="display:none" title="Guidelime and RestedXP each tick a step off that is only &quot;go to this spot&quot; when you are near the spot on the flat map, whatever floor you are on. Ticked, one line of the guide addon's own file is changed so that it asks the Azeroth Atlas addon first: the step is then ticked off when you are at the end of the route to the spot, on its floor. Nothing else of the guide addon is touched, the line is found by its exact words (a guide addon whose line reads otherwise is left alone), and it is done again after the guide addon is updated. Unticked, every such line is put back as its makers wrote it."><input type="checkbox" id="optGuideTeach" checked><span class="grow">Guide addons ask the addon which floor you are on</span></label>
         <div class="btnrow" id="guideRow" style="display:none">
-          <button id="btnGuides" class="attention" title="Changes one line of each guide pack's .toc file: the pack then needs the Azeroth Atlas addon instead of Guidelime. Nothing else of the pack is touched."></button>
+          <button id="btnGuides" class="attention" title="Changes one line of the guide addon's own file, so that it asks the Azeroth Atlas addon before it ticks off a spot you have only reached on the flat map. Nothing else of it is touched."></button>
         </div>
       </div>
     </details>

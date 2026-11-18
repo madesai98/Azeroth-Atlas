@@ -1577,6 +1577,34 @@ do
         "GameFontHighlightSmall", 20, -466, WIDE)
     end)
 
+    -- your guide: which guide addon the route follows (GuideSources.lua)
+    piece(function()
+      Words("Your guide", "GameFontNormal", 16, -510)
+      local said = Words("", "GameFontHighlightSmall", 20, -556, WIDE)
+      local picks = { { "auto", "Automatic" } }
+      for _, s in ipairs(shared.GuideSources and shared.GuideSources() or {}) do picks[#picks + 1] = { s.key, s.name } end
+      for i, pick in ipairs(picks) do
+        local b = Press(pick[2], 20 + (i - 1) * 132, -528, 126, function() shared.SetGuideChoice(pick[1]) end)
+        shows[#shows + 1] = function()
+          -- (the one that is set is the one that cannot be pressed)
+          if shared.GuideChoice() == pick[1] then
+            if b.Disable then b:Disable() end
+          elseif b.Enable then
+            b:Enable()
+          end
+        end
+      end
+      shows[#shows + 1] = function()
+        local running, follows = {}, nil
+        for _, s in ipairs(shared.GuideSources()) do
+          if s.loaded then running[#running + 1] = s.name end
+          if s.followed then follows = s.name end
+        end
+        local now = follows and ("Following " .. follows .. " now.") or (#running > 0 and (table.concat(running, " and ") .. (#running == 1 and " is" or " are") .. " running, with no step to go to just now.") or "No guide addon is running.")
+        said:SetText("The route goes to the step your guide addon has you on, and moves on as the guide does. Automatic follows the one that has a guide open. " .. now .. " The guide addon's own arrow can be switched off in its settings.")
+      end
+    end)
+
     if problems[1] then say("a part of the options could not be shown (" .. problems[1] .. "). Everything there can also be typed: /atlas help.") end
   end
 

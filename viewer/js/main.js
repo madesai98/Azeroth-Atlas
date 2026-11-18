@@ -1011,7 +1011,8 @@ function showSetup(st) {
 //   1. Azeroth Atlas itself (server/appupdate.js: a newer version is fetched and put in);
 //   2. the map's data (built again where the game, QuestieDB or the map tool has moved on);
 //   3. the addon in the game (installed or updated - it is the one that came with this version);
-//   4. guide packs made for Guidelime (converted, so that the addon runs them).
+//   4. the guide addons the addon follows (each taught about floors again, where it was updated
+//      since: server/guidepatch.js).
 // An update of the map tool, and a new build of the map, load the page again: where the run has
 // got to is kept for the tab (sessionStorage), and it carries on from there when the page is back.
 const RUN_KEY = 'wfmap.checkRun';
@@ -1077,9 +1078,8 @@ async function checkAll(resume = null) {
         } else { say(1, 'Map: up to date', 'good'); run.step = 3; keep(); }
       }
     }
-    // 3. the addon in the game, and 4. the guide packs
+    // 3. the addon in the game, and 4. the guide addons it follows
     if (run.step <= 3) {
-      const packs = (n) => `${n} guide pack${n === 1 ? '' : 's'}`;
       let a = await getJSON('/api/addon');
       if (a.error || !a.available) say(2, `Addon: ${a.error ?? a.reason ?? 'the game\u2019s AddOns folder was not found'}`, 'warn');
       else if (!a.current) {
@@ -1092,13 +1092,14 @@ async function checkAll(resume = null) {
           : 'Addon: updated. Type /reload in the game.', 'good');
         a = r.error ? a : r;
       } else say(2, `Addon: up to date${a.version ? ` (version ${a.version})` : ''}`, 'good');
-      const needs = a.installed ? a.guides?.needs?.length ?? 0 : 0;
-      if (needs) {
+      const guides = a.installed ? a.guides?.addons?.filter((g) => g.installed) ?? [] : [];
+      const toTeach = a.guides?.teach ? guides.filter((g) => g.state === 'plain') : [];
+      if (toTeach.length) {
         const r = await post('/api/addon/guides');
         if (r.error) say(3, `Guides: ${r.error}`, 'warn');
-        else say(3, `Guides: converted ${packs(r.done?.length ?? 0)} (${(r.done ?? []).join(', ')}). Restart the game once.`, 'good');
-      } else if (a.guides?.converted?.length) say(3, `Guides: ${packs(a.guides.converted.length)} ready, nothing to convert`, 'good');
-      else if (a.available) say(3, 'Guides: no guide packs made for Guidelime are installed', '');
+        else { say(3, `Guides: ${(r.done ?? []).join(' and ')} taught to ask the addon which floor you are on. Type /reload in the game.`, 'good'); a = r; }
+      } else if (guides.length) say(3, guideWords(a.guides), guides.some((g) => g.state === 'changed') ? 'warn' : 'good');
+      else if (a.available) say(3, 'Guides: neither Guidelime nor RestedXP is installed in the game', '');
     }
     say(4, `Checked at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`, '');
   } catch (err) {
@@ -1486,10 +1487,23 @@ async function refreshDatabase(share) {
   } catch { /* an older server: no such line */ }
 }
 
-// what: nothing (only look), 'install' (Update addon) or 'guides' (Convert guide packs)
+// The guide addons the addon follows (Guidelime, RestedXP), as they are installed: in a line.
+function guideWords(g) {
+  const there = g?.addons?.filter((x) => x.installed) ?? [];
+  if (!there.length) return '';
+  const names = (list) => list.map((x) => x.name).join(' and ');
+  const taught = there.filter((x) => x.state === 'taught'), plain = there.filter((x) => x.state === 'plain'), odd = there.filter((x) => x.state === 'changed');
+  const parts = [`Guides: the route follows ${there.map((x) => x.name + (x.version ? ` ${x.version}` : '')).join(' or ')}, whichever you run (/atlas guide in the game).`];
+  if (taught.length) parts.push(`${names(taught)} ${taught.length === 1 ? 'asks' : 'ask'} the addon which floor you are on.`);
+  if (plain.length && g.teach) parts.push(`${names(plain)} ${plain.length === 1 ? 'does' : 'do'} not yet (updated since, or new): Check for updates sees to it.`);
+  if (odd.length) parts.push(`${names(odd)}: the line that would be changed is not there as expected, so ${odd.length === 1 ? 'it is' : 'they are'} left alone (a step that is only a spot is ticked off on the flat map).`);
+  return parts.join(' ');
+}
+
+// what: nothing (only look), 'install' (Update addon), 'guides' (teach the guide addons), or
+// 'guides?teach=1' / 'guides?teach=0' (switch that on or off)
 async function refreshAddon(what) {
   const btn = $('btnAddon'), msg = $('addonMsg');
-  const packs = (n) => `${n} guide pack${n === 1 ? '' : 's'}`;
   try {
     const before = app.addon;
     const res = await fetch(what ? `/api/addon/${what}` : '/api/addon', { method: what ? 'POST' : 'GET' });
@@ -1500,19 +1514,19 @@ async function refreshAddon(what) {
       : !before?.installed ? 'Addon installed: restart the game so it loads (new addons are only picked up at start).'
       : st.restart ? 'Addon updated. Restart the game once (leave it altogether, not /reload): this update brings new files, and the game only finds those when it starts.'
       : 'Addon updated: type /reload in the game.';
-    if (what === 'guides') msg.textContent = `Converted ${packs(st.done?.length ?? 0)}. Restart the game once (leave it altogether, not /reload): it reads which addon needs which only when it starts.`;
+    if (what && what.startsWith('guides') && st.done?.length) msg.textContent = st.taught ? `${st.done.join(' and ')} taught to ask the addon which floor you are on: type /reload in the game.` : `${st.done.join(' and ')} put back as written by ${st.done.length === 1 ? 'its' : 'their'} makers: type /reload in the game.`;
   } catch (err) { msg.textContent = `Addon: ${err.message}`; }
   const a = app.addon;
-  // Your leveling guides in the game: guide packs made for Guidelime, which the addon runs once
-  // they are converted (they name Guidelime as the addon they need until then).
+  // Your leveling guides in the game: the guide addon you run, which the addon follows
+  // (addon/AzerothAtlas/GuideSources.lua), and whether it has been taught about floors.
   const g = a?.installed ? a.guides : null;
-  const needs = g?.needs?.length ?? 0, converted = g?.converted?.length ?? 0;
-  $('guideMsg').textContent = needs ? `Guides: ${packs(needs)} only ${needs === 1 ? 'loads' : 'load'} with Guidelime switched on. Converted, ${needs === 1 ? 'it runs' : 'they run'} in the addon's own guide window, with or without Guidelime.`
-    : converted ? `Guides: ${packs(converted)} ${converted === 1 ? 'runs' : 'run'} in the addon's own guide window (/atlas guide).${g.guidelime ? ' While Guidelime is switched on in the game, it runs them instead.' : ''}`
-    : '';
-  $('guideMsg').title = needs ? `To convert: ${g.needs.join(', ')}` : converted ? `Converted: ${g.converted.join(', ')}` : '';
-  $('guideRow').style.display = needs ? '' : 'none';
-  $('btnGuides').textContent = `Convert ${packs(needs)}`;
+  const there = g?.addons?.filter((x) => x.installed) ?? [];
+  const toTeach = g?.teach ? there.filter((x) => x.state === 'plain') : [];
+  $('guideMsg').textContent = guideWords(g);
+  $('guideTeachRow').style.display = there.length ? '' : 'none';
+  $('optGuideTeach').checked = g?.teach !== false;
+  $('guideRow').style.display = toTeach.length ? '' : 'none';
+  $('btnGuides').textContent = `Teach ${toTeach.map((x) => x.name).join(' and ')}`;
   if (a?.available && !a.current) {
     btn.style.display = '';
     btn.textContent = a.legacy ? 'Update addon (it has a new name)' : a.installed ? 'Update addon' : 'Install addon';
@@ -1653,6 +1667,7 @@ function bindUI() {
   $('btnAddon').addEventListener('click', () => refreshAddon('install'));
   $('optShare').addEventListener('change', (e) => refreshDatabase(e.target.checked));
   $('btnGuides').addEventListener('click', () => refreshAddon('guides'));
+  $('optGuideTeach').addEventListener('change', (e) => refreshAddon(`guides?teach=${e.target.checked ? 1 : 0}`));
   $('update').addEventListener('click', async () => {
     $('update').disabled = true;
     $('updateMsg').textContent = 'Starting…';
@@ -1838,7 +1853,7 @@ async function main() {
   // Start listening for the game only once a map is up.
   refreshAddon(false);
   resumeCheck();
-  // (a guide pack installed or updated since is offered for converting without reloading the page)
+  // (a guide addon installed or updated since is seen without reloading the page)
   setInterval(() => { if (!document.hidden) refreshAddon(false); }, 30000);
   refreshDatabase();
   setInterval(() => { if (!document.hidden) refreshDatabase(); }, 60000);
