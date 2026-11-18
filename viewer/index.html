@@ -131,6 +131,10 @@
   .kinds input { margin: 0; accent-color: var(--accent); flex: none; }
   #npcNote:empty, #npcSeen:empty, #npcFocus:empty, #npcLine:empty, #npcQuests:empty { display: none; }
   #npcFocus { color: var(--accent); }
+  /* searching: said under the box, with the way out of it */
+  #npcSearching { display: flex; align-items: center; gap: 6px; color: var(--accent); }
+  #npcSearching[hidden] { display: none; }
+  #npcSearching button { flex: none; padding: 1px 8px; }
   #npcCard { display: none; padding: 8px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg2); }
   #npcCard .head { display: flex; align-items: flex-start; gap: 8px; }
   #npcCard .head .grow { flex: 1; font-size: 14px; color: var(--accent); }
@@ -322,7 +326,8 @@
       <div class="secb">
         <div id="npcCard"></div>
         <div id="npcBody">
-          <input id="npcSearch" type="text" placeholder="Find by name, title or quest (Enter: go there)" autocomplete="off" spellcheck="false">
+          <input id="npcSearch" type="text" placeholder="Find by name, title or quest (Enter: go there)" title="Looks among what the switches below leave: by name, title, or the name of a quest somebody starts or ends. What it finds is shown at any distance." autocomplete="off" spellcheck="false">
+          <div id="npcSearching" class="small" hidden><span id="npcSearchingText" class="grow"></span><button id="npcSearchClear" title="Take the search away (Esc in the box does the same)">Clear</button></div>
           <div id="npcFocus" class="small"></div>
           <div id="npcKinds"></div>
           <label class="row" title="Leave out quests you are not yet high enough for, ones that need another quest first, and ones you have outgrown. (Quests of the other side, and with the live link the ones you have done or already have, are always left out.)"><input type="checkbox" id="npcMyQuests" checked><span class="grow">Only quests open to me now</span></label>

@@ -1,7 +1,7 @@
 // The NPC panel: the switches for who is shown, the card for the NPC you click, and the line
 // that says what was learned when you talk to someone in the game. (The data and the drawing
 // are in npcs.js.)
-import { KINDS, GROUPS, RANKS, TYPES, HEIGHT_HOW, SEEN, iconStyle, kindIcon } from './npcs.js';
+import { KINDS, GROUPS, RANKS, TYPES, HEIGHT_HOW, SEEN, iconStyle, kindIcon, searchText } from './npcs.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...children) => {
@@ -78,8 +78,13 @@ export function bindNpcs(app, sheet) {
   bind('npcRange', 'range', (i) => Math.max(50, Math.min(60000, number(i.value) ?? 1200)));
   const search = $('npcSearch');
   search.addEventListener('input', () => { layer.settings.search = search.value; layer.rebuild(); });
+  const unsearch = () => { search.value = ''; layer.settings.search = ''; layer.rebuild(); };
+  $('npcSearchClear').addEventListener('click', unsearch);
+  // Leaving the window, the box lets go of the keyboard: a key pressed on coming back (a camera
+  // key, or one meant for the game) is then not typed into it.
+  window.addEventListener('blur', () => { if (document.activeElement === search) search.blur(); });
   search.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { search.value = ''; layer.settings.search = ''; layer.rebuild(); search.blur(); }
+    if (e.key === 'Escape') { unsearch(); search.blur(); }
     // Enter: fly to the nearest of what was found
     if (e.key === 'Enter' && layer.count) {
       const cam = app.camera, o = layer.origin, inst = layer.inst;
@@ -94,6 +99,10 @@ export function bindNpcs(app, sheet) {
   // ---- what the panel says about the map ----
   const note = () => {
     $('npcBody').className = s.enabled ? '' : 'off';
+    // (searching: said under the box, with how many more by that name the switches leave out)
+    const typed = search.value.trim(), found = searchText(search.value) !== '', more = layer.searchOff ?? 0;
+    $('npcSearching').hidden = !typed;
+    $('npcSearchingText').textContent = found ? `Searching: ${layer.count.toLocaleString()} found${more ? `; ${more.toLocaleString()} more by that name ${more === 1 ? 'is' : 'are'} switched off below` : ''}.` : typed ? 'One letter is not searched for: type another.' : '';
     // (what kind of thing a creature is: only where this map's data says so)
     $('npcTypes').style.display = !layer.data || layer.data.typed ? '' : 'none';
     let text = '';

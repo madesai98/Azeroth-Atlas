@@ -121,6 +121,14 @@ const TALL = 1.9;        // yards: a figure's height at size 1 (see npcfigures.j
 const SIGN_FAR = 2.4;    // yards above the feet a sign floats on its own...
 const signNear = (size) => TALL * size + 0.45; // ...and over the head of a figure
 
+/**
+ * What is searched for: the words in the box, in small letters - or nothing, for fewer than
+ * SEARCH_MIN letters. One letter is no search: nearly every name has an "s" in it, and a key
+ * meant for the camera or for the game lands in the box easily enough.
+ */
+export const SEARCH_MIN = 2;
+export const searchText = (typed) => { const t = String(typed ?? '').trim().toLowerCase(); return t.length >= SEARCH_MIN ? t : ''; };
+
 export class NpcLayer {
   constructor(app) {
     this.app = app;
@@ -603,7 +611,9 @@ export class NpcLayer {
     if (this.context !== `${now.faction}/${now.level}`) this.#classify();
     let enabled = 0n;
     KINDS.forEach((k) => { if (s.kinds[k.key]) enabled |= BIT[k.key]; });
-    const text = s.search.trim().toLowerCase();
+    const text = searchText(s.search);
+    // (searching: how many more go by that name and are switched off - said under the box)
+    let off = 0;
     const Q = this.quests?.quests ?? {};
     // per entry: the icon to draw (-1 = not shown) and whether it shows at any distance
     const icon = new Int8Array(d.entries.length).fill(-1), far = new Uint8Array(d.entries.length);
@@ -615,24 +625,23 @@ export class NpcLayer {
     } else {
       d.entries.forEach((e, i) => {
         const mask = d.mask[i];
-        if (text) {
-          // searching: by name, title, or the name of a quest it starts or ends; the switches are set aside
-          const hit = e.n.toLowerCase().includes(text) || (e.s ?? '').toLowerCase().includes(text)
-            || (e.qs ?? []).some((id) => Q[id]?.n.toLowerCase().includes(text)) || (e.qe ?? []).some((id) => Q[id]?.n.toLowerCase().includes(text));
-          if (hit) { icon[i] = sign(i, first(mask)); far[i] = 1; }
-          return;
-        }
+        // Searching: by name, title, or the name of a quest it starts or ends - among those the
+        // switches leave. (Until 0.5.0 a search set the switches aside: one letter that strayed
+        // into the box showed everybody and everything, whatever was switched off.)
+        if (text && !(e.n.toLowerCase().includes(text) || (e.s ?? '').toLowerCase().includes(text)
+          || (e.qs ?? []).some((id) => Q[id]?.n.toLowerCase().includes(text)) || (e.qe ?? []).some((id) => Q[id]?.n.toLowerCase().includes(text)))) return;
         const k = first(mask & enabled);
-        if (k < 0) return;
-        if ((1n << BigInt(k)) & CREATURE) {
-          if (s.ranks[e.r ?? 0] === false) return;
-          if (d.typed && s.types[e.ct ?? 0] === false) return;
-          if (s.min && (e.l?.[1] ?? 0) < s.min) return;
-          if (s.max && (e.l?.[0] ?? 99) > s.max) return;
+        let on = k >= 0;
+        if (on && ((1n << BigInt(k)) & CREATURE)) {
+          on = !(s.ranks[e.r ?? 0] === false || (d.typed && s.types[e.ct ?? 0] === false) || (s.min && (e.l?.[1] ?? 0) < s.min) || (s.max && (e.l?.[0] ?? 99) > s.max));
         }
+        if (!on) { if (text) off++; return; }
         icon[i] = sign(i, k);
+        // (what a search finds is shown at any distance: it is what you are looking for)
+        if (text) far[i] = 1;
       });
     }
+    this.searchOff = off;
     let n = 0;
     for (let i = 0; i < d.n; i++) if (icon[d.owner[i]] >= 0 && !(s.unsure && d.src[i] > 1)) n++;
     const inst = new Float32Array(n * STRIDE), shown = new Uint32Array(n);

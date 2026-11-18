@@ -494,7 +494,12 @@ trainers** rather than guessed at. On top of the kinds:
 - **Only heights that are a guess** shows just the ones worth walking up to (see below).
 - **Show within** is how far from the camera markers are drawn.
 - The **search box** finds by name, title ("trainer") or the name of a quest someone starts or
-  ends, whatever the switches say and at any distance; Enter flies to the nearest.
+  ends, **among those the switches leave**, at any distance; Enter flies to the nearest. Under
+  the box it says how many it found and how many more by that name are switched off, with a
+  button to clear it. One letter is not searched for. (Until 0.5.0 a search set the switches
+  aside: one letter that strayed into the box - a key meant for the camera - showed everybody
+  and everything, and looked like the switches had stopped working. The box also lets go of
+  the keyboard now when you leave the window.)
 
 **Close up they are figures.** Within the distance set by **3D figures within** (the same one
 that turns you from an arrow into a figure), everyone stands in the world as a person-sized
