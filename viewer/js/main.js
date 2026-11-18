@@ -1301,7 +1301,7 @@ function showRoute() {
     if (legs.length > 1) {
       // a quicker way than walking it all: say each part
       const part = (l) => (l.mode === 'walk' ? `${l.rough ? 'roughly ' : ''}${Math.round(l.rough ? l.yards / 50 : l.yards) * (l.rough ? 50 : 1)} yd on foot${l.to ? ` to ${l.to}` : ''}`
-        : l.mode === 'fly' ? (l.aloft ? `the rest of your flight to ${l.to}` : `fly ${l.from} to ${l.to} (${clock(l.seconds)})`)
+        : l.mode === 'fly' ? (l.aloft ? `the rest of your flight to ${l.to}` : `${l.learn ? `learn the flight point at ${l.from} and fly` : `fly ${l.from}`} to ${l.to} (${clock(l.seconds)})`)
         : l.mode === 'boat' || l.mode === 'zeppelin' ? `the ${l.mode} from ${l.from} to ${l.to} (${clock(l.seconds)}, ${l.known ? `it leaves in ${clock(leavesIn(l))}` : `counting a ${clock(l.wait)} wait`})`
         : l.mode === 'tram' ? `the tram (${clock(l.seconds)}${l.known ? `, it leaves in ${clock(leavesIn(l))}` : ''})`
         : l.mode === 'door' ? `through the ${l.name.replace(/^(Passage|Portal) to /, '')} ${/^Portal/.test(l.name) ? 'portal' : 'entrance'}`

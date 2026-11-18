@@ -14,6 +14,7 @@ const FLIGHT_SPEED = 30.4;  // yards per second on a flight path, until one of y
 const SPEED_OVER = 20;      // seconds of one flight path a flight's speed is measured over, at least
 const SPEED_SKIP = 150;     // yards at the start of a flight path left out of that (taking off)
 const TAKE_OFF = 4;         // seconds lost talking to a flight master and taking off
+const LEARN = 2;            // ...and more at one you have not spoken to before: the flight point is learned first
 const HEARTH_CAST = 10;     // seconds to use a hearthstone
 const WORTH = 0.9;          // another way has to be this much quicker than walking to be offered
 const HEARTH_WORTH = 90;    // seconds a hearthstone must save to be worth its cooldown
@@ -384,20 +385,28 @@ export class RoutePlanner {
     const add = (n) => { n.i = nodes.length; nodes.push(n); edges.push([]); return n; };
     const link = (a, b, e) => edges[a.i].push({ from: a.i, to: b.i, ...e });
     const S = add({ kind: 'start', map: asked.map, pos: asked.from }), G = add({ kind: 'goal', map: asked.toMap, pos: asked.to });
-    // flight points you know: a place on the ground, and the same place "in the air" (so the time
-    // to talk to the flight master is paid once, however many hops the flight has)
+    // flight points: a place on the ground, and the same place "in the air" (so the time to talk
+    // to the flight master is paid once, however many hops the flight has). The ones you have -
+    // and the ones of your own side that you have not: you can walk up to a flight master you
+    // have never spoken to, learn the flight point, and fly on from there to one you have.
+    // (Standing by Lakeshire's, not learned, with Westfall's known, the route used to be all on
+    // foot.) Into a point you have not learned there is no flying, nor through one: it is only
+    // ever where a flight begins. With no word from the game of which you have, none is known,
+    // there is nowhere to fly to, and none is looked at.
     const known = new Set(T?.flights ?? []), air = new Map(), ground = new Map();
+    const mine = this.app.danger?.settings.faction === 'horde' ? 2 : 1;
     for (const n of W.taxiNodes) {
-      if (!known.has(n.id) || (!n.pos[0] && !n.pos[1])) continue;
+      const has = known.has(n.id);
+      if ((!has && !(known.size && n.flags & mine)) || (!n.pos[0] && !n.pos[1])) continue;
       const name = n.name.split(',')[0];
-      const g = add({ kind: 'flight', map: n.map, pos: n.pos, name, id: n.id }), a = add({ kind: 'air', map: n.map, pos: n.pos, name, id: n.id });
+      const g = add({ kind: 'flight', map: n.map, pos: n.pos, name, id: n.id, fresh: !has }), a = add({ kind: 'air', map: n.map, pos: n.pos, name, id: n.id, fresh: !has });
       air.set(n.id, a);
       ground.set(n.id, g);
-      link(g, a, { seconds: TAKE_OFF, mode: 'board' });
-      link(a, g, { seconds: 0, mode: 'land' });
+      link(g, a, { seconds: TAKE_OFF + (has ? 0 : LEARN), mode: 'board', learn: !has });
+      if (has) link(a, g, { seconds: 0, mode: 'land' });
     }
     for (const p of W.taxiPaths) {
-      if (!air.has(p.from) || !air.has(p.to) || p.pointMaps) continue;
+      if (!air.has(p.from) || !air.has(p.to) || p.pointMaps || air.get(p.to).fresh) continue;
       const c = routes.curve(p.map, p.id);
       if (c) link(air.get(p.from), air.get(p.to), { seconds: c.length / this.flightSpeed, mode: 'fly', path: p.id, map: p.map });
     }
@@ -649,7 +658,7 @@ export class RoutePlanner {
           for (; i < n; i++) line.push(q[i * 3], q[i * 3 + 1], q[i * 3 + 2]);
         }
         if (line.length >= 6) { draw(new Float32Array(line), 4, e.seconds); leg.end = kinds.length - 1; }
-      } else if (e.mode === 'board') legs.push({ mode: 'fly', from: a.name, to: a.name, seconds: e.seconds, hops: 0, paths: [], dest: a.id });
+      } else if (e.mode === 'board') legs.push({ mode: 'fly', from: a.name, to: a.name, seconds: e.seconds, hops: 0, paths: [], dest: a.id, learn: !!e.learn }); // (learn: a flight point you have not got yet - it is learned there, then flown from)
       else if (e.mode === 'fly') {
         // (paths, dest: which flight paths this flight goes along, and the flight point it comes down at - for when you are on it: #flight)
         const leg = legs[legs.length - 1];

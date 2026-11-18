@@ -889,7 +889,13 @@ zones" for why going round them was taken out).
   route you have come over twenty seconds or more of it, not how fast you cross the map at one
   moment (coming down to land, that is well under the speed you fly at). From then on flights
   are counted at your speed. Flight points are learned whenever you open a flight master's
-  map, and ShortestPathForever's list is used as well if you have it;
+  map, and ShortestPathForever's list is used as well if you have it. **A flight can also
+  begin at a flight master of your side whose flight point you have not learned yet**: you
+  walk up, learn it, and fly on to one you have ("17 yd on foot to Lakeshire's flight master,
+  then learn the flight point at Lakeshire and fly to Sentinel Hill"; in the game, "Learn the
+  flight point, then fly to Sentinel Hill"). Into a point you have not learned there is no
+  flying, nor through one. (Until 0.5.0 only points you had were looked at: standing beside
+  Lakeshire's flight master, the route to Westfall was all on foot.);
 - **boats and zeppelins**: every line and where it stops comes from the game's own tables
   (they sail the same kind of route a flight path flies, with the stops marked), and how long
   each leg and each stop takes from timetables measured in the game. Every line runs by the

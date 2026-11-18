@@ -137,7 +137,7 @@ export function stepsOf(route, ends, goal) {
   return (route.legs ?? []).map((l, i) => {
     const through = (name) => (/^Portal/.test(name) ? `Portal to ${name.replace(/^Portal to /, '')}` : `Go through to ${name.replace(/^Passage to /, '')}`);
     const text = l.mode === 'walk' ? `Walk to ${l.to ?? goal}`
-      : l.mode === 'fly' ? `Fly to ${l.to}`
+      : l.mode === 'fly' ? (l.learn ? `Learn the flight point, then fly to ${l.to}` : `Fly to ${l.to}`)
       : l.mode === 'boat' ? `Boat to ${l.to}`
       : l.mode === 'zeppelin' ? `Zeppelin to ${l.to}`
       : l.mode === 'tram' ? 'Ride the tram'
