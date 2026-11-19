@@ -25,8 +25,16 @@ export const HEIGHT_HOW = [
   'from the reference database, and the ground agrees',
   'seen in game: you talked to them here',
   'seen in game: you fought them on this level',
+  'seen in game by another player, who talked to them here',
 ];
-export const SEEN = 5, FOUGHT = 6;
+export const SEEN = 5, FOUGHT = 6, SHARED = 7;
+
+/**
+ * Is how this creature stands towards a side a guess? (side: 'a' or 'h'.) `u` marks one with a
+ * side not recorded; `ks` says which sides are known all the same - 1 the Alliance's, 2 the
+ * Horde's: the game's combat log, or Wowhead, said so by way of the Atlas database.
+ */
+export const unsure = (e, side) => !!e.u && !((e.ks ?? 0) & (side === 'h' ? 2 : 1));
 
 // What an NPC does, as the game's own flag bits (QuestieDB passes them on): these are certain.
 const FLAG = { VENDOR: 4, FLIGHT: 8, TRAINER: 16, SPIRIT: 32 | 64, INN: 128, BANK: 256, PETITION: 512, TABARD: 1024, BATTLE: 2048, AUCTION: 4096, STABLE: 8192, REPAIR: 16384 };
@@ -228,7 +236,7 @@ export class NpcLayer {
     const mine = (this.seen ?? []).filter((r) => r.map === map.id);
     const n = owner.length, room = n + mine.length + 64; // (room for the ones you meet that the database has nowhere near)
     const d = {
-      map: map.id, source: meta.source, reference: meta.reference, entries: meta.entries, n, unplaced: meta.unplaced ?? [],
+      map: map.id, source: meta.source, reference: meta.reference, entries: meta.entries, n, unplaced: meta.unplaced ?? [], bosses: meta.bosses ?? [],
       x: new Float32Array(room), y: new Float32Array(room), z: new Float32Array(room), owner: new Uint32Array(room), src: new Uint8Array(room),
       mask: new BigUint64Array(meta.entries.length + mine.length + 64), spawnCount: null,
       typed: meta.entries.some((e) => e.ct), // (does this map's data say what kind of thing a creature is? One built before that was added does not)
@@ -265,8 +273,8 @@ export class NpcLayer {
     }
     let i = this.#nearest(e, r.x, r.y, SAME);
     if (vet && i >= 0 && Number.isFinite(d.z[i]) && ((d.src[i] >= 3 && d.src[i] <= 4 && Math.abs(r.z - d.z[i]) > 6) || r.z - d.z[i] > 60)) { this.rejected++; return -1; }
-    // (a fight adds nobody, and moves nobody the reference database places or you have talked to)
-    if (r.fight && (i < 0 || (d.src[i] >= 3 && d.src[i] <= SEEN))) return -1;
+    // (a fight adds nobody, and moves nobody the reference database places, or you or another player have talked to)
+    if (r.fight && (i < 0 || (d.src[i] >= 3 && d.src[i] !== FOUGHT))) return -1;
     if (i < 0) {
       if (d.n >= d.owner.length) return -1;
       i = d.n++;
@@ -472,6 +480,8 @@ export class NpcLayer {
       });
       if (!left || left.tr) for (const s of q.tr?.at ?? []) found.push({ name: q.tr.t || 'the place it names', map: s[0], x: s[1], y: s[2] });
     }
+    // (nothing it involves is placed anywhere: where the game's own map puts it, if a player's addon has noted that)
+    if (!found.length) for (const s of q.gp?.[handIn ? 'e' : 'o'] ?? []) found.push({ name: handIn ? 'where the game\'s map has it handed in' : 'where the game\'s map puts it', map: s[0], x: s[1], y: s[2] });
     if (!found.length) return null;
     // the zone the quest is filed under (a positive number is an area: its zone's rectangle)
     const zone = q.z > 0 ? this.app.world?.zones?.find((z) => z.type === 3 && z.area === q.z) : null;
@@ -541,7 +551,7 @@ export class NpcLayer {
     d.entries.forEach((e, i) => {
       let m = 0n;
       d.ready[i] = 0;
-      const hostile = !e.k && e[side] === 2 && !e.u;
+      const hostile = !e.k && e[side] === 2 && !unsure(e, side);
       if (e.k) m |= BIT.object;
       if (!hostile) {
         if (e.qs?.some((id) => this.wanted(id))) m |= BIT.quest;
@@ -638,6 +648,8 @@ export class NpcLayer {
         // switches leave. (Until 0.5.0 a search set the switches aside: one letter that strayed
         // into the box showed everybody and everything, whatever was switched off.)
         if (text && !(e.n.toLowerCase().includes(text) || (e.s ?? '').toLowerCase().includes(text)
+          // (an object also by what it asks and what it is to a profession: "herbalism", "anvil")
+          || (e.nd ?? '').toLowerCase().includes(text) || (e.fo ?? '').toLowerCase().includes(text)
           || (e.qs ?? []).some((id) => Q[id]?.n.toLowerCase().includes(text)) || (e.qe ?? []).some((id) => Q[id]?.n.toLowerCase().includes(text)))) return;
         const k = first(mask & enabled);
         let on = k >= 0;
@@ -714,7 +726,7 @@ export class NpcLayer {
     return near.slice(0, limit).map(([dist, k]) => {
       const e = d.entries[d.owner[this.shown[k]]];
       return { kind: 'npc', name: e.n, x: inst[k * STRIDE] + o[0], y: inst[k * STRIDE + 1] + o[1], z: inst[k * STRIDE + 2] + o[2], lift: dist < this.figureDist ? signNear(inst[k * STRIDE + 5]) : SIGN_FAR, minDist: 0, maxDist: reach, prio: 5,
-        color: e.k ? '#bcdcff' : e[side] === 2 && !e.u ? '#ffb3a8' : e[side] === 1 ? '#ffe9a3' : e.u && e[side] === 2 ? '#d5d9e0' : '#c4f7cb' };
+        color: e.k ? '#bcdcff' : e[side] === 2 && !unsure(e, side) ? '#ffb3a8' : e[side] === 1 ? '#ffe9a3' : unsure(e, side) && e[side] === 2 ? '#d5d9e0' : '#c4f7cb' };
     });
   }
 
@@ -762,7 +774,13 @@ export class NpcLayer {
     for (let k = 0; k < d.n; k++) if (d.owner[k] === d.owner[i]) places++;
     return {
       spawn: i, id: e.id, object: !!e.k, name: e.n, title: e.s ?? '', level: e.l ? (e.l[0] === e.l[1] ? `${e.l[1]}` : `${e.l[0]}-${e.l[1]}`) : '', rank: RANK[e.r ?? 0] ?? '',
-      reaction: e.k ? '' : e.u && e[side] === 2 ? 'side not recorded' : ['friendly', 'neutral', 'hostile'][e[side]] ?? '',
+      reaction: e.k ? '' : unsure(e, side) && e[side] === 2 ? 'side not recorded' : ['friendly', 'neutral', 'hostile'][e[side]] ?? '',
+      // (its health as fights in this game measured it: one figure, or lowest level to highest; a boss by the game's own list)
+      health: e.hp ? e.hp.map((v) => v.toLocaleString()).join('-') : '', boss: !!e.b,
+      // (an object: what it asks of whoever would open it, and what it is to a profession)
+      needs: e.nd ?? '', spot: e.fo ?? '',
+      // (a vendor's goods as its window showed them - [item, copper, name] - and how many more; how many things a trainer teaches)
+      sells: e.sl ?? [], sellsMore: e.sm ?? 0, teaches: e.tc ?? 0,
       jobs: JOBS.filter(([bit]) => (e.f ?? 0) & bit).map(([, name]) => name),
       type: e.k || !e.ct ? '' : (TYPE_NAME[e.ct] ?? '').toLowerCase(),
       starts: (e.qs ?? []).map(quest), ends: (e.qe ?? []).map(quest),

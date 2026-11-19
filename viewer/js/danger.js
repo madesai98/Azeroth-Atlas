@@ -141,7 +141,8 @@ export class DangerLayer {
       // guess), one that attacks your side on sight, one that is neutral. Friendly ones make no
       // zone, nor do those whose level is not known, nor the hostile ones standing inside one of
       // your own side's towns or cities (c.t says whose: practice targets, event helpers).
-      const what = c.u ? 'unconfirmed' : c[key] === 2 ? 'hostile' : c[key] === 1 ? 'neutral' : null;
+      // (a side that is known all the same - c.ks - is known: see #guess)
+      const what = this.#guess(c) ? 'unconfirmed' : c[key] === 2 ? 'hostile' : c[key] === 1 ? 'neutral' : null;
       if (!what || !s.kinds?.[what] || !(c.max > 0) || (what === 'hostile' && c.t & mine)) { d.band[i] = -1; continue; }
       const band = bandOf(s.level, c.max, c.rank);
       d.band[i] = s.bands[band] ? band : -1;
@@ -240,11 +241,18 @@ export class DangerLayer {
     if (!hits.size) return null;
     const creatures = [...hits].map(([ci, distance]) => {
       const c = d.creatures[ci];
-      return { name: c.name, min: c.min, max: c.max, rank: RANK_NAME[c.rank] ?? '', band: d.band[ci], distance, estimated: !!c.est, unconfirmed: !!c.u };
+      return { name: c.name, min: c.min, max: c.max, rank: RANK_NAME[c.rank] ?? '', band: d.band[ci], distance, estimated: !!c.est, unconfirmed: this.#guess(c) };
     }).sort((p, q) => q.band - p.band || q.max - p.max);
     return { band: creatures[0].band, creatures };
   }
 
-  /** How many creatures of this map's data have no side recorded (0: none, or a map built before they were kept). */
-  get unconfirmed() { return this.data ? this.data.creatures.reduce((n, c) => n + (c.u ? 1 : 0), 0) : 0; }
+  /**
+   * Is how this creature stands towards YOUR side a guess? `u` marks one with a side not
+   * recorded; `ks` says which sides are known all the same (1 the Alliance's, 2 the Horde's:
+   * the game's combat log, or Wowhead, said so by way of the Atlas database).
+   */
+  #guess(c) { return !!c.u && !((c.ks ?? 0) & (this.settings.faction === 'horde' ? 2 : 1)); }
+
+  /** How many creatures of this map's data have no side recorded towards yours (0: none, or a map built before they were kept). */
+  get unconfirmed() { return this.data ? this.data.creatures.reduce((n, c) => n + (this.#guess(c) ? 1 : 0), 0) : 0; }
 }

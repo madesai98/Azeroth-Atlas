@@ -90,6 +90,30 @@ export function luaValue(src, at) {
 }
 
 /**
+ * Who the addon has met, in its saved settings (the text of a SavedVariables/AzerothAtlas.lua;
+ * the addon's Met.lua keeps them): the creatures you targeted, had the mouse on or saw a name
+ * plate of, with what the game showed of each - its health at a level, how it stood towards
+ * your side. As the lines they are sent as (publish.js, fold: "l" and "r"), the same as what the
+ * combat log says of a creature fought.
+ */
+export function metIn(text) {
+  const at = text.indexOf('AzerothAtlasDB = {');
+  if (at < 0) return [];
+  let db;
+  try { db = luaValue(text, at + 17); } catch { return []; }
+  const of = db?.met?.of;
+  if (!of || typeof of !== 'object') return [];
+  const whole = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
+  const lines = [];
+  for (const [id, rec] of Object.entries(of)) {
+    if (!whole(+id, 1, 16777215) || !rec || typeof rec !== 'object') continue;
+    if (rec.hp && typeof rec.hp === 'object') for (const [level, health] of Object.entries(rec.hp)) if (whole(+level, 1, 99) && whole(health, 1, 2e9)) lines.push(`l,${+id},${+level},${health}`);
+    for (const side of ['A', 'H']) if ([1, 0, -1].includes(rec[side])) lines.push(`r,${+id},${side},${rec[side]}`);
+  }
+  return lines;
+}
+
+/**
  * The sightings in the addon's saved settings (the text of a SavedVariables/AzerothAtlas.lua):
  * [{ n, s, arr, t, src, lane }]. `all`: also the ones it keeps for its own timetables (with
  * `out` alone, a version of the addon from before it kept them for sending gives none).

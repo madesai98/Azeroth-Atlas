@@ -143,6 +143,7 @@ const FIX_SURE = 1.5;    // a height measured to within this is taken as it is w
 const FIX_UNDER = 3;     // yards under the lowest thing the map has at a spot that a measured height may still be
 const FIX_FRESH = 1500;  // milliseconds: a fix is held against the reading it came with, or one this soon after
 const FIX_NEAR = 4;      // ...and this near to it, in yards
+const BAND_SLACK = 1.5;  // yards a floor may lie outside the heights the minimap's rooms span and still be in them (a room's box is its walls' and floor's)
 const HEIGHT_KEY = 'wfmap.height', SPOTS_KEY = 'wfmap.heights';
 
 /** The surfaces of a sorted list that have room for a character above them. */
@@ -422,6 +423,7 @@ export class HeightTracker {
       if (this.z !== null) { this.trail.push({ t: clock, z: this.z }); if (this.trail.length > 60) this.trail.shift(); }
       // The game has measured your height (see #fixed): held, once, against where you were when
       // that came - not against somewhere you have got to since.
+      if (me.band) this.#banded(me);
       const fix = me.fix;
       if (fix && fix.n !== this.fixN) {
         this.fixN = fix.n;
@@ -815,6 +817,34 @@ export class HeightTracker {
     this.how = 'next to someone';
     this.#note(`anchor:${Math.round(this.z)}`, 'you are next to someone whose height is known: yours is theirs', { z: Math.round(this.z * 10) / 10 });
     return this.z;
+  }
+
+  // ---- by the rooms on the minimap --------------------------------------------------------------
+  /**
+   * Inside a dungeon your place is read off the game's minimap (server/minimap.js), and the
+   * minimap says more than where: the game leaves the rooms above yours off it, so which rooms
+   * it shows says which rooms you can be in - and those lie between two heights (me.band:
+   * [lowest, highest]). Where the height worked out here is not between them and there is
+   * somewhere to stand that is, you are on that: the nearest such place to where you were taken
+   * to be. Where two floors lie within the heights, nothing is said, and walking decides as ever.
+   */
+  #banded(me) {
+    const [lo, hi] = me.band;
+    if (this.z === null || this.fall || this.dive || this.ride || this.loose) return;
+    const inside = (z) => z >= lo - BAND_SLACK && z <= hi + BAND_SLACK;
+    // (the other floors followed alongside that the minimap rules out are followed no longer)
+    if (this.alts.length) this.alts = this.alts.filter((a) => inside(a.z));
+    if (inside(this.z)) return;
+    const here = this.#surfaces(me.x, me.y, me);
+    if (here.pending) return;
+    let best = null;
+    for (const z of [...standable(here.all), ...this.#props(here)]) if (inside(z) && (best === null || Math.abs(z - this.z) < Math.abs(best - this.z))) best = z;
+    if (best === null) return;
+    const was = this.z;
+    this.z = best; this.at = [me.x, me.y];
+    this.gap = 0; this.lost = 0; this.unsure = false; this.score = 0;
+    this.how = 'the rooms on the minimap';
+    this.#note(`band:${Math.round(was)}:${Math.round(best)}`, 'the rooms the minimap shows say which floor you are on: you are taken to be on that', { from: Math.round(was * 10) / 10, to: Math.round(best * 10) / 10, between: [Math.round(lo * 10) / 10, Math.round(hi * 10) / 10] });
   }
 
   // ---- in the air ----------------------------------------------------------------------------

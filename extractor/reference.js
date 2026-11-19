@@ -157,10 +157,13 @@ function readFacts(sql) {
     return out;
   };
   const loot = { creature: lootTable('creature_loot_template'), reference: lootTable('reference_loot_template'), object: lootTable('gameobject_loot_template') };
-  const chests = new Map(), movers = new Map();
+  const chests = new Map(), movers = new Map(), objectKinds = new Map();
   {
     const t = reader('gameobject_template');
     const iId = t.at('entry'), iType = t.at('type'), iData = t.at('data1'), iName = t.at('name');
+    // (the object's kind and its first five numbers, as the server has them: which lock it has, what a profession works at there - world.js, objectNeeds)
+    const iNumbers = [0, 1, 2, 3, 4].map((n) => t.at(`data${n}`));
+    if (t.ok && Math.min(iId, iType, ...iNumbers) >= 0) for (const r of t.rows()) objectKinds.set(num(r[iId]), [num(r[iType]), ...iNumbers.map((i) => num(r[i]))]);
     // (type 3: a chest - anything you open and take from; its second number is the loot it holds.
     // type 11: something that moves along a way of its own with whoever stands on it - a lift)
     if (t.ok && Math.min(iId, iType, iData) >= 0) for (const r of t.rows()) {
@@ -183,7 +186,7 @@ function readFacts(sql) {
       quests.set(num(r[iId]), { title: iTitle >= 0 ? r[iTitle] : '', type: iType >= 0 ? num(r[iType]) : 0, limit: iLimit >= 0 ? num(r[iLimit]) : 0, needs });
     }
   }
-  return { templates, respawn, loot, chests, movers, quests };
+  return { templates, respawn, loot, chests, movers, objectKinds, quests };
 }
 
 /**
@@ -220,7 +223,7 @@ export function readReference(file) {
     }
     return out;
   };
-  let facts = { templates: new Map(), respawn: new Map(), loot: { creature: new Map(), reference: new Map(), object: new Map() }, chests: new Map(), movers: new Map(), quests: new Map() };
+  let facts = { templates: new Map(), respawn: new Map(), loot: { creature: new Map(), reference: new Map(), object: new Map() }, chests: new Map(), movers: new Map(), objectKinds: new Map(), quests: new Map() };
   try { facts = readFacts(sql); } catch { /* the spawn tables alone, as before */ }
   return { hash, creatures: table('creature'), objects: table('gameobject'), ...facts };
 }

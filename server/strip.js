@@ -9,7 +9,10 @@
 //                                                   kind: 1 your guide's step, 2 a journey of your own
 //                                                   in Shortest Path Forever, 3 a pin on the game's map,
 //                                                   4 a quick waypoint: a Shift-click on the game's map)
-//   [text]    kind(1) key(2) part(1) 9 bytes(24)    when layout has 2 (names and travel facts, a piece per frame)
+//   [text]    kind(1) key(2) part(1) 9 bytes(24)    when layout has 2 (names and travel facts, a piece per frame;
+//                                                   more has been said this way since without a new version, each
+//                                                   under a key of its own that an older map simply does not read:
+//                                                   NameCache below has them all)
 //   [fix]     seq(1) 2 x ( kind(1) id(5) h(5) d(4) ) when layout has 8 (version 6, whose layout has two digits:
 //                                                   your height as the game measured it - see below)
 //   checksum(4)
@@ -307,6 +310,28 @@ export class NameCache {
       tracked = { id: quest, state: q[4] & 3, n, done: q[5] & (2 ** n - 1), kinds: Array.from({ length: n }, (_, k) => (kinds >> (k * 2)) & 3) };
     }
     return { guide: guide ?? null, waypoint: waypoint ?? null, corpse: corpse ?? null, quest: quest ?? 0, tracked };
+  }
+
+  /**
+   * Where the game has its minimap on the screen, as the addon says (AzerothAtlas.lua,
+   * MinimapReport) - or null from an addon that does not say: the map finds you on the minimap
+   * inside a dungeon (minimap.js), and has to know where it is.
+   * { known (the place and size that follow were read; false: the game would not say),
+   *   cx, cy (its middle, in pixels of the game's picture from the top left corner), half, halfHigh
+   *   (half its width and height, pixels), zoom (the step of its zoom, 0 the widest; null not said),
+   *   zooms (how many steps there are), radius (yards from its middle to its edge, as the game has
+   *   it; null not said), rotates (it turns with you; null not said), round (null not said),
+   *   shown, screen: [width, height] (the game's picture as the game counts it) }
+   */
+  minimap() {
+    const b = this.raw.get(`${TEXT_KIND.TALK}:9`);
+    if (!b || b.length < 18 || !(b[0] & 128) || b[17] !== 1) return null;
+    const u16 = (o) => b[o] * 256 + b[o + 1];
+    return {
+      known: !!(b[0] & 1), cx: u16(1) / 8, cy: u16(3) / 8, half: u16(5) / 32, halfHigh: u16(7) / 32,
+      zoom: b[0] & 32 ? b[9] & 15 : null, zooms: b[9] >> 4, radius: u16(10) ? u16(10) / 16 : null,
+      rotates: b[0] & 64 ? !!(b[0] & 2) : null, round: b[0] & 8 ? !!(b[0] & 4) : null, shown: !!(b[0] & 16), screen: [u16(12), u16(14)],
+    };
   }
 
   /**

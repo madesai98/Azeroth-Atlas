@@ -22,6 +22,11 @@ import { SEC, parseLiquidSection } from './tile.js';
 import { MSEC } from './model.js';
 
 export const NAV_VERSION = 6;
+// The ground of a map that is one building (a dungeon, the Deeprun Tram: see buildNav) was
+// first made at this number. A number of its own, apart from NAV_VERSION: nothing a tile's
+// ground is made of changed with it, so every tile stays as it is, while the page offers the
+// map built again for the maps that had no ground until then (stamp.js).
+export const BUILDING_NAV_VERSION = 1;
 // LINKS: per surface, four bits for each of east, west, south, north (in that order from the
 // lowest): 0 it leads nowhere that way; 1-14 it leads on to that surface of the next cell
 // (counted from 1, lowest first); LINK_EDGE the next cell is on the next tile, and this surface
@@ -108,11 +113,17 @@ function mesh(dir, kind, fdid) {
 
 /**
  * @param job { col, row, tile, models (directory of converted models), out, kinds }
+ *
+ * A map that is one building and nothing else (a dungeon, the Deeprun Tram) has no tiles: the
+ * same squares are laid over it all the same, and each of them the building reaches into is
+ * built with no `tile` and the building itself instead:
+ *            { col, row, building: { fdid, pos (world), rot, scale }, models, out }
+ * There is no ground and no water in such a square, only what the building is made of.
  */
 export function buildNav(job) {
   // everything is laid into a grid of half cells first (see "floors" below)
   const N = NAV_N * 2, CELL = NAV_CELL / 2;
-  const { sections } = unpackContainer(fs.readFileSync(job.tile), 'WFT1');
+  const sections = job.tile ? unpackContainer(fs.readFileSync(job.tile), 'WFT1').sections : null;
   const xN = (32 - job.row) * TILE_SIZE, yW = (32 - job.col) * TILE_SIZE;
 
   // spans: linked lists per cell
@@ -183,11 +194,11 @@ export function buildNav(job) {
   };
 
   // ---- terrain ----
-  const H = f32View(sections.get(SEC.HEIGHTS));
-  const holes = sections.get(SEC.HOLES);
-  const chunks = sections.get(SEC.CHUNKS);
+  const H = sections ? f32View(sections.get(SEC.HEIGHTS)) : null;
+  const holes = sections?.get(SEC.HOLES);
+  const chunks = sections?.get(SEC.CHUNKS);
   const Q = TILE_SIZE / 128;
-  for (let j = 0; j < 128; j++) for (let i = 0; i < 128; i++) {
+  for (let j = 0; H && j < 128; j++) for (let i = 0; i < 128; i++) {
     const ci = (j >> 3) * 16 + (i >> 3);
     if (holes && (holes[ci * 8 + (j & 7)] >> (i & 7)) & 1) continue; // a hole in the ground (cave mouth)
     const blocked = chunks ? chunks.readUInt32LE(ci * 8) & 2 : 0;     // chunk the game marks impassable
@@ -204,41 +215,48 @@ export function buildNav(job) {
   }
 
   // ---- buildings and objects placed on the tile ----
-  const obj = sections.get(SEC.OBJECTS);
   let placed = 0;
+  // One model where it stands (in world yards): its collision mesh, laid into the grid.
+  const place = (kind, fdid, pos, rot, scale) => {
+    const m = mesh(job.models, kind, fdid);
+    if (!m) return;
+    const M = placementMatrix(pos, rot, scale);
+    const P = m.positions, nV = P.length / 3;
+    const w = new Float32Array(nV * 3);
+    let lox = Infinity, hix = -Infinity, loy = Infinity, hiy = -Infinity;
+    for (let i = 0; i < nV; i++) {
+      const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
+      const wx = M[0] * x + M[1] * y + M[2] * z + M[3], wy = M[4] * x + M[5] * y + M[6] * z + M[7];
+      w[i * 3] = wx; w[i * 3 + 1] = wy; w[i * 3 + 2] = M[8] * x + M[9] * y + M[10] * z + M[11];
+      if (wx < lox) lox = wx; if (wx > hix) hix = wx; if (wy < loy) loy = wy; if (wy > hiy) hiy = wy;
+    }
+    if (hix < xN - TILE_SIZE || lox > xN || hiy < yW - TILE_SIZE || loy > yW) return; // does not reach this tile
+    placed++;
+    const I = m.indices;
+    // a mirrored placement (negative scale) would flip the winding; the game has none, so `wind` stands
+    for (let t = 0; t + 2 < I.length; t += 3) {
+      const a = I[t] * 3, b = I[t + 1] * 3, c = I[t + 2] * 3;
+      solid(w[a], w[a + 1], w[a + 2], w[b], w[b + 1], w[b + 2], w[c], w[c + 1], w[c + 2], m.wind, 0);
+    }
+  };
+  const obj = sections?.get(SEC.OBJECTS);
   if (obj && obj.length >= 8) {
     const nDoodads = obj.readUInt32LE(0), nWmos = obj.readUInt32LE(4);
-    const place = (kind, p, scale) => {
-      const m = mesh(job.models, kind, obj.readUInt32LE(p));
-      if (!m) return;
-      const M = placementMatrix([obj.readFloatLE(p + 8), obj.readFloatLE(p + 12), obj.readFloatLE(p + 16)], [obj.readFloatLE(p + 20), obj.readFloatLE(p + 24), obj.readFloatLE(p + 28)], scale);
-      const P = m.positions, nV = P.length / 3;
-      const w = new Float32Array(nV * 3);
-      let lox = Infinity, hix = -Infinity, loy = Infinity, hiy = -Infinity;
-      for (let i = 0; i < nV; i++) {
-        const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
-        const wx = M[0] * x + M[1] * y + M[2] * z + M[3], wy = M[4] * x + M[5] * y + M[6] * z + M[7];
-        w[i * 3] = wx; w[i * 3 + 1] = wy; w[i * 3 + 2] = M[8] * x + M[9] * y + M[10] * z + M[11];
-        if (wx < lox) lox = wx; if (wx > hix) hix = wx; if (wy < loy) loy = wy; if (wy > hiy) hiy = wy;
-      }
-      if (hix < xN - TILE_SIZE || lox > xN || hiy < yW - TILE_SIZE || loy > yW) return; // does not reach this tile
-      placed++;
-      const I = m.indices;
-      // a mirrored placement (negative scale) would flip the winding; the game has none, so `wind` stands
-      for (let t = 0; t + 2 < I.length; t += 3) {
-        const a = I[t] * 3, b = I[t + 1] * 3, c = I[t + 2] * 3;
-        solid(w[a], w[a + 1], w[a + 2], w[b], w[b + 1], w[b + 2], w[c], w[c + 1], w[c + 2], m.wind, 0);
-      }
-    };
-    for (let i = 0; i < nDoodads; i++) place('m2', 8 + i * 40, obj.readFloatLE(8 + i * 40 + 32));
+    const listed = (kind, p, scale) => place(kind, obj.readUInt32LE(p), [obj.readFloatLE(p + 8), obj.readFloatLE(p + 12), obj.readFloatLE(p + 16)], [obj.readFloatLE(p + 20), obj.readFloatLE(p + 24), obj.readFloatLE(p + 28)], scale);
+    for (let i = 0; i < nDoodads; i++) listed('m2', 8 + i * 40, obj.readFloatLE(8 + i * 40 + 32));
     const base = 8 + nDoodads * 40;
-    for (let i = 0; i < nWmos; i++) place('wmo', base + i * 68, obj.readFloatLE(base + i * 68 + 32) || 1);
+    for (let i = 0; i < nWmos; i++) listed('wmo', base + i * 68, obj.readFloatLE(base + i * 68 + 32) || 1);
   }
+  // The one building of a map that is nothing else. Laid in as a building that stands on a tile
+  // is: its own collision, and not that of the objects it places inside itself (the crates and
+  // stalagmites of a dungeon are no more in this than the stalls and lamp posts of a town's
+  // buildings are), nor its water (a town's canals are not in it either).
+  if (job.building) place('wmo', job.building.fdid, job.building.pos, job.building.rot, job.building.scale || 1);
 
   // ---- water: level and kind per terrain quad ----
   const water = new Float32Array(128 * 128).fill(NaN);
   const waterKind = new Uint8Array(128 * 128);
-  for (const L of parseLiquidSection(sections.get(SEC.LIQUID))) {
+  for (const L of sections ? parseLiquidSection(sections.get(SEC.LIQUID)) : []) {
     const cr = L.chunk >> 4, cc = L.chunk & 15;
     for (let y = 0; y < L.h; y++) for (let x = 0; x < L.w; x++) {
       const bit = y * L.w + x;

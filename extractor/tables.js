@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 import { readTable, tableHashOf } from './formats/db2.js';
 
 const DBD_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dbd');
@@ -53,6 +54,18 @@ export const TABLE_FDID = {
   SpellName: 1990283,
   ItemEffect: 969941,
   ItemXItemEffect: 3177687,
+  // the bosses of each dungeon and raid, as the game lists them (world.js)
+  DungeonEncounter: 1347279,
+  // what a quest gives, worked out as the game works it out: experience, money and reputation by
+  // the quest's level and the step the server names (world.js, questRewards)
+  QuestXP: 1139378,
+  QuestMoneyReward: 1139047,
+  QuestFactionReward: 1282622,
+  // what it takes to open a thing, and what a profession works at (world.js, opens)
+  Lock: 1343608,
+  SpellFocusObject: 1280620,
+  // which picture of the minimap belongs to which room of which building (jobs/minimap.js)
+  WMOMinimapTexture: 1323241,
 };
 
 async function refreshDefinition(name) {
@@ -91,7 +104,14 @@ export async function loadTable(casc, name, log = () => {}, { hotfixes = null, c
     try {
       if (!dbd) throw Object.assign(new Error('no definition yet'), { code: 'ELAYOUT', first: true });
       const t = readTable(buf, dbd, { build: casc.build.version, hotfixes });
-      return { rows: t.rows, hash: casc.contentHash(fdid), skippedEncryptedSections: t.skippedEncryptedSections, hotfixed: t.hotfixed };
+      // (sent: a mark of the records out of the hotfix cache that were laid over the table - the same records, the same mark; none, null)
+      let sent = null;
+      if (hotfixes?.length) {
+        const h = crypto.createHash('sha1');
+        for (const r of hotfixes) { h.update(`${r.id}:`); if (r.data) h.update(r.data); else h.update('-'); }
+        sent = h.digest('hex').slice(0, 12);
+      }
+      return { rows: t.rows, hash: casc.contentHash(fdid), skippedEncryptedSections: t.skippedEncryptedSections, hotfixed: t.hotfixed, sent };
     } catch (err) {
       if (err.code !== 'ELAYOUT' || attempt === 1) { log(`table ${name}: ${err.message}`); return null; }
       try {

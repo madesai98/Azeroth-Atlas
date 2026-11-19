@@ -7,6 +7,7 @@ import { buildAreas } from './jobs/areas.js';
 import { buildPlacements } from './jobs/placements.js';
 import { buildWmo, buildM2, shapeM2, copyTextures } from './jobs/model.js';
 import { buildNav } from './jobs/nav.js';
+import { buildMinimapRef } from './jobs/minimap.js';
 
 const casc = Casc.fromShared(workerData.shared);
 const handlers = {
@@ -19,6 +20,7 @@ const handlers = {
   m2shape: (job) => shapeM2(casc, job),
   textures: (job) => copyTextures(casc, job),
   nav: (job) => buildNav(job),
+  minimap: (job) => buildMinimapRef(casc, job),
 };
 
 parentPort.on('message', async (msg) => {

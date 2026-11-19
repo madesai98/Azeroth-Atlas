@@ -287,6 +287,8 @@ export function bindQuests(app) {
       }
     }
     if (q.tr) { parts.push({ label: q.tr.t || 'Go to the place it names', seconds: TALK, detail: '' }); const s = q.tr.at?.[0]; if (s) spots.push({ map: s[0], x: s[1], y: s[2], z: null, name: q.tr.t || 'the place' }); }
+    // (nothing it asks for is placed anywhere: where the game's own map puts it, if a player's addon has noted that)
+    if (!spots.length && q.gp?.o?.[0]) { const s = q.gp.o[0]; spots.push({ map: s[0], x: s[1], y: s[2], z: null, name: 'where the game\'s map puts it' }); }
     if (q.ty && KIND[q.ty] && q.ty !== 84) rough.push(`a ${KIND[q.ty].toLowerCase()} quest: the time is what the fighting would take one player, and takes no account of finding a group or getting through the place`);
     const to = (q.e ?? []).map((n) => where('n', n, spots[spots.length - 1] ?? from)).find((p) => p?.map !== undefined) ?? (q.eo ?? []).map((n) => where('o', n)).find((p) => p?.map !== undefined) ?? null;
     // the way round: from who gives it, to each thing it asks for (the nearest next), to who takes it

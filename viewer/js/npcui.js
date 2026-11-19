@@ -1,7 +1,10 @@
 // The NPC panel: the switches for who is shown, the card for the NPC you click, and the line
 // that says what was learned when you talk to someone in the game. (The data and the drawing
 // are in npcs.js.)
-import { KINDS, GROUPS, RANKS, TYPES, HEIGHT_HOW, SEEN, FOUGHT, iconStyle, kindIcon, searchText } from './npcs.js';
+import { KINDS, GROUPS, RANKS, TYPES, HEIGHT_HOW, SEEN, FOUGHT, SHARED, iconStyle, kindIcon, searchText } from './npcs.js';
+
+/** An amount of copper as the game writes money: "1g 20s 5c". */
+const coins = (c) => { c = Math.max(0, Math.round(c)); const g = Math.floor(c / 10000), si = Math.floor((c % 10000) / 100), co = c % 100; return [g ? `${g}g` : '', si ? `${si}s` : '', co || (!g && !si) ? `${co}c` : ''].filter(Boolean).join(' '); };
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...children) => {
@@ -110,8 +113,16 @@ export function bindNpcs(app, sheet) {
     else if (!layer.data) text = app.scene?.map.npcs ? 'Loading…' : 'No NPCs recorded for this map.';
     else {
       const h = layer.heights(), total = layer.data.n, pct = (c) => `${Math.round((c / Math.max(1, total)) * 100)}%`;
-      const mine = h[SEEN] + h[FOUGHT], sure = h[4] + h[3] + mine;
-      text = !total ? `Nobody could be placed on this map (${layer.data.source}).` : `${layer.count.toLocaleString()} shown of ${total.toLocaleString()} (${layer.data.source}). Heights: ${pct(sure)} known${mine ? ` (${mine} seen by you)` : ''}, ${pct(h[2])} the only place to stand, ${pct(h[1] + h[0])} a best guess.`;
+      const mine = h[SEEN] + h[FOUGHT], others = h[SHARED] ?? 0, sure = h[4] + h[3] + mine + others;
+      text = !total ? `Nobody could be placed on this map (${layer.data.source}).` : `${layer.count.toLocaleString()} shown of ${total.toLocaleString()} (${layer.data.source}). Heights: ${pct(sure)} known${mine ? ` (${mine} seen by you)` : ''}${others ? ` (${others} seen by other players)` : ''}, ${pct(h[2])} the only place to stand, ${pct(h[1] + h[0])} a best guess.`;
+      // the bosses of the place, by the game's own list, and how many of them the map can show
+      const bosses = layer.data.bosses;
+      if (bosses.length) {
+        const placed = new Set(layer.data.entries.filter((e) => e.b).map((e) => e.n));
+        const lost = bosses.filter((b) => !placed.has(b));
+        text += ` The game lists ${bosses.length === 1 ? 'one boss' : `${bosses.length} bosses`} here: ${bosses.join(', ')}.`;
+        if (lost.length) text += ` Not placed yet: ${lost.length === bosses.length ? (lost.length === 1 ? 'it' : 'any of them') : lost.join(', ')} (a boss is placed once somebody fights it with the game's combat log on).`;
+      }
       const lost = layer.data.unplaced.length;
       if (lost) text += ` ${lost}${total ? ' more' : ''} ${lost === 1 ? 'is' : 'are'} known to be on this map, but not where (${layer.data.unplaced.slice(0, 4).join(', ')}${lost > 4 ? ', …' : ''}).`;
     }
@@ -167,17 +178,21 @@ export function bindNpcs(app, sheet) {
     if (!layer.data || i < 0) { close(); return; }
     showing = i;
     const d = layer.describe(i);
-    const line = [d.object ? 'Object' : d.level ? `Level ${d.level}` : '', d.rank, d.type, d.reaction].filter(Boolean).join(' · ');
+    // (boss: the game's own list of the place's bosses names it; health: as fights in this game measured it)
+    const line = [d.object ? 'Object' : d.level ? `Level ${d.level}` : '', d.needs ? `needs ${d.needs}` : '', d.spot ? `counts as: ${d.spot}` : '', d.boss && d.rank !== 'boss' ? 'boss' : '', d.rank, d.type, d.reaction, d.health ? `${d.health} health` : ''].filter(Boolean).join(' · ');
     const list = (title, quests) => (quests.length ? [el('div', { class: 'sub', text: `${title} (${quests.length})` }), ...quests.map((q) => questLine(q, (id) => openQuest(id, i)))] : []);
     fill(card,
       el('div', { class: 'head' }, el('span', { class: 'title grow', text: d.name }), el('button', { text: '×', title: 'Close', onclick: close })),
       d.title ? el('div', { class: 'dim', text: `<${d.title}>` }) : null,
       line ? el('div', { text: line }) : null,
       d.jobs.length ? el('div', { text: d.jobs.join(', ') }) : null,
+      // (what its window showed the players whose addon noted it)
+      d.sells.length ? el('div', { class: 'dim small', title: d.sells.map((s) => `${s[2] || `item ${s[0]}`}: ${coins(s[1])}`).join('\n'), text: `Sells ${d.sells.length + d.sellsMore} things: ${d.sells.slice(0, 6).map((s) => s[2] || `item ${s[0]}`).join(', ')}${d.sells.length + d.sellsMore > 6 ? '…' : ''}` }) : null,
+      d.teaches ? el('div', { class: 'dim small', text: `Teaches ${d.teaches} ${d.teaches === 1 ? 'thing' : 'things'}` }) : null,
       ...list('Starts', d.starts), ...list('Ends', d.ends),
       el('div', { class: 'sub', text: 'Where' }),
       el('div', { class: 'r', text: `${d.x.toFixed(0)}, ${d.y.toFixed(0)}${d.z !== null ? `, ${d.z.toFixed(1)} yd up` : ''}${d.places > 1 ? ` · one of ${d.places} places` : ''}` }),
-      el('div', { class: d.src === SEEN || d.src >= 3 ? 'r good' : d.src <= 1 ? 'r warn' : 'r dim', text: `Height ${HEIGHT_HOW[d.src]}.` }),
+      el('div', { class: d.src >= 3 ? 'r good' : d.src <= 1 ? 'r warn' : 'r dim', text: `Height ${HEIGHT_HOW[d.src]}.` }),
       el('div', { class: 'btnrow', style: 'margin-top:8px' },
         el('button', { text: 'Route here', title: 'Drop the marker here: with "Route to my waypoint" on, the way there is drawn', onclick: () => app.setPin?.([d.x, d.y, d.z ?? app.scene.heightAt(d.x, d.y) ?? 0], d.name, d.z !== null) }),
         el('button', { text: 'Look', title: 'Fly the camera here', onclick: () => app.camera.lookAt([d.x, d.y, d.z ?? app.scene.heightAt(d.x, d.y) ?? 0], 70, app.camera.heading, -40, true) })),

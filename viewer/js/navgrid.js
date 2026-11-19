@@ -22,6 +22,13 @@ async function inflate(bytes) {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
+/**
+ * The squares of a map that have a ground file, "col_row" each: its tiles - or, for a map that
+ * is one building and has no tiles (a dungeon, the Deeprun Tram), the squares its record lists
+ * (map.json: nav.at).
+ */
+export const navTiles = (map) => (map.nav?.at ?? map.tiles ?? []).map((t) => `${t[0]}_${t[1]}`);
+
 /** One tile as it is on the disk, made ready to be asked: { offs, z, flags, xN, yW }. */
 export async function readNavTile(buf, col, row) {
   const dv = new DataView(buf);
@@ -37,7 +44,7 @@ export async function readNavTile(buf, col, row) {
 }
 
 export class NavGrid {
-  /** @param app { scene } (the map in hand says which tiles there are)   @param load (map, name, rev) => Promise<ArrayBuffer | null>, for tests */
+  /** @param app { scene } (the map in hand says which tiles there are: navTiles)   @param load (map, name, rev) => Promise<ArrayBuffer | null>, for tests */
   constructor(app, load = null) {
     this.app = app;
     this.tiles = new Map(); // "map/rev/col_row" -> tile | null (none) | undefined while being fetched
@@ -53,7 +60,7 @@ export class NavGrid {
   #tile(x, y) {
     const map = this.app.scene?.map;
     if (!map?.nav) return null;
-    if (this.haveFor !== map) { this.haveFor = map; this.have = new Set((map.tiles ?? []).map((t) => `${t[0]}_${t[1]}`)); }
+    if (this.haveFor !== map) { this.haveFor = map; this.have = new Set(navTiles(map)); }
     const col = Math.floor(32 - y / TILE), row = Math.floor(32 - x / TILE), name = `${col}_${row}`;
     if (!this.have.has(name)) return null;
     const key = `${map.id}/${map.nav.rev}/${name}`;

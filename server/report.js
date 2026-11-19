@@ -14,7 +14,10 @@
 //                     a digest of each, so that a file gone wrong shows), config.json, what the
 //                     server knew at that moment (the game, the addon, your character as the
 //                     game reported it, your quest log), its notes (log.js), what the page
-//                     showed and noted, a picture of the map, the route mailboxes as they stood
+//                     showed and noted, a picture of the map, the route mailboxes as they stood,
+//                     and - where you were found on the game's minimap inside a dungeon
+//                     (minimap.js) - the last small square of the game's picture that was looked
+//                     at, where the minimap was taken to be in it, and what the look gave
 //   game/             the game: its build, its settings (Config.wtf), the addons installed and
 //                     which are switched on, what the Azeroth Atlas addon has saved (with its own
 //                     notes of what it did: Route.lua), what the addons it works with have saved,
@@ -211,7 +214,7 @@ export function addonNotes(lua) {
 // ---- the report ------------------------------------------------------------------------------------
 /**
  * @param ctx  { configFile, cfg (the settings in use, or null where the game was not found), problem
- *             (why not, then), live: { status(), tracker, mail, atlas, auctions } (what the running
+ *             (why not, then), live: { status(), tracker, mail, atlas, auctions, minimap } (what the running
  *             server has in hand; none of it when run from a terminal) }
  * @param ask  { text (what went wrong, in the reporter's words), when, include: { shot, cache,
  *             others (every addon's saved settings), hotfixes }, page: { state, log, shot (a
@@ -320,6 +323,19 @@ export async function buildReport(ctx, ask = {}) {
     const g = state.game;
     if (g && !g.error) summary.push(`The game: ${g.status}${g.reason ? ` (${g.reason})` : ''}${g.player ? `, a level ${g.player.level} character on map ${g.player.map}` : ''}`);
     if (state.addon && !state.addon.error) summary.push(`The addon: ${state.addon.installed ? `version ${state.addon.installedVersion ?? '?'} installed${state.addon.current ? '' : ` (this copy brings version ${state.addon.version ?? '?'})`}` : 'not installed'}`);
+  });
+  await part('the minimap', () => {
+    // Where you are inside a dungeon is read off the game's minimap (minimap.js). What may explain
+    // a place that is wrong, or none at all: the last square of the game's picture that was looked
+    // at, as a picture; where the minimap was taken to be (by the addon's word and by its rim on
+    // the picture); and the figures of the last look.
+    const mm = live.minimap;
+    if (!mm) return;
+    const s = mm.status();
+    add('atlas/minimap/state.json', s);
+    const pic = include.shot ? mm.picture() : null;
+    if (pic) add('atlas/minimap/last.png', pic.png, { text: false, at: new Date(pic.at), note: `the square of the game's picture last looked at: ${pic.w} x ${pic.h} pixels${pic.origin ? `, ${pic.origin[0]} across and ${pic.origin[1]} down` : ''}` });
+    if (s.wanted || s.pictures) summary.push(`The minimap: ${s.state}${s.why ? ` (${s.why})` : ''}; ${s.found} of ${s.pictures} pictures of it gave a place`);
   });
   await part('the notes of Azeroth Atlas', () => {
     for (const f of logFiles()) file(`atlas/logs/${path.basename(f)}`, f, { max: 3 * MB, text: true });

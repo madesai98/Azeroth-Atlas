@@ -81,9 +81,9 @@ try {
     for (const n of found.notes) log(n);
     if (value('only') === 'seen') { found.npc.clear(); found.object.clear(); found.quest.clear(); }
     if (value('only') === 'cache') found.seen.length = 0;
-    log(`found: ${found.npc.size} creatures, ${found.object.size} objects and ${found.quest.size} quests in the game's cache (game build ${found.build || '?'}), ${found.seen.length} sightings, ${found.boats.length} sightings of boats, zeppelins and the tram`);
+    log(`found: ${found.npc.size} creatures, ${found.object.size} objects and ${found.quest.size} quests in the game's cache (game build ${found.build || '?'}), ${found.seen.length} sightings, ${found.logged.length} facts of creatures fought or met (a place, health at a level, a side), ${found.boats.length} sightings of boats, zeppelins and the tram`);
     const r = await share(db, store, found, { app, dry: flag('dry'), copy });
-    log(`${r.dry ? 'would send' : 'sent'}: ${r.sent.npc} creatures, ${r.sent.object} objects, ${r.sent.quest} quests, ${r.sent.seen} sightings in ${r.deliveries} ${r.deliveries === 1 ? 'delivery' : 'deliveries'} (${kb(r.bytes)}), ${r.sent.boats} sightings of boats; the rest was sent before`);
+    log(`${r.dry ? 'would send' : 'sent'}: ${r.sent.npc} creatures, ${r.sent.object} objects, ${r.sent.quest} quests, ${r.sent.seen} sightings, ${r.sent.logged ?? 0} facts of creatures fought or met in ${r.deliveries} ${r.deliveries === 1 ? 'delivery' : 'deliveries'} (${kb(r.bytes)}), ${r.sent.boats} sightings of boats; the rest was sent before`);
     if (r.boatsError) log(`the boats could not be sent: ${r.boatsError}`);
     if (json) console.log(JSON.stringify({ collect: r }));
   } else if (command === 'publish') {

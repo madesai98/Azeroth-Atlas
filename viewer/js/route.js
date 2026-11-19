@@ -4,6 +4,7 @@ import { note, changed } from './log.js';
 import { GLOBALS_WGSL, targets, depthState, ALPHA_BLEND } from './gpu.js';
 import { wayOf, nearestOn } from './transit.js';
 import { FELL, FALL_SPEED, fallsOf } from './falls.js';
+import { navTiles } from './navgrid.js';
 
 const REPLAN_OFF = 10;      // yards off the route before a new one is worked out
 const REPLAN_EVERY = 20000; // ms: refresh while travelling even if nothing seems to have changed
@@ -22,7 +23,7 @@ const HEARTH_WORTH = 90;    // seconds a hearthstone must save to be worth its c
 const CHANGE_WORTH = 60;    // seconds each thing a journey takes after its first (the tram to get to a flight) must save to be worth the change
 const RIDES = new Set(['board', 'boat', 'zeppelin', 'tram', 'hearth']); // what counts as one: getting on a flight (however many hops), a boat, a zeppelin, the tram; your hearthstone
 const HOSTILE_REACH = 1000; // yards: a flight master within this says whose town a dock or doorway is in
-const TRUST = 150;          // yards: a walk this short on a map with no walking data (the tram's platform) is taken on trust
+const TRUST = 150;          // yards: a walk this short on a map with no walking data (the tram's platform, in a map built before it had any) is taken on trust
 const ROUGH = 3;            // a walk too long to work out is counted at this many times the straight line (it was looked for and not found within reach: it is no short way round)
 const GAP = 60;             // yards: drawn stretches further apart than this are not joined by a line
 const BREAK = 8;            // kind bit: this point starts a new stretch (no line from the one before)
@@ -84,7 +85,7 @@ export class RoutePlanner {
   setMap(map) {
     this.mapId = map.id;
     this.navigable = !!map.nav;
-    this.info = map.nav ? { map: map.id, rev: map.nav.rev, tiles: map.tiles.map((t) => `${t[0]}_${t[1]}`) } : null;
+    this.info = map.nav ? { map: map.id, rev: map.nav.rev, tiles: navTiles(map) } : null;
     this.infos.set(map.id, this.info);
     this.#clear('');
   }
@@ -271,7 +272,7 @@ export class RoutePlanner {
       const entry = this.app.manifest.maps.find((m) => m.id === id);
       if (entry) {
         const map = await (await fetch(`/data/maps/${id}/map.json?v=${entry.rev}`)).json();
-        if (map.nav) info = { map: id, rev: map.nav.rev, tiles: map.tiles.map((t) => `${t[0]}_${t[1]}`) };
+        if (map.nav) info = { map: id, rev: map.nav.rev, tiles: navTiles(map) };
       }
     } catch { /* treated as a map with no walking data */ }
     this.infos.set(id, info);
@@ -576,7 +577,7 @@ export class RoutePlanner {
       const info = await this.#mapInfo(e.map);
       const yards = Math.hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1]);
       const guess = { seconds: (yards * slack) / run, length: yards * slack, points: null, rough: true };
-      // a map with no walking data (the tram's tunnel): a short hop is taken on trust
+      // a map with no walking data (the tram's tunnel, in a map built before it had any): a short hop is taken on trust
       if (!info) { exact.set(key, { ok: yards < TRUST, ...guess }); return; }
       const r = await this.#walk(info, a.pos, b.pos, { ...opts, landFrom: a.land, landTo: b.land });
       // Too long a walk to work out step by step (a far corner of another continent): an

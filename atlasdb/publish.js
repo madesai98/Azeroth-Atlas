@@ -30,6 +30,11 @@ import { KINDS, SCHEMA, LAYERS, fromQuestie, fromReference, mergeAll, shards, ca
 import { entries, SERVER_TIME } from './rtdb.js';
 
 const SAME = 30;            // yards: sightings of one NPC this close together are the same spot
+const FLATS = 400;          // the most places kept of one creature on one map, of those fights with it began at
+const SOLD = 200;           // the most things kept of what one vendor sells
+const TAUGHT = 400;         // ...and of what one trainer teaches
+const PINS = 12;            // the most places kept of one kind of pin of a quest on one of the game's maps
+const PIN_SAME = 1.5;       // per cent of the map: pins of a quest this close together are one pin
 const REQUEST = 3 << 20;    // bytes of records to one request
 const WHOLE = 40;           // shards wanted of one kind beyond which the whole kind is fetched at once
 
@@ -112,15 +117,42 @@ export function vote(voices) {
   return { rec, split };
 }
 
+/** What most of the copies say (each has one voice); of two said equally often, the larger - so that it is always the same one. */
+function mostSaid(voices) {
+  const count = new Map();
+  for (const v of voices.values()) count.set(v, (count.get(v) ?? 0) + 1);
+  return [...count].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0]?.[0];
+}
+
 /**
  * What the copies have sent, put together: per kind the facts of the game's cache (settled by
- * vote where several copies have sent the same thing: vote()), the sightings, and who reported what.
+ * vote where several copies have sent the same thing: vote()), the sightings, what the game's
+ * combat log said of the creatures fought, and who reported what.
+ *
+ * The lines of a delivery's `seen` list, by their first letter (collect.js writes them):
+ *   n,<id>,<map>,<x>,<y>,<z>     where an NPC stands, from someone who stood beside it and talked
+ *   o,<id>,<map>,<x>,<y>,<z>     the same of an object
+ *   f,<id>,<map>,<x>,<y>         where a creature was when a fight with it began (no height)
+ *   l,<id>,<level>,<health>      a creature's health at a level, as the fight showed it
+ *   r,<id>,<A or H>,<1, 0, -1>   how a creature stood towards a player of that side
+ *   v,<id>,<item>,<copper>,<how many>,<1: stock is limited>   what a vendor sells, as its window showed
+ *   t,<id>,<spell>,<copper>,<skill>,<skill level>,<level>     what a trainer teaches, and what it asks
+ *   q,<quest>,<s, o or e>,<the game's map>,<x>,<y>            where the game's own map puts a quest:
+ *                                where it starts, an objective, where it is handed in (per cent of that map)
+ * A line of any other kind is left out: a later version's, which this one does not know.
  * @param inbox what GET /inbox returned
- * @returns { cache, seen, obs, copies, deliveries, splits: [{ kind, id, field, said }] }
+ * @returns { cache, seen, logged, obs, copies, deliveries, splits: [{ kind, id, field, said }] }
  */
 export function fold(inbox) {
   const reports = { npc: new Map(), object: new Map(), quest: new Map() }; // id -> Map<copy, { copy, at, key, build, rec }>
   const spots = new Map(); // "n123:m0" -> [{ x, y, z, copies: Set }]
+  const flats = new Map();  // "123:m0" -> [{ x, y, by: Map<copy, [x, y]> }]
+  const levels = new Map(); // id -> Map<level, Map<copy, health>>
+  const stands = new Map(); // id -> [Map<copy, how> towards the Alliance, the same towards the Horde]
+  const sells = new Map();  // id -> Map<item, Map<copy, [copper, how many, limited]>>
+  const teaches = new Map(); // id -> Map<spell, Map<copy, [copper, skill, skill level, level]>>
+  const pins = new Map();   // "quest:s|o|e:the game's map" -> [{ x, y, by: Map<copy, [x, y]> }]
+  const whole = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
   let deliveries = 0;
   const copies = entries(inbox);
   for (const [copy, list] of copies) {
@@ -146,7 +178,70 @@ export function fold(inbox) {
       for (const [, line] of entries(b.seen)) {
         const p = String(line).split(',');
         const k = p[0], id = +p[1], map = +p[2], x = +p[3], y = +p[4], z = +p[5];
-        if ((k !== 'n' && k !== 'o') || !Number.isInteger(id) || !Number.isInteger(map) || ![x, y, z].every(Number.isFinite)) continue;
+        if (!Number.isInteger(id) || id <= 0) continue;
+        if (k === 'f') {
+          // where a creature was when a fight began: the same spot from several copies is one spot, in the middle of what they say
+          if (!Number.isInteger(map) || map < 0 || ![x, y].every((v) => Number.isFinite(v) && Math.abs(v) < 40000)) continue;
+          const key = `${id}:m${map}`;
+          let list2 = flats.get(key);
+          if (!list2) flats.set(key, (list2 = []));
+          const near = list2.find((s) => Math.hypot(s.x - x, s.y - y) < SAME);
+          if (near) {
+            near.by.set(copy, [x, y]);
+            const all = [...near.by.values()];
+            near.x = all.reduce((a, v) => a + v[0], 0) / all.length; near.y = all.reduce((a, v) => a + v[1], 0) / all.length;
+          } else if (list2.length < FLATS) list2.push({ x, y, by: new Map([[copy, [x, y]]]) });
+          continue;
+        }
+        if (k === 'l') {
+          const level = +p[2], health = +p[3];
+          if (!Number.isInteger(level) || level < 1 || level > 99 || !Number.isInteger(health) || health < 1 || health > 2e9) continue;
+          let by = levels.get(id);
+          if (!by) levels.set(id, (by = new Map()));
+          let voices = by.get(level);
+          if (!voices) by.set(level, (voices = new Map()));
+          voices.set(copy, health); // (a copy's later word on a level stands for its earlier one)
+          continue;
+        }
+        if (k === 'r') {
+          const side = p[2] === 'A' ? 0 : p[2] === 'H' ? 1 : -1, how = +p[3];
+          if (side < 0 || ![1, 0, -1].includes(how)) continue;
+          let both = stands.get(id);
+          if (!both) stands.set(id, (both = [new Map(), new Map()]));
+          both[side].set(copy, how);
+          continue;
+        }
+        if (k === 'v' || k === 't') {
+          // a vendor's goods or a trainer's lessons: each thing with what every copy saw asked for it
+          const thing = +p[2], rest = p.slice(3).map(Number);
+          const fits = k === 'v'
+            ? rest.length === 3 && whole(rest[0], 0, 2e9) && whole(rest[1], 1, 10000) && (rest[2] === 0 || rest[2] === 1)
+            : rest.length === 4 && whole(rest[0], 0, 2e9) && whole(rest[1], 0, 65535) && whole(rest[2], 0, 1000) && whole(rest[3], 0, 99);
+          if (!whole(thing, 1, 16777215) || !fits) continue;
+          const shelf = k === 'v' ? sells : teaches;
+          let things = shelf.get(id);
+          if (!things) shelf.set(id, (things = new Map()));
+          let voices = things.get(thing);
+          if (!voices) { if (things.size >= (k === 'v' ? SOLD : TAUGHT)) continue; things.set(thing, (voices = new Map())); }
+          voices.set(copy, rest);
+          continue;
+        }
+        if (k === 'q') {
+          // a pin of the game's own map for a quest: the same pin from several copies is one, in the middle of what they say
+          const what = p[2], ui = +p[3], px = +p[4], py = +p[5];
+          if (!['s', 'o', 'e'].includes(what) || !whole(ui, 1, 99999) || ![px, py].every((v) => Number.isFinite(v) && v >= 0 && v <= 100)) continue;
+          const key = `${id}:${what}:${ui}`;
+          let list2 = pins.get(key);
+          if (!list2) pins.set(key, (list2 = []));
+          const near = list2.find((s) => Math.hypot(s.x - px, s.y - py) < PIN_SAME);
+          if (near) {
+            near.by.set(copy, [px, py]);
+            const all = [...near.by.values()];
+            near.x = all.reduce((a, v) => a + v[0], 0) / all.length; near.y = all.reduce((a, v) => a + v[1], 0) / all.length;
+          } else if (list2.length < PINS) list2.push({ x: px, y: py, by: new Map([[copy, [px, py]]]) });
+          continue;
+        }
+        if ((k !== 'n' && k !== 'o') || !Number.isInteger(map) || ![x, y, z].every(Number.isFinite)) continue;
         const key = `${k}${id}:m${map}`;
         let list2 = spots.get(key);
         if (!list2) spots.set(key, (list2 = []));
@@ -184,7 +279,52 @@ export function fold(inbox) {
     o.s = [Math.max(o.s?.[0] ?? 0, ...list.map((s) => s.by.size))];
     obs[kind].set(id, o);
   }
-  return { cache, seen, obs, copies: copies.length, deliveries, splits };
+  // what the combat log said of each creature: where fights with it began, its health level by level, how it stands towards each side
+  const logged = { npc: new Map(), quest: new Map() };
+  const told = new Map(); // id -> Set of the copies that said anything of it
+  const of = (id) => { let rec = logged.npc.get(id); if (!rec) logged.npc.set(id, (rec = {})); return rec; };
+  const by = (id, names) => { let s = told.get(id); if (!s) told.set(id, (s = new Set())); for (const n of names) s.add(n); };
+  for (const [key, list] of flats) {
+    const m = /^(\d+):(m\d+)$/.exec(key), id = +m[1];
+    (of(id).f ??= {})[m[2]] = list.map((s) => [r2(s.x), r2(s.y)].join(',')).join(' ');
+    for (const s of list) by(id, s.by.keys());
+  }
+  for (const [id, perLevel] of levels) {
+    const hpl = [...perLevel].map(([level, voices]) => [level, mostSaid(voices)]).sort((a, b) => a[0] - b[0]);
+    const rec = of(id);
+    rec.hpl = hpl;
+    rec.lv = [hpl[0][0], hpl[hpl.length - 1][0]];
+    rec.hp = [hpl[0][1], hpl[hpl.length - 1][1]];
+    for (const voices of perLevel.values()) by(id, voices.keys());
+  }
+  for (const [id, both] of stands) {
+    of(id).react = both.map((voices) => (voices.size ? mostSaid(voices) : -2));
+    for (const voices of both) by(id, voices.keys());
+  }
+  // What a vendor sells and a trainer teaches. A price falls with your standing with its people,
+  // so the largest anybody was asked is the price; of everything else, what most say.
+  const column = (voices, n) => mostSaid(new Map([...voices].map(([copy, v]) => [copy, v[n]])));
+  for (const [id, things] of sells) {
+    of(id).sells = [...things].map(([item, voices]) => [item, Math.max(...[...voices.values()].map((v) => v[0])), column(voices, 1), column(voices, 2)]).sort((a, b) => a[0] - b[0]);
+    for (const voices of things.values()) by(id, voices.keys());
+  }
+  for (const [id, things] of teaches) {
+    of(id).teaches = [...things].map(([spell, voices]) => [spell, Math.max(...[...voices.values()].map((v) => v[0])), column(voices, 1), column(voices, 2), column(voices, 3)]).sort((a, b) => a[0] - b[0]);
+    for (const voices of things.values()) by(id, voices.keys());
+  }
+  // Where the game's own map puts a quest: { s: { u<the game's map>: "x,y x,y" }, o: ..., e: ... }
+  for (const [key, list] of pins) {
+    const [quest, what, ui] = key.split(':');
+    let rec = logged.quest.get(+quest);
+    if (!rec) logged.quest.set(+quest, (rec = { gp: {} }));
+    (rec.gp[what] ??= {})[`u${ui}`] = list.map((s) => [r2(s.x), r2(s.y)].join(',')).join(' ');
+  }
+  for (const [id, names] of told) {
+    const o = obs.npc.get(id) ?? {};
+    o.l = [names.size];
+    obs.npc.set(id, o);
+  }
+  return { cache, seen, logged, obs, copies: copies.length, deliveries, splits };
 }
 
 /**
@@ -233,8 +373,10 @@ export async function buildTruth(cfg, dataDir, inbox, log = () => {}) {
   for (const kind of KINDS) {
     sources[kind].push(['g', got.cache[kind]]);
     if (got.seen[kind]) sources[kind].push(['s', got.seen[kind]]);
+    if (got.logged[kind]) sources[kind].push(['l', got.logged[kind]]);
   }
   from.copies = got.copies; from.deliveries = got.deliveries;
+  if (got.logged.npc.size) { from.logged = got.logged.npc.size; log(`the game's combat log, as the copies read it: ${got.logged.npc.size.toLocaleString()} creatures with a place, a level and health, or a side`); }
   if (got.splits.length) from.split = got.splits.length;
   log(`${got.copies} ${got.copies === 1 ? 'copy has' : 'copies have'} sent ${got.deliveries} ${got.deliveries === 1 ? 'delivery' : 'deliveries'}: ${got.cache.npc.size.toLocaleString()} creatures, ${got.cache.object.size.toLocaleString()} objects and ${got.cache.quest.size.toLocaleString()} quests from the game's cache, sightings of ${(got.seen.npc.size + got.seen.object.size).toLocaleString()}`);
   if (got.splits.length) log(`the copies' caches disagree about ${got.splits.length.toLocaleString()} ${got.splits.length === 1 ? 'fact' : 'facts'}: settled by vote ("votes" lists them)`);

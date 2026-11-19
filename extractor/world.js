@@ -3,9 +3,33 @@
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { loadTable } from './tables.js';
+import { readCache } from './hotfix.js';
 import { transportLines, findPortalData, readPortals } from './transit.js';
 
-export const WORLD_VERSION = 6; // raise when the contents of world.json change (6: lifts)
+export const WORLD_VERSION = 8; // raise when the contents of world.json change (6: lifts; 7: bosses, and what the server sent since the game's files were made; 8: locks and what professions work at)
+/** The ways into a lock that are a skill of a player's own, by the game's number for each (its table LockType). */
+const LOCK_SKILLS = { 1: 'Lockpicking', 2: 'Herbalism', 3: 'Mining', 19: 'Fishing' };
+/** Which of an object's numbers names its lock, by the object's kind (0 a door, 1 a button, 2 a quest giver, 3 a chest - herbs and veins are chests -, 6 a trap, 10 a thing you use, 25 a school of fish, 50 a node). */
+const LOCK_AT = { 0: 1, 1: 1, 2: 0, 3: 0, 6: 0, 10: 0, 13: 0, 22: 0, 23: 0, 24: 0, 25: 4, 50: 0 };
+/**
+ * What an object asks of whoever would open it, and what it is to a profession, in words:
+ * { need: "Herbalism 70" | "Lockpicking 150 or a key" | "a key", spot: "Anvil" } (either may be
+ * missing). `type` and `data` are the object's kind and numbers as the server gives them.
+ * @param opens  world.json's opens
+ */
+export function objectNeeds(opens, type, data) {
+  const out = {};
+  if (!opens || !Number.isInteger(type) || !Array.isArray(data)) return out;
+  if (type === 8) { const spot = opens.spots?.[data[0]]; if (spot) out.spot = spot; return out; }
+  const lock = opens.locks?.[data[LOCK_AT[type] ?? -1]];
+  if (!lock) return out;
+  const ways = (lock.s ?? []).map(([skill, level]) => `${opens.skills?.[skill] ?? 'a skill'} ${level}`);
+  // (a key is another way into what a lock pick opens. The game's table also names one for four
+  // kinds of ore vein - an axe, Rockslicer - which opens nothing: what is gathered is gathered)
+  if (lock.k?.length && !(lock.s ?? []).some(([skill]) => skill !== 1)) ways.push('a key');
+  if (ways.length) out.need = ways.join(' or ');
+  return out;
+}
 export const ROOMS_VERSION = 1; // ...and of rooms.json
 const hex = (argb) => '#' + ((argb >>> 0) & 0xffffff).toString(16).padStart(6, '0');
 const r3 = (v) => v.map((x) => Math.round(x * 1000) / 1000);
@@ -71,15 +95,40 @@ export function liftsOf(ref, rows) {
   return out.sort((a, b) => a.map - b.map || a.x - b.x || a.y - b.y);
 }
 
+/**
+ * A table of the game's with what the game's server has sent since its files were made laid over
+ * it (the hotfix cache: hotfix.js). The game's files do not hold every record: a dungeon added
+ * after they were made - its map, its areas, the names of its rooms - comes that way, and so
+ * does a flight path that was moved. Where the sent records cannot be laid over (a layout this
+ * version cannot read), the table is read as the files have it: better that than no table.
+ * @param cache  what readCache(cfg) gave (null: there is none)
+ * @returns what loadTable() returns, its `hash` taking in what was laid over - or null
+ */
+export async function loadSentTable(casc, name, log, cache) {
+  let t = cache ? await loadTable(casc, name, () => {}, { cache }) : null;
+  if (!t) t = await loadTable(casc, name, log);
+  if (t?.sent) t.hash = `${t.hash}+${t.sent}`;
+  return t;
+}
+
 export async function buildWorld(casc, log, cfg = null) {
-  const names = ['Map', 'AreaTable', 'UiMap', 'UiMapAssignment', 'AreaPOI', 'LiquidType', 'LiquidObject', 'LiquidMaterial', 'TaxiNodes', 'TaxiPath', 'TaxiPathNode', 'AreaTrigger'];
+  const names = ['Map', 'AreaTable', 'UiMap', 'UiMapAssignment', 'AreaPOI', 'LiquidType', 'LiquidObject', 'LiquidMaterial', 'TaxiNodes', 'TaxiPath', 'TaxiPathNode', 'AreaTrigger', 'DungeonEncounter', 'QuestXP', 'Lock', 'SpellFocusObject'];
   const T = {};
   const hashes = [];
+  let cache = null;
+  try { cache = cfg ? readCache(cfg) : null; } catch { cache = null; }
+  let sentRows = 0;
+  // (the tables that say how water is laid out are read as the game's files have them: every
+  // tile of terrain is built with them, the tiles themselves come out of the files, and a record
+  // sent later for a new kind of water would have every tile of every map built again for nothing)
+  const AS_FILED = new Set(['LiquidType', 'LiquidObject', 'LiquidMaterial']);
   for (const name of names) {
-    const t = await loadTable(casc, name, log);
+    const t = AS_FILED.has(name) ? await loadTable(casc, name, log) : await loadSentTable(casc, name, log, cache);
     T[name] = t?.rows ?? [];
+    if (t?.sent) sentRows += t.hotfixed ?? 0;
     hashes.push(`${name}:${t?.hash ?? 'none'}`);
   }
+  if (sentRows) log(`world tables: ${sentRows.toLocaleString()} records the game's server has sent since its files were made are laid over them`);
   if (!T.Map.length) throw new Error('Map table could not be read from the game data');
 
   // Liquid vertex-format lookup (needed to decode water height data correctly).
@@ -161,12 +210,50 @@ export async function buildWorld(casc, log, cfg = null) {
     box: r.Box_length || r.Box_width || r.Box_height ? r3([r.Box_length, r.Box_width, r.Box_height, r.Box_yaw]) : undefined,
   }));
 
+  // The bosses of each dungeon and raid, as the game itself lists them (its table
+  // DungeonEncounter: what it counts a kill of towards being saved to the place), in its own
+  // order: { [map]: [name, ...] }. Names only - the game's files do not say where a boss stands.
+  const bosses = {};
+  for (const r of [...T.DungeonEncounter].sort((a, b) => a.MapID - b.MapID || a.OrderIndex - b.OrderIndex || a.ID - b.ID)) {
+    const name = String(r.Name_lang ?? '').trim();
+    // (the table keeps rows its makers gave up: "No Longer in Use" is nobody to look for)
+    if (!name || /^no longer in use$|^unused\b|\bunused$/i.test(name) || !Number.isInteger(r.MapID) || r.MapID < 0) continue;
+    const list = (bosses[r.MapID] ??= []);
+    if (!list.includes(name)) list.push(name);
+  }
+
+  // What it takes to open a thing (the game's table Lock): a lock is up to eight ways in, each a
+  // key (an item) or a skill at some level. The skills that are a player's own are kept -
+  // picking locks, herbalism, mining, fishing - with the keys: { [lock]: { s: [[skill, level],
+  // ...], k: [item, ...] } }. (The other ways a lock lists - "open", "treasure" - are what
+  // everybody can do once it is unlocked, and say nothing of what it asks.) And what a profession
+  // works at (the game's table SpellFocusObject): { [id]: "Anvil" }. Which lock or which of those
+  // an object is, the server says when the object is met (the game's cache), not the files.
+  const opens = { skills: LOCK_SKILLS, locks: {}, spots: {} };
+  for (const r of T.Lock) {
+    if (!Array.isArray(r.Type) || !Array.isArray(r.Index)) continue;
+    const s = [], k = [];
+    for (let i = 0; i < r.Type.length; i++) {
+      if (r.Type[i] === 1 && r.Index[i] > 0) k.push(r.Index[i]);
+      else if (r.Type[i] === 2 && LOCK_SKILLS[r.Index[i]]) s.push([r.Index[i], r.Skill?.[i] > 0 ? r.Skill[i] : 1]);
+    }
+    if (s.length || k.length) opens.locks[r.ID] = k.length ? { s, k } : { s };
+  }
+  for (const r of T.SpellFocusObject) { const name = String(r.Name_lang ?? '').trim(); if (name && r.ID > 0) opens.spots[r.ID] = name; }
+
+  // What a quest gives in experience, as the game works it out: the server names a quest's level
+  // and a step (1-7), and the game looks the amount up here (its table QuestXP): { [level]:
+  // [amount at step 0, 1, ...] }. The game's cache holds the step and not the amount, so whoever
+  // reads the cache needs this beside it (atlasdb/collect.js, questXp).
+  const questXp = {};
+  for (const r of T.QuestXP) if (Number.isInteger(r.ID) && r.ID > 0 && Array.isArray(r.Difficulty) && r.Difficulty.some((v) => v > 0)) questXp[r.ID] = r.Difficulty;
+
   return {
     maps: T.Map,
     lvf,
     // WORLD_VERSION is part of it so that a change to what is written here reaches the viewer
     // (it caches world.json by the map revision).
     hash: `v${WORLD_VERSION}|${hashes.join('|')}`,
-    data: { areas, zones, pois, taxiNodes, taxiPaths, transports, portals, capitals, areaTriggers, liquidTypes },
+    data: { areas, zones, pois, taxiNodes, taxiPaths, transports, portals, capitals, areaTriggers, liquidTypes, bosses, questXp, opens },
   };
 }

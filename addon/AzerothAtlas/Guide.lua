@@ -1546,6 +1546,11 @@ do
       end
       Press("Back to the top left", 20, -236, 170, function() shared.PlaceStrip("TOPLEFT", 0, 0) end)
     end)
+    -- the game's combat log, kept for the 3D map to read (AzerothAtlas.lua: KeepFights)
+    piece(function()
+      Check("Keep the game's combat log: the 3D map learns from it", 216, -234,
+        function() return shared.FightsKept() end, function(on) shared.SetFights(on) end)
+    end)
 
     -- the routes
     piece(function()

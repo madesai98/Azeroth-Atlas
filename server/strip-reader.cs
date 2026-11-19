@@ -13,9 +13,20 @@
 //           available, and stops working while another window covers the game's corner.
 // Neither opens, reads or modifies the game process, and no input is sent to it.
 //
+// The same picture has the game's minimap on it, and inside a dungeon that is the one thing that
+// shows where you are (server/minimap.js). So, only while it is asked to, the helper also hands
+// over one small square of the picture a few times a second: the square the minimap is in. It
+// is asked through its input, a line at a time:
+//   "M <x> <y> <w> <h> <ms>"   send that square of the area the game draws in (counted from its
+//                              top-left corner), no more often than every so many milliseconds
+//   "M off"                    send none
+// Nothing else is read from the input, and with no such line nothing but the strip is ever sent.
+//
 // Built automatically by server/tracker.js with the C# compiler that ships with Windows (the
 // WGC symbol is defined when the Windows capture API can be compiled in).
-// Output lines:  "S <status...>"  when the status changes,  "P <rgb hex>"  when the pixels change.
+// Output lines:  "S <status...>"  when the status changes,  "P <rgb hex>"  when the pixels change,
+//                "M <x> <y> <w> <h> <rgb base64>"  a square of the picture (the part of what was
+//                asked for that is in the picture), rows from the top, red green blue a pixel.
 using System;
 using System.Diagnostics;
 using System.Drawing;
@@ -43,6 +54,50 @@ static class StripReader
     [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr hWnd, out RECT r);
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hWnd, out RECT r);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out RECT value, int size);
+
+    // The square of the picture that is asked for (see the top of this file): where it is in the
+    // area the game draws in, how big, and how many milliseconds are left between two of them.
+    // miniOn: one is asked for at all. Set from the thread that reads the input, read in the loop.
+    static volatile bool miniOn;
+    static volatile int miniX, miniY, miniW, miniH, miniEvery = 200;
+    static readonly object miniLock = new object();
+    const int MiniMost = 1024; // (a square is never bigger than this each way: it is the minimap that is wanted, not the window)
+
+    static void Ask(string line)
+    {
+        string[] p = line.Trim().Split(' ');
+        if (p.Length < 2 || p[0] != "M") return;
+        if (p[1] == "off") { miniOn = false; return; }
+        if (p.Length < 6) return;
+        int x, y, w, h, every;
+        if (!int.TryParse(p[1], out x) || !int.TryParse(p[2], out y) || !int.TryParse(p[3], out w) || !int.TryParse(p[4], out h) || !int.TryParse(p[5], out every)) return;
+        if (w < 8 || h < 8 || w > MiniMost || h > MiniMost) { miniOn = false; return; }
+        lock (miniLock) { miniX = x; miniY = y; miniW = w; miniH = h; miniEvery = Math.Max(50, every); miniOn = true; }
+    }
+    // What is asked for is read as it comes, beside the watching of the game (the map server
+    // writes a line when what it wants changes; started with nothing to read from, this ends at once).
+    static void Listen()
+    {
+        Thread t = new Thread(delegate ()
+        {
+            try { string line; while ((line = Console.In.ReadLine()) != null) Ask(line); }
+            catch { }
+        });
+        t.IsBackground = true;
+        t.Start();
+    }
+
+    // A square of a picture as the line it is sent as. px: its pixels (B, G, R, A), rows of pitch bytes.
+    static string MiniLine(byte[] px, int pitch, int x, int y, int w, int h)
+    {
+        byte[] rgb = new byte[w * h * 3];
+        for (int j = 0, o = 0; j < h; j++)
+        {
+            int p = j * pitch;
+            for (int i = 0; i < w; i++, p += 4) { rgb[o++] = px[p + 2]; rgb[o++] = px[p + 1]; rgb[o++] = px[p]; }
+        }
+        return "M " + x + " " + y + " " + w + " " + h + " " + Convert.ToBase64String(rgb);
+    }
 
     static string lastStatus = "";
     static void Status(TextWriter o, string s)
@@ -222,6 +277,14 @@ static class StripReader
         // been done, with where it is in the picture (FoundX, FoundY: -1 when it is not in it).
         public bool WantScan, Scanned;
         public int FoundX = -1, FoundY = -1;
+        // Asked for a square of the next picture as well (WantMini: where in the picture, how big);
+        // GotMini once it has been taken, with its pixels in Mini (rows of MiniPitch bytes) and
+        // what of it was inside the picture (MiniGotW by MiniGotH, from MiniX, MiniY).
+        public bool WantMini, GotMini;
+        public int MiniX, MiniY, MiniW, MiniH, MiniGotW, MiniGotH, MiniPitch;
+        public byte[] Mini;
+        IntPtr miniStaging;
+        int miniStagingW, miniStagingH;
 
         public static WindowCapture Start(IntPtr hwnd, int width, int interval)
         {
@@ -332,6 +395,11 @@ static class StripReader
                         WantScan = false; Scanned = true; FoundX = -1; FoundY = -1;
                         try { Locate(texture); } catch { }
                     }
+                    if (WantMini)
+                    {
+                        WantMini = false;
+                        try { TakeMini(texture); } catch { GotMini = false; }
+                    }
                     Array.Clear(px, 0, px.Length);
                     if (x < 0 || y < 0 || y >= FrameHeight || x >= FrameWidth) return 1;
                     int w = Math.Min(Math.Min(width, stagingWidth), FrameWidth - x);
@@ -349,6 +417,40 @@ static class StripReader
                 return 1;
             }
             finally { frame.Dispose(); }
+        }
+
+        // The square that is asked for, out of this picture: copied into a small texture of its own
+        // that the CPU can read (kept from one time to the next, made anew when another size is asked for).
+        void TakeMini(IntPtr texture)
+        {
+            int x = Math.Max(0, MiniX), y = Math.Max(0, MiniY);
+            int w = Math.Min(MiniX + MiniW, FrameWidth) - x, h = Math.Min(MiniY + MiniH, FrameHeight) - y;
+            if (w < 8 || h < 8) return;
+            if (miniStaging == IntPtr.Zero || miniStagingW != w || miniStagingH != h)
+            {
+                if (miniStaging != IntPtr.Zero) { Marshal.Release(miniStaging); miniStaging = IntPtr.Zero; }
+                TEXTURE2D_DESC d = new TEXTURE2D_DESC();
+                d.Width = (uint)w; d.Height = (uint)h; d.MipLevels = 1; d.ArraySize = 1; d.Format = 87 /* B8G8R8A8_UNORM */;
+                d.SampleCount = 1; d.Usage = 3 /* staging */; d.CPUAccessFlags = 0x20000 /* read */;
+                if (((CreateTexture2DFn)Method(device, 5, typeof(CreateTexture2DFn)))(device, ref d, IntPtr.Zero, out miniStaging) < 0) { miniStaging = IntPtr.Zero; return; }
+                miniStagingW = w; miniStagingH = h;
+            }
+            BOX box = new BOX();
+            box.Left = (uint)x; box.Top = (uint)y; box.Front = 0; box.Right = (uint)(x + w); box.Bottom = (uint)(y + h); box.Back = 1;
+            copyRegion(context, miniStaging, 0, 0, 0, 0, texture, 0, ref box);
+            MAPPED m;
+            if (map(context, miniStaging, 0, 1 /* read */, 0, out m) < 0) return;
+            try
+            {
+                int pitch = (int)m.RowPitch;
+                if (Mini == null || Mini.Length < pitch * h) Mini = new byte[pitch * h];
+                Marshal.Copy(m.Data, Mini, 0, pitch * (h - 1) + w * 4);
+                MiniPitch = pitch; MiniGotW = w; MiniGotH = h;
+                // (where it is in the picture, as it was taken: what was asked for may have been cut at the picture's edge)
+                MiniX = x; MiniY = y;
+                GotMini = true;
+            }
+            finally { unmap(context, miniStaging, 0); }
         }
 
         // Look through the whole picture for the strip: a copy of it the CPU can read, made for
@@ -379,6 +481,7 @@ static class StripReader
             try { if (pool != null) pool.Dispose(); } catch { }
             session = null; pool = null; item = null; winrtDevice = null;
             if (staging != IntPtr.Zero) { Marshal.Release(staging); staging = IntPtr.Zero; }
+            if (miniStaging != IntPtr.Zero) { Marshal.Release(miniStaging); miniStaging = IntPtr.Zero; }
             if (context != IntPtr.Zero) { Marshal.Release(context); context = IntPtr.Zero; }
             if (device != IntPtr.Zero) { Marshal.Release(device); device = IntPtr.Zero; }
         }
@@ -401,6 +504,23 @@ static class StripReader
             }
             return 0;
         }
+        // (for the tests) "crop <picture file> <x> <y> <w> <h>": a square of a picture, as the line
+        // a square of the game's picture is sent as.
+        if (args.Length == 6 && args[0] == "crop")
+        {
+            using (Bitmap picture = new Bitmap(args[1]))
+            {
+                int x = Math.Max(0, int.Parse(args[2])), y = Math.Max(0, int.Parse(args[3]));
+                int w = Math.Min(x + int.Parse(args[4]), picture.Width) - x, h = Math.Min(y + int.Parse(args[5]), picture.Height) - y;
+                if (w < 1 || h < 1) { Console.Out.WriteLine("M none"); return 0; }
+                BitmapData d = picture.LockBits(new Rectangle(x, y, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                byte[] all = new byte[d.Stride * h];
+                Marshal.Copy(d.Scan0, all, 0, d.Stride * (h - 1) + w * 4);
+                picture.UnlockBits(d);
+                Console.Out.WriteLine(MiniLine(all, d.Stride, x, y, w, h));
+            }
+            return 0;
+        }
         if (args.Length < 6)
         {
             Console.Error.WriteLine("usage: strip-reader <processNames> <pathHint|-> <parentPid> <width> <row> <intervalMs> [screenX screenY | screen]");
@@ -420,6 +540,10 @@ static class StripReader
         const int Height = 8;
         const string Hex = "0123456789abcdef";
         TextWriter o = Console.Out;
+        Listen();
+        DateTime lastMini = DateTime.MinValue;
+        Bitmap miniBmp = null;
+        byte[] miniPx = null;
 #if WGC
         WindowCapture capture = null;
 #else
@@ -489,7 +613,21 @@ static class StripReader
                         RECT bounds = VisibleBounds(hwnd);
                         int cornerX = ox - bounds.Left, cornerY = oy - bounds.Top;
                         if (look) capture.WantScan = true;
+                        // (the minimap's square, when it is asked for and it is time for one: out of the same picture)
+                        if (miniOn && (DateTime.UtcNow - lastMini).TotalMilliseconds >= miniEvery)
+                        {
+                            int askX, askY, askW, askH;
+                            lock (miniLock) { askX = miniX; askY = miniY; askW = miniW; askH = miniH; }
+                            // (no further than the area the game draws in)
+                            if (askX < 0) { askW += askX; askX = 0; }
+                            if (askY < 0) { askH += askY; askY = 0; }
+                            askW = Math.Min(askW, clientW - askX); askH = Math.Min(askH, clientH - askY);
+                            capture.MiniX = cornerX + askX; capture.MiniY = cornerY + askY; capture.MiniW = askW; capture.MiniH = askH;
+                            capture.GotMini = false;
+                            capture.WantMini = askW >= 8 && askH >= 8;
+                        }
                         fresh = capture.Read(px, cornerX + offX, cornerY + offY + row, width) == 1;
+                        capture.WantMini = false;
                         if (capture.Scanned)
                         {
                             // The whole picture has been looked through: the strip is read where it was
@@ -547,6 +685,32 @@ static class StripReader
                     string spot = "S strip " + offX + " " + offY;
                     if (spot != place) { place = spot; o.WriteLine(place); o.Flush(); }
                 }
+                if (!windowCapture && miniOn && (DateTime.UtcNow - lastMini).TotalMilliseconds >= miniEvery)
+                {
+                    // (looking at the screen: the minimap's square is that spot of the screen)
+                    int ax, ay, aw, ah;
+                    lock (miniLock) { ax = miniX; ay = miniY; aw = miniW; ah = miniH; }
+                    if (ax < 0) { aw += ax; ax = 0; }
+                    if (ay < 0) { ah += ay; ay = 0; }
+                    if (!fixedPos) { aw = Math.Min(aw, clientW - ax); ah = Math.Min(ah, clientH - ay); }
+                    lastMini = DateTime.UtcNow;
+                    if (aw >= 8 && ah >= 8)
+                    {
+                        try
+                        {
+                            if (miniBmp == null || miniBmp.Width != aw || miniBmp.Height != ah) { if (miniBmp != null) miniBmp.Dispose(); miniBmp = new Bitmap(aw, ah, PixelFormat.Format32bppArgb); }
+                            using (Graphics mg = Graphics.FromImage(miniBmp)) mg.CopyFromScreen(ox + ax, oy + ay, 0, 0, new Size(aw, ah), CopyPixelOperation.SourceCopy);
+                            BitmapData md = miniBmp.LockBits(new Rectangle(0, 0, aw, ah), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                            if (miniPx == null || miniPx.Length < md.Stride * ah) miniPx = new byte[md.Stride * ah];
+                            Marshal.Copy(md.Scan0, miniPx, 0, md.Stride * (ah - 1) + aw * 4);
+                            int stride = md.Stride;
+                            miniBmp.UnlockBits(md);
+                            o.WriteLine(MiniLine(miniPx, stride, ax, ay, aw, ah));
+                            o.Flush();
+                        }
+                        catch { }
+                    }
+                }
                 if (fresh)
                 {
                     for (int i = 0, c = 2; i < width; i++)
@@ -573,6 +737,17 @@ static class StripReader
                     o.Flush();
                     lastEmit = DateTime.UtcNow;
                 }
+#if WGC
+                if (windowCapture && capture != null && capture.GotMini)
+                {
+                    // (the square that was taken out of the picture the strip's row came from: sent after that row)
+                    capture.GotMini = false;
+                    lastMini = DateTime.UtcNow;
+                    RECT edge = VisibleBounds(hwnd);
+                    o.WriteLine(MiniLine(capture.Mini, capture.MiniPitch, capture.MiniX - (ox - edge.Left), capture.MiniY - (oy - edge.Top), capture.MiniGotW, capture.MiniGotH));
+                    o.Flush();
+                }
+#endif
                 Thread.Sleep(interval);
             }
         }

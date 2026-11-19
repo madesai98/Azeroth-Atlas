@@ -1134,6 +1134,7 @@ function showStatus(st) {
   else if (!ext) $('build').textContent = `Game build ${inst} — map not built yet`;
   else if (st.updateAvailable && st.updateReason === 'creatures') $('build').textContent = `Game build ${inst} — there is a newer QuestieDB than the one the map's creatures, NPCs and quests were built from: press Update map`;
   else if (st.updateAvailable && st.updateReason === 'tool') $('build').textContent = `Game build ${inst} — the map tool has been updated since the map was built: press Update map`;
+  else if (st.updateAvailable && st.updateReason === 'database') $('build').textContent = `Game build ${inst} — the Atlas database has more than the map's creatures, NPCs and quests were built with: the map takes it in by itself, or press Update map`;
   else if (st.updateAvailable) $('build').textContent = `Map is from build ${ext}; game is now ${inst}`;
   else $('build').textContent = `Game build ${inst} — map up to date`;
   const job = st.job;
@@ -1146,7 +1147,7 @@ function showStatus(st) {
   } else {
     btn.disabled = !st.installed;
     bar.style.display = 'none';
-    btn.textContent = st.updateAvailable ? (!ext ? 'Build map' : st.updateReason === 'creatures' ? 'Update map (new creature data)' : st.updateReason === 'tool' ? 'Update map (the map tool is newer)' : 'Update map (new game build)') : 'Update map';
+    btn.textContent = st.updateAvailable ? (!ext ? 'Build map' : st.updateReason === 'creatures' ? 'Update map (new creature data)' : st.updateReason === 'tool' ? 'Update map (the map tool is newer)' : st.updateReason === 'database' ? 'Update map (new in the Atlas database)' : 'Update map (new game build)') : 'Update map';
     btn.className = st.updateAvailable ? 'attention' : 'primary';
     if (job.error) msg.textContent = `Update failed: ${job.error}`;
   }
@@ -1183,9 +1184,16 @@ function showPlayer() {
       const z = app.scene.heightAt(link.me.x, link.me.y) ?? 0;
       const d = describe([link.me.x, link.me.y, z]);
       msg = `You: ${d.coords || d.place || app.scene.map.name}`;
+      // (inside a dungeon: what says where you are - the game's minimap, or its combat log at your last blow)
+      if (link.me.placed === 'minimap') msg += link.waning ? ' · where the minimap last showed you' : ' · by the minimap';
+      else if (link.me.placed) msg += ' · where you last struck a blow';
     } else {
       const name = app.manifest.maps.find((m) => m.id === p.map)?.name ?? `map ${p.map}`;
-      msg = link.me ? `You are in ${name}` : `You are in ${name} (the game hides your position here)`;
+      // (in a dungeon the game hides where you are, and its minimap is looked at for it - server/minimap.js: how that stands)
+      const mm = s.minimap?.state;
+      const why = mm === 'looking' ? 'the game hides your position here: looking for you on its minimap' : mm === 'nothing' ? 'the game hides your position here, and its minimap shows nothing just now'
+        : mm === 'no minimap' ? 'the game hides your position here, and its minimap was not found on the game\'s picture' : 'the game hides your position here';
+      msg = link.me ? `You are in ${name}` : `You are in ${name} (${why})`;
     }
     if (p.dead) msg += ' · dead';
     if (p.taxi) msg += ' · flying';
@@ -1208,7 +1216,7 @@ function showPlayer() {
   dot.className = `dot ${cls}`;
   text.textContent = msg;
   // (noted when it is another state of things - log.js - in the words the sidebar has for it)
-  if (changed('link', [s.status, s.reason, s.capture, p?.map ?? null, !!p?.dead, !!link.me, link.onThisMap])) note('link', msg, { status: s.status, reason: s.reason ?? undefined, read: s.capture ?? undefined });
+  if (changed('link', [s.status, s.reason, s.capture, p?.map ?? null, !!p?.dead, !!link.me, link.onThisMap, link.me?.placed ?? null, s.minimap?.state ?? null])) note('link', msg, { status: s.status, reason: s.reason ?? undefined, read: s.capture ?? undefined });
   $('btnFind').disabled = s.status !== 'live';
   syncDangerFromGame();
   showInGame();
@@ -1485,7 +1493,7 @@ async function refreshDatabase(share) {
     $('dbRow').style.display = st.on ? '' : 'none';
     $('optShare').checked = !!st.share;
     const r = st.result, sent = r?.collect?.sent;
-    const n = sent ? sent.npc + sent.object + sent.quest + sent.seen : 0;
+    const n = sent ? sent.npc + sent.object + sent.quest + sent.seen + (sent.logged ?? 0) : 0;
     $('dbNow').textContent = st.error ? 'not reached' : st.running ? 'working…' : n ? `${n.toLocaleString()} sent` : r?.pull?.rev ? `database ${r.pull.rev}` : '';
     $('dbNow').title = st.error ?? '';
   } catch { /* an older server: no such line */ }

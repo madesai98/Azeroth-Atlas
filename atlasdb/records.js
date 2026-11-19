@@ -10,7 +10,15 @@
 //                              copies the later is believed, of three or more what most say.
 //   s  seen in game            where someone really stands, noted by the map when a player talks
 //                              to them (server/seen.js).
-//   w  Wowhead                 its database for this game (wowhead.com/forever), which its own
+//   l  the game's combat log   what a player's game wrote down of its own fights
+//                              (server/combatlog.js): where a creature was when it was first
+//                              hit, which level it was and how much health it had, and how it
+//                              stood towards that player's side. The server's own figures for
+//                              the creature that was fought: believed for health before every
+//                              table. A level it gives is the level of the ones somebody happened
+//                              to fight, not every level the creature comes in: so for levels it
+//                              is asked last, and fills in where nobody else says.
+//   w  Wowhead                its database for this game (wowhead.com/forever), which its own
 //                              users' games feed. Read by a tool of the database's maker and
 //                              handed over as a file (publish.js, readLayers): believed for what
 //                              a thing is (name, level, kind, side), and where QuestieDB is
@@ -36,10 +44,13 @@
 //           beast's family), zone, fac (its faction), fr (whose side it is on: A, H or AH),
 //           react [towards the Alliance, towards the Horde] (1 friendly, 0 neutral, -1 hostile,
 //           -2 not known),
-//           flags (what it does: vendor, trainer...), hp [at min level, at max], respawn
+//           flags (what it does: vendor, trainer...), hp [at min level, at max], hpl [[level,
+//           health]] (health as fights measured it, level by level), respawn
 //           (seconds), qs / qe (quests it gives / takes), loot / skin (which loot table),
 //           disp (how it looks), hpMul, qi (quest items it carries), boss (1: a leader),
-//           drops [[item a quest wants, how often in per cent]] (the original game's rates)
+//           drops [[item a quest wants, how often in per cent]] (the original game's rates),
+//           sells [[item, copper, how many at a time, 1: stock is limited]] (what its vendor's
+//           window showed), teaches [[spell, copper, skill, skill level asked, level asked]]
 //   object  n, zone, type, disp, qs, qe, chest (its loot table), size, qi, data (the game's
 //           own numbers for it)
 //   quest   n, l level, m level needed, ml highest level, races, classes, s { n, o, i } who or
@@ -50,12 +61,15 @@
 //           trig { t, at }, xp, money, ri [[item, count]] given, rc [[item, count]] to choose
 //           from, rep [[faction, value]], type, limit (seconds), grp (players suggested), skill
 //           [skill, value needed], minRep / maxRep [faction, value], crumbFor, crumbs, kids, group,
-//           srcItems
+//           srcItems, gp { s, o, e: { u<the game's map>: "x,y ..." } } (where the game's own map
+//           puts it: where it starts, its objectives, where it is handed in; per cent of that map)
 //
 // Where things stand: `at` is { z<zone id>: "x,y x,y ..." } in per cent of the zone's map (as
 // QuestieDB gives it; -1,-1: in this zone, spot not known), `paths` the same per patrol route,
-// `w` is { m<map id>: "x,y,z x,y,z ..." } in the game's own yards (the reference database), and
-// `seen` is { m<map id>: "x,y,z,n ..." }: sightings, n the number of copies that made them.
+// `w` is { m<map id>: "x,y,z x,y,z ..." } in the game's own yards (the reference database),
+// `seen` is { m<map id>: "x,y,z,n ..." }: sightings, n the number of copies that made them, and
+// `f` is { m<map id>: "x,y x,y ..." }: where creatures of this kind were when a fight with them
+// began, in the game's own yards and with no height (the combat log has none).
 // (The letters before the ids keep the database from turning a list of numbers into an array.)
 import crypto from 'node:crypto';
 
@@ -64,8 +78,15 @@ export const KINDS = ['npc', 'object', 'quest'];
 export const BUCKET = 500; // ids to a shard: a copy fetches only the shards that have changed
 
 /** Believed first to last. */
-const ORDER = ['g', 's', 'w', 'q', 'x', 'c'];
+const ORDER = ['g', 's', 'l', 'w', 'q', 'x', 'c'];
 const rankOf = (code) => { const i = ORDER.indexOf(code); return i < 0 ? ORDER.length : i; };
+
+/**
+ * The source asked last for a field, whatever its place otherwise. What the combat log says of
+ * a creature's level is the level of the ones somebody happened to fight: it fills in where no
+ * other source gives a level, and narrows nobody's.
+ */
+const LAST = { npc: { lv: 'l' } };
 
 /** The sources that come as a file of the maker's own (publish.js, readLayers). */
 export const LAYERS = ['w'];
@@ -314,6 +335,23 @@ function mergeWanted(layers) {
 }
 
 /**
+ * How a creature stands towards each side, side by side: each from the most believed source
+ * that knows it (-2: nobody does). One source often knows one side only - a player's game says
+ * how the creature stood towards that player.
+ */
+function mergeReact(have) {
+  const out = [-2, -2], from = [];
+  for (let i = 0; i < 2; i++) {
+    for (const [code, rec] of have) {
+      const v = rec.react?.[i];
+      if (v === 1 || v === 0 || v === -1) { out[i] = v; from.push(code); break; }
+    }
+  }
+  from.sort((a, b) => rankOf(a) - rankOf(b));
+  return { value: from.length ? out : undefined, code: from[0] ?? have[0][0] };
+}
+
+/**
  * One record out of what each source says about the same thing.
  * @param layers [[code, fields], ...] in any order
  */
@@ -328,8 +366,11 @@ export function merge(kind, layers) {
     const first = PREFER[kind]?.[f];
     if (AFTER_Q[kind]?.includes(f)) have.sort((x, y) => rankAfterQ(x[0]) - rankAfterQ(y[0]));
     if (first) have.sort((x, y) => (x[0] === first ? -1 : 0) - (y[0] === first ? -1 : 0));
+    const last = LAST[kind]?.[f];
+    if (last) have.sort((x, y) => (x[0] === last ? 1 : 0) - (y[0] === last ? 1 : 0));
     let code = have[0][0], value = have[0][1][f];
     if (kind === 'quest' && f === 'o') ({ value, code } = mergeWanted(have));
+    if (kind === 'npc' && f === 'react') ({ value, code } = mergeReact(have));
     if (!some(value)) continue;
     out[f] = value;
     if (code !== 'q') src[f] = code;

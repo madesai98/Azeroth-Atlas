@@ -2,6 +2,10 @@
 // coded strip the AzerothAtlas addon draws in the game window (finding it in whichever corner
 // it has been put), decodes it, and streams the result to the viewer. The helper only runs
 // while a map page is listening.
+//
+// The same helper hands over the small square of the game's picture the minimap is in, while it
+// is asked to (look): inside a dungeon, where the game hides where you are, the minimap is what
+// shows it (minimap.js, which is told of every reading of the strip and of every such square).
 import { spawn, execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -73,6 +77,12 @@ export class PlayerTracker {
     this.sent = '';
     this.reads = { ok: 0, bad: {}, since: Date.now(), first: true }; // how reading the strip has gone, for the notes (log.js)
     this.whereAt = 0;
+    // What finds you on the game's minimap inside a dungeon (minimap.js; server.js sets it): told
+    // what the strip says (heard), handed the squares of the picture it asks for (crop), told when
+    // the game is no longer heard from (quiet).
+    this.eyes = null;
+    this.square = null;   // the square of the game's picture the helper is asked for: [x, y, w, h, every ms] - or null
+    this.squares = 0;     // how many have come
   }
 
   // ---- subscribers (server-sent events) ---------------------------------------------------
@@ -102,6 +112,8 @@ export class PlayerTracker {
 
   #set(patch) {
     Object.assign(this.state, patch);
+    // (the game no longer heard from: its minimap is no longer looked at)
+    if (this.state.status !== 'live' && 'status' in patch) { try { this.eyes?.quiet(); } catch { /* its own affair */ } }
     // (the route mailboxes are only kept filled while the game is being heard from)
     if (this.mail) {
       this.mail.setLive(this.state.status === 'live');
@@ -110,6 +122,38 @@ export class PlayerTracker {
     const s = this.state;
     if (changed('link', [s.status, s.reason, s.capture])) note('link', `${s.status}${s.reason ? `: ${s.reason}` : ''}`, { capture: s.capture, window: s.window, strip: s.strip ?? null });
     this.#publish();
+  }
+
+  /**
+   * Where you are, as something other than the strip says it. Inside a dungeon the game tells
+   * the addon which dungeon and nothing of where; its combat log does say where, with every
+   * blow of yours (combatlog.js). Handed to the page beside what the strip says: { map, x, y,
+   * facing (or null), t (when the game wrote it, ms), from: 'log' }.
+   */
+  placed(fix) {
+    // (band: from the minimap - the heights the rooms you may be in span, lowest and highest, where it can tell)
+    this.#set({ placed: fix ? { map: fix.map, x: fix.x, y: fix.y, facing: fix.facing ?? null, t: fix.at, from: fix.from ?? 'log', ...(fix.band ? { band: fix.band } : {}) } : null });
+  }
+
+  /** How finding you on the minimap is going (minimap.js), for the page to say. */
+  minimapState(brief) {
+    this.#set({ minimap: brief });
+  }
+
+  /**
+   * Ask the helper for a square of the game's picture - the one the minimap is in - every so
+   * many milliseconds, or (null) for none. [x, y, w, h], counted from the top left corner of
+   * the area the game draws in.
+   */
+  look(square, every = 200) {
+    this.square = square ? [...square.map(Math.round), every] : null;
+    this.#ask();
+  }
+
+  #ask() {
+    const pipe = this.child?.stdin;
+    if (!pipe || pipe.destroyed || !pipe.writable) return;
+    try { pipe.write(this.square ? `M ${this.square.join(' ')}\n` : 'M off\n'); } catch { /* the helper is going: asked again when it is back */ }
   }
 
   /** The route mailboxes have something new to say (the map page sent a route). */
@@ -125,8 +169,11 @@ export class PlayerTracker {
     const args = [o.processNames.join(','), o.pathHint || '-', String(process.pid), String(WIDTH), String(ROW), String(o.intervalMs)];
     if (o.fixed) args.push(String(o.fixed[0]), String(o.fixed[1]));
     this.#set({ status: 'starting', reason: null });
-    const child = spawn(exe, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    // (its input: what it is asked for besides the strip - see look)
+    const child = spawn(exe, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     this.child = child;
+    child.stdin.on('error', () => { /* the helper has gone: said by its ending */ });
+    this.#ask();
     note('link', 'watching for the game', { helper: path.basename(exe), looksFor: o.processNames, in: o.pathHint || null, every: o.intervalMs, fixed: o.fixed });
     this.reads = { ok: 0, bad: {}, since: Date.now(), first: true };
     readline.createInterface({ input: child.stdout }).on('line', (line) => this.#line(line));
@@ -147,6 +194,7 @@ export class PlayerTracker {
   stop() {
     const child = this.child;
     this.child = null;
+    try { this.eyes?.quiet(); } catch { /* its own affair */ }
     child?.kill();
     if (child) note('link', 'the game is no longer watched (no map page is open)');
     changed('link', 'off');
@@ -208,6 +256,17 @@ export class PlayerTracker {
       // the top-left corner, where it is unless you have moved it in the addon's options).
       else if (kind === 'strip') { const [x, y] = rest.map(Number); this.#set({ strip: Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null }); }
       else if (kind === 'stalled') this.#set({ status: 'nosignal', reason: 'stalled', party: [] });
+      return;
+    }
+    if (line.startsWith('M ')) {
+      // a square of the game's picture that was asked for (look): where it is, how big, its pixels
+      const [, x, y, w, h, data] = line.split(' ');
+      const [X, Y, W, H] = [x, y, w, h].map(Number);
+      if (!data || ![X, Y, W, H].every(Number.isInteger) || W < 8 || H < 8) return;
+      const rgb = Buffer.from(data, 'base64');
+      if (rgb.length !== W * H * 3) return;
+      this.squares++;
+      try { this.eyes?.crop({ x: X, y: Y, w: W, h: H, data: rgb }); } catch (err) { if (changed('eyes', err.message)) note('minimap', 'a picture of the minimap could not be taken in', { error: err.message }); }
       return;
     }
     if (!line.startsWith('P ')) return;
@@ -274,6 +333,8 @@ export class PlayerTracker {
     const met = this.names.talk();
     if (met && (!this.talk || this.talk.seq !== met.seq || this.talk.id !== met.id || this.talk.object !== met.object || !!this.talk.fight !== met.fight)) { this.talk = { id: met.id, seq: met.seq, object: met.object, fight: met.fight, at: Date.now() - met.age * 1000 }; note('game', met.fight ? `you fought creature ${met.id}, and were beside it` : `you opened the window of ${met.object ? 'object' : 'NPC'} ${met.id}`); }
     this.#noteGame(d, player);
+    // (inside a dungeon the game hides where you are: its minimap is looked at - minimap.js)
+    try { this.eyes?.heard(d, this.names.minimap(), this.state.window); } catch (err) { if (changed('eyes', err.message)) note('minimap', 'what the strip said could not be taken in', { error: err.message }); }
     this.#set({
       status: 'live', reason: null, player, talk: this.talk, heads: this.names.heads(),
       // (the lists themselves are fetched when this changes: they are long, and this goes out many times a second)

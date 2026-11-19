@@ -291,9 +291,12 @@ The map only redraws when the view changes, so it uses no GPU while you are just
 | `reference` | `false` = never download the reference database used for NPC heights (see "NPCs") |
 | `referenceFile` | A copy of that database of your own to use instead of downloading one |
 | `ingame` | `false` = never write the route into the game's route mailboxes (see "The same route in the game") |
+| `minimap` | `false` = never look at the game's minimap to find you inside a dungeon (see "Inside a dungeon: your place, read off the game's minimap") |
 | `autoUpdate` | `false` = the map tool only says when a newer version of itself is out, and puts it in when you press the button (see "Updates"). `"never"` = it is never put in, whatever is pressed |
 | `auctions` | Auction prices (see "Auction prices"): `{ "house": "us-110" }` = the auction house this copy shows (chosen on the page); `false` = off altogether |
-| `database` | The Atlas database (see "The Atlas database"): `{ "share": false }` = this copy sends nothing of what it learns; `{ "url": "...", "apiKey": "..." }` = another database than the one this version names, and the key to sign in to it with; `{ "maintain": true }` = this copy also makes and publishes the database (the database must list it as a maintainer); `false` = off altogether |
+| `combatLog` | `false` = the game's combat log is never read (see "What a fight shows") |
+| `atlas` | `false` = the map is built from QuestieDB and the reference database alone, without what the Atlas database adds (see "The map is built from it") |
+| `database` | The Atlas database (see "The Atlas database"): `{ "share": false }` = this copy sends nothing of what it learns; `{ "apply": false }` = what a newer database adds is not put on the map by itself, only when you press **Update map**; `{ "url": "...", "apiKey": "..." }` = another database than the one this version names, and the key to sign in to it with; `{ "maintain": true }` = this copy also makes and publishes the database (the database must list it as a maintainer); `false` = off altogether |
 
 `config.json` is each computer's own: it need not exist, it is not part of what is published,
 and an update never touches it.
@@ -548,10 +551,33 @@ built so, without its being built again.)
 A dungeon has no zone map to give a spot on, so QuestieDB lists who is inside but not where. On
 any map where it places nothing (dungeons, raids, the Deeprun Tram, the PvP halls), the
 reference database's spawns are used outright, for the creatures and quest objects QuestieDB
-knows: position and height both. Where the dungeon has ground data to check against, it bears
-them out almost everywhere (the Deadmines 182 of 182, Scarlet Monastery 373 of 373, Naxxramas
-1,208 of 1,263). A dungeon that is new to this game, or has been rebuilt, is not in the
-reference: nobody can be placed there, and the NPC section says who is known to be inside.
+knows: position and height both. The dungeon's own ground data bears them out almost
+everywhere (the Deadmines 182 of 182, Scarlet Monastery 373 of 373, Naxxramas 1,208 of 1,263;
+and, of the dungeons that are one building with no terrain, Blackrock Depths 1,191 of 1,193,
+Dire Maul 1,123 of 1,124, the Stockade 28 of 28). A dungeon that is new to this game, or has
+been rebuilt, is not in the reference: nobody can be placed there, and the NPC section says who
+is known to be inside.
+
+**Who is inside, where nobody is placed.** The game's own files list every dungeon's and raid's
+bosses, in the order they are met (343 of them on 43 maps), and the Atlas database knows of many
+creatures which dungeon they are in without knowing where. The NPC section says both under the
+switches: the bosses by name, and how many more are known to be inside with no place yet. A
+creature that is on the game's list is marked **boss** on its card, wherever it was placed from.
+
+**They are placed as people fight them.** The game tells an addon nothing of where anything is
+inside a dungeon, your own place included. Its combat log does (see "What a fight shows"): where
+a creature was when a fight with it began, to the yard. So a dungeon fills in as it is run, by
+anybody whose copy of the map shares what it learns: every copy gets the places the others
+found. They come with no height; the map takes it from the dungeon's own ground, which every
+dungeon now has (see "Data for route planning").
+
+**Where you are, inside.** In a dungeon that is one building the map finds you on the game's
+own minimap, several times a second (see "Inside a dungeon: your place, read off the game's
+minimap"). With every blow of yours the combat log also says where you stood: that is what
+there is to go by in the dungeons the minimap cannot be read in (those that stand on open
+ground: the Deadmines, Scarlet Monastery, Stratholme and the like), where the map shows you
+there for a quarter of a minute after each blow - enough to see where the fight is, not a place
+that follows you between fights - and it is what the minimap's reading is held against.
 
 ### Where everyone stands, and how high
 
@@ -592,6 +618,31 @@ map which NPC it is. You are standing next to them, so their height is yours: th
 floor at their spot nearest the height it has followed you to, notes it on that spawn point as
 **seen in game**, and says what it learned under the switches ("height corrected from 6.0 to
 12.0 yd"). An NPC the database has nowhere near is added where you met them.
+
+The same goes for **an object you take things out of**: a chest, a herb, a vein of ore, a crate
+for a quest. When its loot window opens the addon says which object it is, and the map notes it
+where you stand, as it notes someone you talk to. (What you fish up comes out of your own float,
+and what you take from a creature is the creature's: neither is an object anywhere.) Most of
+this game's new chests and nodes are placed by nobody else.
+
+**What an object asks, and what it is to a profession.** An object's card says what it takes to
+open it - **needs Herbalism 70**, **needs Mining 155**, **needs Lockpicking 150 or a key** - and
+whether a profession works at it (**counts as: Anvil**, Forge, Cooking Fire, Moonwell). Typing
+"herbalism", "mining" or "anvil" in the search box finds them. Where it comes from: the game's
+files hold every lock (its table `Lock`: up to eight ways in, each a key or a skill at some
+level) and every kind of thing a profession works at (`SpellFocusObject`), but not which object
+has which. That the server says when the object is met: the game's cache has it for every
+object some copy's player has come across, and the reference database for the original game's.
+Put together they name it for 316 kinds of object on 27,393 spots (118 herbs, 62 veins, 42
+locked chests and doors, 93 that only a key opens), and for 2,070 cooking fires, 216 anvils and
+86 forges. Of a lock's ways in only a player's own skills are told (picking locks, herbalism,
+mining, fishing) and keys; the game's table also lists a key for four kinds of ore vein - an
+axe, Rockslicer - which opens nothing, and is left out.
+
+**What other players have seen** is on your map too: the Atlas database puts every copy's
+sightings together, and the map build lays them over the spawn points like your own (height
+source **seen in game by another player**). Yours, where you have one of the same spot, is believed
+first; and someone the reference database places stays as placed, whoever saw them where.
 
 - Who is surer decides. Someone the reference database places is surer of where they stand than
   the map is of where you do, so if the two disagree by more than four yards it is your height
@@ -903,10 +954,12 @@ the real geometry (`extractor/jobs/nav.js`): a grid of about one yard of every p
 can stand. It is made by laying every solid triangle into the grid (the terrain, and the
 collision meshes of the buildings and objects placed on it), so it knows slopes too steep to
 walk, walls, fences, tree trunks, bridges, the floors and stairs inside buildings, and water deep
-enough that you swim. Each place records which of its neighbours it leads on to, worked out at
-half-yard precision, so thin walls separate and doorways a yard wide stay open. The cost of a
-step is the time it takes at **your** speeds: the addon reports your current run speed (mounted
-or not) and swim speed.
+enough that you swim. A map that is one building with no terrain under it (a dungeon, a raid,
+the Deeprun Tram) has the same grid, laid over that building alone: its collision as for a
+building that stands on terrain, so not the objects placed inside it and not its water. Each
+place records which of its neighbours it leads on to, worked out at half-yard precision, so
+thin walls separate and doorways a yard wide stay open. The cost of a step is the time it takes
+at **your** speeds: the addon reports your current run speed (mounted or not) and swim speed.
 
 **How steep is too steep** is the game's own rule: ground whose face tilts more than 50 degrees
 cannot be walked up, and anything up to that can. A good many of the game's hillsides are built
@@ -1711,6 +1764,99 @@ What you get:
   with how far it has got: whether it is ready to hand in, and which of the things it asks for
   are done.
 
+### Inside a dungeon: your place, read off the game's minimap
+
+Inside a dungeon or a raid the game tells an addon which one you are in and nothing of where:
+the strip can say "the Stockade", and no more. But the game's own minimap is on the screen, and
+the picture on it is centred on you. So, while you are in a dungeon, the map reads that picture
+too and finds where it fits on the dungeon's plan. That is where you are: the figure stands
+there, glides as you walk, faces the way you face, and the camera, the routes and "Follow me"
+go by it as they do outdoors. The line under **You** says "by the minimap".
+
+**What it reads, and what it does not.** It reads the picture of the game window - the same
+picture the strip is read off, by the same helper, the same way - and of that picture one
+small square: the minimap with its rim (about 240 pixels each way on a screen 1240 high), about
+four times a second, and only while you are in a dungeon the map has a plan of. It does not read the game's memory,
+sends nothing into the game, presses nothing, and changes nothing about the minimap. The square
+is looked at and dropped: nothing of it is written to the disk and nothing leaves this computer
+(the last one is held in memory, so that a report of a problem you make yourself can show what
+was looked at). `"minimap": false` in `config.json` switches all of it off.
+
+**How it works.**
+
+- *The plan.* The game has a picture of the floor of every room of a dungeon (they are what
+  its minimap is drawn from). The map build puts them together for every map that is one
+  building (`extractor/jobs/minimap.js`): for each room where its floor is, two pixels a yard,
+  north up - `maps/<id>/minimap.bin`, between 4 and 43 KB a dungeon. An update of the map tool
+  that brings this offers **Update map** once; the plans take seconds to make.
+- *Where the minimap is on the screen.* Its middle has to be known to a pixel - a pixel off is
+  a yard and a half off, at the widest view - and its size to a hundredth. The addon says where
+  the game has it (the minimap frame's middle and size in pixels, its zoom, how many yards it
+  shows from its middle to its edge, whether it turns with you, whether it is round; read
+  outside fights, and kept through them). That could not be tried in the game before it was
+  sent out, so it is not taken on trust: the gold rim the game draws round its minimap is looked
+  for on the picture, and where it is found the picture has the last word. With an older addon
+  that says nothing, the rim is looked for in the top right corner of the game's picture,
+  where the game puts its minimap, and the six steps of the minimap's zoom (300, 240, 180, 120,
+  80 and 50 yards across, indoors) are tried in turn until one fits.
+- *Finding you.* Both pictures are boiled down to "is this floor": lit, or black. The plan is
+  brought to the screen's scale and the minimap's disc is looked for on it, at every place and -
+  where the minimap turns with you - every turn (`server/minimap-match.js`, in a thread of its
+  own, so the map goes on answering). A place is believed only where it fits well **and** no
+  other place fits nearly as well; otherwise nothing is said. Once found you are followed from
+  one picture to the next, which takes a hundredth or two of a second; a fresh look takes a
+  few tenths of a second in a small dungeon (the Stockade, Ragefire Chasm) and several seconds
+  in the biggest with many floors (Dire Maul, Blackrock Spire: four with north up, up to ten
+  where every turn has to be tried).
+- *Which way you face.* Where the minimap turns with you, its turn is the way you face; where
+  it keeps north up, your arrow in its middle says.
+- *Which floor.* The game leaves off its minimap every room that lies wholly above the ceiling
+  of the room you are in. So the plan is put together once for every set of rooms that can be
+  showing, and which set fits says which rooms you can be in - and between which heights. The
+  page takes your height from the dungeon's own walkable ground, as it does everywhere
+  (following the floor you walk on), and where the rooms on the minimap rule that floor out, you
+  are put on the one they allow.
+
+**Checked against the game's own figures.** Where the game keeps its combat log (`/combatlog`
+in the game, or the addon's own switch for it), that log says exactly where you stood at each
+blow, and the map reads it. While the minimap has you, the log's place - which is always a
+moment old - is not shown; it is what the minimap's place is held against. Where you stood
+still round a blow, the two should be the same spot, and what lies between them says how far
+off the minimap's middle is taken to be: after a few such blows that agree with each other, the
+middle is moved by that much (never more than two and a half pixels). When the minimap has
+nothing to say, the log's place is shown as before.
+
+**Measured.** On seven screenshots taken in the Stockade, three of them with the minimap turned,
+every one was found, fitting 0.96 of a possible 1 with the next best place 0.3 behind; the one
+taken within five seconds of a blow in the combat log was 0.2 yards from where the game said
+you stood. The same seven with a tenth, a quarter, four tenths and six tenths of the minimap
+covered (black, floor-coloured or bright, from eight sides: 672 tries) were found in the right
+place or refused, never placed in a wrong one: with a tenth covered all were found, with four
+tenths covered in black six in ten. A place far from where you were a moment ago is only
+believed of a fit as good as an uncovered minimap gives, and a minimap with next to nothing lit
+on it only of a good one.
+
+**What it cannot do.**
+
+- A dungeon that stands on ground of its own - the Deadmines, Shadowfang Keep, Scarlet
+  Monastery, Zul'Farrak, Stratholme, Scholomance, the raids outside Molten Core and Onyxia's
+  Lair - has no plan: the game has pictures of that ground on its minimap as well, lit from
+  edge to edge, and there is no dark to tell the floor from, which is all the matcher goes by.
+  There the combat log's place is what there is. The dungeons that are one building have one:
+  the Stockade, Ragefire Chasm, Wailing Caverns, Blackfathom Deeps, Gnomeregan, Uldaman,
+  Maraudon, the Sunken Temple, Blackrock Depths and Spire, Dire Maul, Molten Core, Onyxia's
+  Lair, and the Deeprun Tram.
+- In the open air inside a dungeon (the arena of Dire Maul, the way in to Onyxia) the game's
+  minimap shows nothing, and so nothing is said.
+- A minimap that is hidden, covered by another program's overlay, or reskinned by an addon so
+  that it has no gold rim and the addon's word is all there is: it works by that word alone
+  where it can, and says so on the page ("looking for you on its minimap") where it cannot.
+- Only the Stockade could be tried against the real game. For every other dungeon the plan is
+  made the same way and a minimap drawn from it is found on it, but no screenshot was there to
+  hold it against.
+- The first place found after the minimap has been lost can take a few seconds in a dungeon
+  with many floors, and the figure waits where it was, greyed, meanwhile.
+
 ### The camera that follows you
 
 **Follow me** ties the camera to your character: they stay in the middle of the view, and the
@@ -2097,7 +2243,7 @@ The extractor keeps what a pathfinder needs, in `dataDir`:
 | `maps/<id>/t/<col>_<row>.bin` (`WFT1`) | Per tile: section 1 heights (129×129 corner + 128×128 centre, float32), 2 normals, 4 holes (per chunk, 8 rows × 8 bits), 5 chunk flags + area id (flag `0x2` = impassable), 6 liquid layers (type, level, per-quad existence, per-vertex heights), 7 object placements |
 | `maps/<id>/areas.bin` | Area id per terrain chunk for the whole map |
 | `maps/<id>/wmos.bin` | Every building placement (position, rotation, scale, world bounds) |
-| `maps/<id>/nav/<col>_<row>.bin` (`WFN1`) | Where a character can stand, and what can only be slid or fallen down, per tile, on a 512 x 512 grid (1.04 yd). Sections (each deflated): 2 number of surfaces per cell (at most 14, lowest first), 3 their heights (uint16, 1/8 yd, +2048, stored as differences), 4 flags per surface (1 swim, 2 lava, 4 terrain, 8 steep ground: nowhere to stand, only a way down; 16 / 32 / 64 / 128 = a floor you walk on from to the cell east / west / south / north), 5 links per surface (uint16: four bits each for east, west, south, north, lowest first: 0 leads nowhere that way, 1 to 14 the surface of the next cell it leads on to, counted from 1, by a step where the flag for that side is set and by a fall where it is not, 15 open on that side at the edge of the tile), 6 the room over each surface along the tile's four edges (uint16, 1/8 yd, 65535 open sky, 0 not open on that side: for the east, west, south and north edge in turn, each cell along it, each surface of that cell - what a fall across the seam of two tiles is checked against). Steep ground is kept only where it is part of a way from a floor down to a floor. Tiles built before 0.5.1 have sections 2 to 4 only and are still read |
+| `maps/<id>/nav/<col>_<row>.bin` (`WFN1`) | Where a character can stand, and what can only be slid or fallen down, per tile, on a 512 x 512 grid (1.04 yd). Sections (each deflated): 2 number of surfaces per cell (at most 14, lowest first), 3 their heights (uint16, 1/8 yd, +2048, stored as differences), 4 flags per surface (1 swim, 2 lava, 4 terrain, 8 steep ground: nowhere to stand, only a way down; 16 / 32 / 64 / 128 = a floor you walk on from to the cell east / west / south / north), 5 links per surface (uint16: four bits each for east, west, south, north, lowest first: 0 leads nowhere that way, 1 to 14 the surface of the next cell it leads on to, counted from 1, by a step where the flag for that side is set and by a fall where it is not, 15 open on that side at the edge of the tile), 6 the room over each surface along the tile's four edges (uint16, 1/8 yd, 65535 open sky, 0 not open on that side: for the east, west, south and north edge in turn, each cell along it, each surface of that cell - what a fall across the seam of two tiles is checked against). Steep ground is kept only where it is part of a way from a floor down to a floor. Tiles built before 0.5.1 have sections 2 to 4 only and are still read. A map that is one building has no tiles: it has one such file for each square of the same grid that its building reaches into, and `maps/<id>/map.json` lists them (`nav.at`: `[col, row]` each) |
 | `maps/<id>/creatures.bin` (`WFC1`) | Stationed creatures: section 1 JSON (`creatures`: name, `min`/`max` level, `rank`, reaction to Alliance `a` and Horde `h` (0 friendly, 1 neutral, 2 hostile), `est` level estimated, `u` = no side recorded (new to this game: shown only when asked for), `t` = these spawn points are inside a town or city of the Alliance (1) or the Horde (2) and make no zone for that side), 2 spawn points (float32 world x, y), 3 creature index per spawn point, 4 patrol route points, 5 routes (`creature, firstPoint, count`) |
 | `models/wmo/<id>.bin` (`WFM1`) | Section 1 header (JSON: its groups with the game's flags, box and run of vertices; `left`: the groups left out and why - see "What of a building or an object is not drawn"), 2 vertices (36-byte stride, position first), 5 collision triangle indices, 6 the game's per-triangle flags (`0x08` collision, `0x20` render, `0x04` detail, `0x02` no-camera-collide), 7 interior object placements, 8/9 interior liquid surfaces |
 | `models/m2/<id>.bin` (`WFM1`) | Section 4 collision vertices, 5 collision triangles |
@@ -2155,7 +2301,8 @@ each fact with a note of where it came from:
 | Source | What it gives | Believed |
 | --- | --- | --- |
 | **The game's own cache** (`Cache/WDB` in the game folder: what the server told your game about what you have met) | A creature's name, kind, family and rank; a quest's level, what it asks for and how many, what it gives; an object's kind | first: it is the server's own answer. Every copy's cache is believed; where several have sent the same thing, a vote settles it (below) |
-| **Seen in game** | where an NPC really stands, noted when you talk to it | next |
+| **Seen in game** | where an NPC really stands, noted when you talk to it; where an object is, noted when you take something out of it | next |
+| **What a fight shows, whom the addon met, and what the game's windows show** (the game's combat log, as each copy's map read it; what the game shows of a creature you target, have the mouse on or see a name plate of; a vendor's and a trainer's window, and the game's own quest pins) | where a creature was when a fight with it began (inside dungeons too, where nothing else says); its health at each level it has; how it stands towards each side; what a vendor sells and a trainer teaches; where the game's map puts a quest | next. Its health is believed before every other source's, being the game's own figure (this game's creatures have more health than the original's: a Defias Captive 2,538 at level 24, where the reference database has 1,815). Its levels only add to what is known, never narrow it: a fight shows the levels met, not all there are. Where copies differ on a figure, what most say |
 | **Wowhead** (its database for this game, which its own users' games feed; read by the database's maintainer and handed in as a file) | a creature's name, level, kind, rank and how it stands towards each side; a quest's level, experience, money and rewards; and, where its page was read, where a thing stands and what a quest asks for | next for what a thing is; after QuestieDB for where things stand and who gives which quest, so it fills in what QuestieDB lacks |
 | **QuestieDB** | everything it has for this game: names, levels, sides, where things stand, who gives and takes each quest, what comes before and after it; quest experience measured from players' sessions | next |
 | **cmangos classic-db** | the original game: heights, a creature's kind and health, how soon it is back, drop tables, how many of each thing a quest asks for | last: right for most of the old world, silent about everything new |
@@ -2182,7 +2329,74 @@ does not do: a thing only one copy has ever sent is believed as it stands, and a
 anonymous account, of which one person can make several. `votes` (below) lists every fact the
 copies disagree about, who said what, and what was believed.
 
-**What a copy sends.** While the map runs it reads the game's cache, its own sightings and what
+**The map is built from it.** QuestieDB and the reference database are what the map is built
+from; the Atlas database is laid over them when the map is built (`extractor/atlas.js`), so what
+any copy has learned is on every copy's map. What it adds, and what it leaves alone:
+
+- **Whom QuestieDB does not list at all**: creatures, objects and quests known only from the
+  game's cache, a fight or Wowhead (as the database stood on 18 November 2026: 171 creatures,
+  3,403 objects, 111 quests).
+- **A place** for a creature or object QuestieDB lists and does not place (428 and 210): from a
+  sighting, from where a fight with it began, from Wowhead's page. Wowhead has some creatures on
+  no zone's map, only on a continent's own, where a pin is some 35 yards coarse: those are used
+  only where nothing else says where the creature is.
+- **A level, a side, a giver** where QuestieDB has none (a level for 70 creatures; a side for
+  2,513 that have no faction recorded, from how Wowhead and players' own fights say they stand
+  towards the Alliance and the Horde; who gives or takes 88 quests).
+- **The game's own word** where it differs: a name as the server gives it, a rank from the
+  game's cache, health as fights showed it.
+- **Left alone**: what QuestieDB has. Its levels, sides and places are what the spawn zones and
+  the danger zones are worked out from, and another source's different opinion does not move them.
+
+A newer database changes the map only where it says something new: each map's NPC layer is
+built again only if its own contents changed (5 to 26 seconds, the larger figure where a whole
+continent's layer is redone). So the map does it by itself, a little after it starts and
+whenever a newer database has been fetched, and the page loads the result
+(`"database": { "apply": false }` in `config.json` leaves it to the **Update map** button, which
+then reads "new in the Atlas database"; `"atlas": false` builds the map without the database).
+
+**What a fight shows.** The game can write every blow of a fight to a file (`Logs\WoWCombatLog...txt`
+in its folder: the same log raiders hand to log sites; `/combatlog` is the game's own switch for
+it, off at every login). Each line names who struck whom and carries figures of one of them:
+where it stood, its level, its health. The map reads the file while the game runs
+(`server/combatlog.js`; only ever reads it) and keeps, of each creature: where it was when it
+first came into a fight, its health at that level, and whether it was hostile to your side. Not
+kept: anything of players, pets and guardians, how the fight went, or when it was. Your own
+place in those lines is used for one thing, on your own computer: showing you on the map inside
+a dungeon (see "Dungeons"). The addon asks the game to keep the log each time you enter the
+world, and never switches off a log it did not switch on itself; `/atlas fights` (or the
+addon's options) stops it asking, and `"combatLog": false` in `config.json` stops the map
+reading. The file grows by a few megabytes an evening and the game never clears it: delete old
+ones in the game's `Logs` folder whenever you like.
+
+**Whom the addon met.** Of a creature you have targeted, have the mouse on or see a name plate
+of, the game shows an addon its level, its health and how it stands towards you. The addon
+notes those (`addon/AzerothAtlas/Met.lua`; `/atlas met` says how many) in its saved settings,
+which the game writes when you log out or `/reload`, and the map reads them there. So a creature
+nobody ever fights gets its level and side as well. Left out: players, their pets, a creature
+whose level the game shows as a skull, and whatever the game withholds in a fight or inside a
+dungeon.
+
+**What the game's own windows show.** Three more things the game says to an addon and keeps in
+no file, noted the same way (`addon/AzerothAtlas/Learned.lua`; `/atlas learned` says how many;
+read by `atlasdb/learned.js`):
+
+| What | When | What the map does with it |
+| --- | --- | --- |
+| **What a vendor sells**: each thing, what one purchase costs, how many it gives, whether its stock runs out | when you open its window | The vendor's card lists it ("Sells 23 things: Coarse Thread, Gray Dye…"; hover for the prices). A recipe's reagent that some vendor was seen to sell counts as sold by a vendor, as QuestieDB's do. A price falls with your standing with the vendor's people, so the database keeps the highest anybody was shown. Things sold for tokens or marks are left out |
+| **What a trainer teaches**: each spell, what it costs, the profession and skill it asks for, the level it asks for | half a second after you open its window (the game fills the list late) | The trainer's card says how many things it teaches. A recipe is **learnt at** the skill a trainer asks: the game's files have 1 there for most of what trainers teach, the trainer's own window has the real figure. Left out: what you know already (the game no longer says its level), and a hunter's pet trainers |
+| **Where the game's own map puts a quest**: the pin of what is still to do, of where it is handed in, and - where this game's server says so - of where a quest on offer starts | as your quest log and the game's map change; a pin counts once it was seen twice | A quest nothing else places has that to go by: the route to it leads to the game's own pin ("where the game's map puts it"), and the quest explorer plots it there |
+
+To read a trainer's whole list the addon needs "available" and "unavailable" both shown; one of
+the two that you have switched off is switched on for the read and off again in the same
+moment. None of the three has been tried in the game by the map's maker: they go by the game's
+own window code, read out of the installed game, and by what other addons do in this client.
+
+**What a copy sends.** While the map runs it reads the game's cache, its own sightings, what a
+fight showed and whom the addon met (above: "a creature of this kind was here", "at this level
+it has this much health", "it is hostile to this side"), what the game's windows showed ("this
+vendor sells this for so much", "this trainer teaches this spell at this skill", "the game's map
+puts this quest here"), and what
 the addon has seen of the boats (see "Boats, zeppelins and the tram, live": a boat sighting
 is a line, a stop and a moment, with no names; of a ride of your own, that does say this copy's
 player was aboard then), and
@@ -2228,7 +2442,8 @@ line is only there in a version that names a database.
 The pieces: `atlasdb/records.js` (a record, and how sources are merged into one), `collect.js`
 (what a copy gathers and sends), `boats.js` (the boats: a sighting as it is sent, and how a
 line is measured from everybody's), `publish.js` (making, publishing and fetching the database),
-`rtdb.js` (talking to the database: plain web requests, nothing to install), `signin.js` (the
+`extractor/atlas.js` (laying the database over QuestieDB when the map is built), `server/combatlog.js`
+(reading the game's combat log), `rtdb.js` (talking to the database: plain web requests, nothing to install), `signin.js` (the
 anonymous account), `rules.json` (the database's rules, as pasted into the Firebase console),
 `extractor/wdb.js` (reading the game's cache), `server/atlasdb.js` (the map doing it by itself).
 
@@ -2482,7 +2697,7 @@ out, and why):
 | `report.txt` | what you wrote, and a summary of all the rest |
 | `timeline.txt` | every note below as one list, in the order things happened: the server's, the page's and the addon's own, side by side |
 | `computer/` | the version of Windows, processor, memory, graphics card and its driver, drives and how full they are, the antivirus program, and the names of the programs running (an overlay or a capture program can be in the strip's way) |
-| `atlas/` | this copy of Azeroth Atlas: its version, a digest of each of its own files (a file gone wrong in an update shows), `config.json`, what the server knew at that moment (the game, the addon, your character as the game reported it, your quest log), its notes, what the page was showing (where you were, each route and how it was taken to go, what the game had been handed) with a picture of the map, and the route mailboxes as they stood |
+| `atlas/` | this copy of Azeroth Atlas: its version, a digest of each of its own files (a file gone wrong in an update shows), `config.json`, what the server knew at that moment (the game, the addon, your character as the game reported it, your quest log), its notes, what the page was showing (where you were, each route and how it was taken to go, what the game had been handed) with a picture of the map, the route mailboxes as they stood, and - where you were looked for on the game's minimap inside a dungeon - `atlas/minimap/`: the last small square of the game's picture that was looked at (`last.png`), where the minimap was taken to be in it (by its rim, and by the addon's word), the figures of the last look, and how it has agreed with the combat log (`state.json`) |
 | `game/` | the game's build and its settings, the addons installed and which are switched on, what the Azeroth Atlas addon has saved (its own notes among it), what the addons it works with have saved (Questie, Guidelime and guide packs, TomTom, ShortestPathForever, DockWatch and the like), the game's own logs about itself and its addons, the beginning of its last three crash reports, and its cache of what the server told it about creatures, objects and quests |
 
 **What never goes in:** account names (an account's folder is called `account-1` in the zip,

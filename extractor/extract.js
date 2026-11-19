@@ -12,7 +12,8 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Casc } from './casc/casc.js';
 import { loadConfig } from './config.js';
-import { buildWorld, roomNames, liftsOf, ROOMS_VERSION } from './world.js';
+import { buildWorld, loadSentTable, roomNames, liftsOf, ROOMS_VERSION } from './world.js';
+import { readCache } from './hotfix.js';
 import { parseWDT } from './formats/wdt.js';
 import { Pool } from './pool.js';
 import { writeFileAtomic, unpackContainer } from './container.js';
@@ -26,10 +27,13 @@ import { CREATURES_VERSION, placeCreatures, placeInns, placeDungeons, writeCreat
 import { readQuestieDungeons } from './questie-extras.js';
 import { findQuestieDb, readQuestie, questieStamp, questieFrom } from './questie.js';
 import { fetchQuestie } from '../atlasdb/questiedb.js';
+import { ATLAS_VERSION, readAtlas, layOver } from './atlas.js';
 import { NPCS_VERSION, placeNpcs, resolveHeights, writeNpcs, buildQuests } from './jobs/npcs.js';
 import { fetchReference, readReference } from './reference.js';
 import { NavReader } from './navread.js';
-import { NAV_VERSION } from './jobs/nav.js';
+import { NAV_VERSION, BUILDING_NAV_VERSION } from './jobs/nav.js';
+import { MINIMAP_VERSION } from './jobs/minimap.js';
+import { parseWmoRoot } from './formats/wmo.js';
 import { loadTable } from './tables.js';
 import { ensureItems } from './jobs/items.js';
 import { ensureRecipes } from './jobs/recipes.js';
@@ -41,6 +45,22 @@ const KIND_INDEX = { water: 1, ocean: 2, magma: 3, slime: 4 };
 const TILE_YARDS = 1600 / 3; // one map tile
 const sig = (...parts) => crypto.createHash('sha1').update(JSON.stringify(parts)).digest('hex').slice(0, 20);
 const round1 = (v) => Math.round(v * 10) / 10;
+/**
+ * The one building of a map that is nothing else (the Deeprun Tram, a dungeon), as it stands in
+ * the world - or null for a map that has none. It is placed from the middle of the world, not
+ * from the map's corner as everything that stands on a map with ground is: the game's files put
+ * every one of them at (0, 0, 0), and you walk about in them at the building's own coordinates.
+ * (Placed from the corner, the building stood 17,067 yards north and west of everyone in it.)
+ * @returns { fdid, uniqueId, pos, rot, scale, doodadSet, nameSet, bounds: [min x, y, z, max x, y, z] }
+ */
+function oneBuilding(wdt) {
+  const g = wdt.globalWmo && wdt.globalWmo.isFdid ? wdt.globalWmo : null;
+  if (!g) return null;
+  return {
+    fdid: g.fdid, uniqueId: g.uniqueId, pos: [-g.pos[2], -g.pos[0], g.pos[1]], rot: g.rot, scale: g.scale, doodadSet: g.doodadSet, nameSet: g.nameSet,
+    bounds: [-g.extents[5], -g.extents[3], g.extents[1], -g.extents[2], -g.extents[0], g.extents[4]],
+  };
+}
 
 export async function runExtraction(cfg, opts = {}, report = () => {}) {
   const t0 = Date.now();
@@ -69,6 +89,9 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
 
   report({ type: 'phase', name: 'Reading world tables' });
   const world = await buildWorld(casc, log, cfg);
+  // What the game's server has sent since its files were made (hotfix.js), for the tables read further down: read once, when first asked for.
+  let sent;
+  const sentRecords = () => { if (sent === undefined) { try { sent = readCache(cfg); } catch { sent = null; } } return sent; };
   const lvfSig = sig(world.lvf);
   const kinds = {};
   for (const [id, t] of Object.entries(world.data.liquidTypes)) kinds[id] = KIND_INDEX[t.kind] ?? 1;
@@ -301,14 +324,70 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
         if (fresh(rel, s)) { entry.meta = prev.artifacts[rel].meta; stats.reused++; } else navJobs.push(entry);
         map.nav.push(entry);
       }
+      // A map that is one building has no tiles to go by: the same squares are laid over it, and
+      // every one its box reaches into has its ground worked out from the building alone (the
+      // game's own box for it, as the map's file gives it: a square it does not reach after all
+      // comes out empty). Made again when the building does, or when it stands otherwise.
+      const g = map.tiles.length ? null : oneBuilding(map.wdt);
+      if (!g || !modelSig.wmo.has(g.fdid)) continue; // (none, or one that could not be converted: nothing to stand on)
+      const building = { fdid: g.fdid, pos: g.pos, rot: g.rot, scale: g.scale };
+      const s = sig(NAV_VERSION, 'building', BUILDING_NAV_VERSION, building, modelSig.wmo.get(g.fdid));
+      const square = (v) => Math.floor(32 - v / TILE_YARDS);
+      for (let col = square(g.bounds[4]); col <= square(g.bounds[1]); col++) for (let row = square(g.bounds[3]); row <= square(g.bounds[0]); row++) {
+        const rel = `maps/${map.id}/nav/${col}_${row}.bin`;
+        const entry = { map, building, x: col, y: row, rel, sig: s, meta: null };
+        if (fresh(rel, s)) { entry.meta = prev.artifacts[rel].meta; stats.reused++; } else navJobs.push(entry);
+        map.nav.push(entry);
+      }
     }
     await runJobs('Mapping where you can walk', navJobs, async (n) => {
-      n.meta = await pool.run('nav', { col: n.e.x, row: n.e.y, tile: abs(n.e.rel), models: abs('models'), out: abs(n.rel), kinds });
+      n.meta = await pool.run('nav', n.e ? { col: n.e.x, row: n.e.y, tile: abs(n.e.rel), models: abs('models'), out: abs(n.rel), kinds } : { col: n.x, row: n.y, building: n.building, models: abs('models'), out: abs(n.rel) });
     });
     for (const map of maps) {
       map.nav = map.nav.filter((n) => n.meta);
       for (const n of map.nav) next.artifacts[n.rel] = { sig: n.sig, meta: n.meta };
     }
+
+    // ---- the minimap's plan of every map that is one building (a dungeon, the Deeprun Tram) ----
+    // Inside a dungeon the game says nothing of where you are, and its minimap shows it: the map
+    // server finds the minimap's picture on the building's plan (server/minimap.js). The plan is
+    // made here from the game's own pictures of each room (jobs/minimap.js), and made again when
+    // the building, one of its rooms or one of the pictures changes.
+    // (Only for a map that is one building. A dungeon that stands on ground - the Deadmines,
+    // Shadowfang Keep - has pictures of that ground on its minimap as well, lit from edge to
+    // edge: there is no dark to tell the floor from, which is all the matcher goes by.)
+    const planJobs = [];
+    const alone = maps.filter((m) => !m.tiles.length && oneBuilding(m.wdt));
+    const pictures = alone.length ? await loadTable(casc, 'WMOMinimapTexture', log) : null;
+    if (alone.length && !pictures) {
+      // (the table's layout is fetched the first time it is needed, and there may be no connection: the plans made before stand)
+      log('the minimap plans of the dungeons could not be made: the table of the minimap pictures could not be read');
+      for (const map of alone) {
+        const rel = `maps/${map.id}/minimap.bin`, old = prev.artifacts[rel];
+        if (!prev.stale && old?.meta && fs.existsSync(abs(rel))) map.planEntry = { map, rel, sig: old.sig, meta: old.meta };
+      }
+    }
+    if (pictures) {
+      const byBuilding = new Map();
+      for (const r of pictures.rows) { let l = byBuilding.get(r.WMOID); if (!l) byBuilding.set(r.WMOID, (l = [])); l.push([r.GroupNum, r.BlockX, r.BlockY, r.FileDataID]); }
+      for (const map of alone) {
+        const g = oneBuilding(map.wdt);
+        // (every one of them stands at the middle of the world, unturned: one that did not would need its pictures turned as well)
+        if (g.pos.some((v) => v !== 0) || g.rot.some((v) => v !== 0) || g.scale !== 1) { log(`map ${map.id}: its one building is not placed plainly, so it gets no minimap plan`); continue; }
+        let root;
+        try { root = parseWmoRoot(casc.readFile(g.fdid)); } catch { continue; } // (not downloaded, or still locked)
+        const rows = (byBuilding.get(root.wmoId) ?? []).filter((r) => r[0] < root.nGroups && r[3] && casc.exists(r[3])).sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || a[3] - b[3]);
+        if (!rows.length) continue; // (the game has no picture of any of its rooms: its minimap is empty in there)
+        const rel = `maps/${map.id}/minimap.bin`;
+        const s = sig(MINIMAP_VERSION, ckey(g.fdid), root.groupFiles.map(ckey), rows.map((r) => [r[0], r[1], r[2], ckey(r[3])]));
+        map.planEntry = { map, rel, sig: s, meta: null, fdid: g.fdid, rows };
+        if (fresh(rel, s)) { map.planEntry.meta = prev.artifacts[rel].meta; stats.reused++; } else planJobs.push(map.planEntry);
+      }
+    }
+    await runJobs('Drawing the minimap plans of the dungeons', planJobs, async (e) => {
+      e.meta = await pool.run('minimap', { map: e.map.id, fdid: e.fdid, rows: e.rows, out: abs(e.rel) });
+    });
+    for (const map of maps) if (map.planEntry?.meta) next.artifacts[map.planEntry.rel] = { sig: map.planEntry.sig, meta: map.planEntry.meta };
   } finally {
     await pool.close();
   }
@@ -328,6 +407,7 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
   let innsSig = null, dungeonsSig = null, liftsSig = null;
   let reference = null, ref = null; // the reference database, once it has been looked for (the NPC layer and the lifts both read it)
   let questieDb = null, factionTemplates = null, factionHash = null; // kept for the NPC layer below
+  let atlas = null, laid = null; // the Atlas database as last fetched, and a mark of it for the signatures of what is built with it
   try {
     const file = findQuestieDb(cfg);
     if (file) questie = { stamp: questieStamp(file) };
@@ -336,15 +416,28 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
       const db = readQuestie(file);
       questie.hash = db.hash; // (what is in it: the same data in another place is the same data - see builtFromQuestie)
       log(`QuestieDB ${db.version ?? '?'}, from ${questieFrom(cfg, file)}`);
-      const ft = await loadTable(casc, 'FactionTemplate', log);
+      // What the Atlas database knows beyond QuestieDB - the game's own word from every copy's
+      // cache, sightings and combat log, and Wowhead - laid over it (atlas.js). Optional like the
+      // rest: with none fetched, or one that cannot be read, the map is built from QuestieDB alone.
+      try {
+        const got = cfg.atlas === false ? null : readAtlas(dataDir);
+        if (got) {
+          const did = layOver(db, got, world.data.zones);
+          atlas = { rev: got.rev, hash: got.hash };
+          laid = sig(ATLAS_VERSION, got.hash);
+          const c = did.creatures, o = did.objects, q = did.quests;
+          log(`the Atlas database (${got.rev}) adds: ${c.added.toLocaleString()} creatures QuestieDB does not list, a place for ${c.placed.toLocaleString()} it does not place, a level for ${c.levelled.toLocaleString()}, a side for ${c.sided.toLocaleString()}, ${c.named.toLocaleString()} named as the game names them, sightings of ${c.seen.toLocaleString()}, where fights began with ${c.fought.toLocaleString()}, measured health of ${c.measured.toLocaleString()}; ${o.added.toLocaleString()} objects (${o.placed.toLocaleString()} more with a place); ${q.added.toLocaleString()} quests, who gives ${q.given.toLocaleString()} more and takes ${q.taken.toLocaleString()}, how many ${q.counted.toLocaleString()} ask for`);
+        }
+      } catch (err) { log(`the Atlas database could not be laid over QuestieDB (${err.message}): the map is built from QuestieDB alone`); }
+      const ft = await loadSentTable(casc, 'FactionTemplate', log, sentRecords());
       const templates = ft ? new Map(ft.rows.map((r) => [r.ID, { friend: r.FriendGroup, enemy: r.EnemyGroup }])) : null;
       questieDb = db; factionTemplates = templates; factionHash = ft?.hash ?? null;
       if (!templates) log('faction table unavailable: every non-friendly creature is treated as hostile');
-      const s = sig(CREATURES_VERSION, db.hash, sig(world.data.zones), ft?.hash ?? null, world.hash, maps.map((m) => m.areasEntry?.sig ?? null));
+      const s = sig(CREATURES_VERSION, db.hash, laid, sig(world.data.zones), ft?.hash ?? null, world.hash, maps.map((m) => m.areasEntry?.sig ?? null));
       const source = `QuestieDB ${db.version ?? '?'}`;
       // innkeepers, for the route planner (where a hearthstone leads) and for knowing the towns
       world.data.inns = placeInns(db.npcs, world.data.zones, templates);
-      innsSig = sig('inns3', db.hash, ft?.hash ?? null);
+      innsSig = sig('inns3', db.hash, laid, ft?.hash ?? null);
       // the dungeons' doors, for leading a quest that is done inside one to the way in
       const dungeons = readQuestieDungeons(file);
       world.data.dungeons = placeDungeons(dungeons.list, world.data.zones, world.data.areas, dungeons.instances, world.maps);
@@ -405,13 +498,17 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
       const source = `QuestieDB ${db.version ?? '?'}`;
       reference = await fetchReference(cfg, dataDir, log);
       if (reference) { try { ref = readReference(reference.file); } catch (err) { log(`reference database unreadable (${err.message}): heights come from the map data alone`); } }
-      const placed = placeNpcs(db, world.data.zones, factionTemplates, ref ? { areas: world.data.areas, ref, mapIds: new Set(maps.map((m) => m.id)) } : null);
+      // (inside: the maps you enter through a door - a creature known only to be "in this zone" is listed there, not on a continent)
+      const placed = placeNpcs(db, world.data.zones, factionTemplates, { areas: world.data.areas, ref, mapIds: new Set(maps.map((m) => m.id)), bosses: world.data.bosses ?? {}, opens: world.data.opens ?? null, inside: new Set(maps.filter((m) => m.row.InstanceType > 0).map((m) => m.id)) });
       const todo = [];
       for (const map of maps) {
         const m = placed.get(map.id);
-        if (!m || (!m.points.length && !m.unplaced.length)) continue;
+        if (!m || (!m.points.length && !m.unplaced.length && !m.seen.length && !m.bosses.length)) continue;
         const navRev = map.nav?.length ? sig(map.nav.map((n) => n.sig)) : null;
-        const s = sig(NPCS_VERSION, db.hash, sig(world.data.zones), factionHash, reference?.sha ?? null, navRev);
+        // (with the Atlas database laid over: by what is on THIS map, so that a new database builds again only the maps it changes anything on)
+        const s = laid
+          ? sig(NPCS_VERSION, 'atlas', sig(m.entries, m.points, m.seen, m.unplaced, m.bosses), sig(world.data.zones), factionHash, reference?.sha ?? null, navRev)
+          : sig(NPCS_VERSION, db.hash, sig(world.data.zones), factionHash, reference?.sha ?? null, navRev, sig(m.bosses));
         map.npcsEntry = { rel: `maps/${map.id}/npcs.bin`, sig: s, meta: null };
         if (fresh(map.npcsEntry.rel, s)) { map.npcsEntry.meta = prev.artifacts[map.npcsEntry.rel].meta; stats.reused++; }
         else todo.push({ map, m });
@@ -427,7 +524,7 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
           report({ type: 'progress', done: ++done, total: todo.length });
         }
       }
-      const heights = [0, 0, 0, 0, 0];
+      const heights = [0, 0, 0, 0, 0, 0, 0, 0];
       let spawns = 0, places = 0;
       for (const map of maps) {
         const e = map.npcsEntry;
@@ -437,13 +534,13 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
         e.meta.heights.forEach((c, i) => { heights[i] += c; });
       }
       // the quests (who gives and takes each, what it asks for)
-      const qs = sig(NPCS_VERSION, db.hash, sig(world.data.zones), reference?.sha ?? null);
+      const qs = sig(NPCS_VERSION, db.hash, laid, sig(world.data.zones), reference?.sha ?? null);
       if (fresh('quests.json', qs)) stats.reused++;
       else { writeFileAtomic(abs('quests.json'), JSON.stringify({ source, reference: ref ? reference.name : null, ...buildQuests(db, world.data.zones, ref) })); stats.built++; }
       next.artifacts['quests.json'] = { sig: qs };
       npcInfo = { source, reference: reference?.name ?? null, spawns, heights, quests: db.quests.length };
       const pct = (c) => `${((c / Math.max(1, spawns)) * 100).toFixed(0)}%`;
-      log(`${source}: ${spawns.toLocaleString()} NPC and object spawn points placed on ${places} maps. Heights: ${pct(heights[4])} from the reference database and confirmed by the ground, ${pct(heights[3])} from the reference database alone, ${pct(heights[2])} the only place to stand, ${pct(heights[1])} the likeliest of several, ${pct(heights[0])} not known`);
+      log(`${source}${atlas ? ` and the Atlas database (${atlas.rev})` : ''}: ${spawns.toLocaleString()} NPC and object spawn points placed on ${places} maps. Heights: ${pct(heights[4])} from the reference database and confirmed by the ground, ${pct(heights[3])} from the reference database alone, ${pct(heights[2])} the only place to stand, ${pct(heights[1])} the likeliest of several, ${pct(heights[0])} not known${heights[7] ? `, ${heights[7].toLocaleString()} as another player saw them` : ''}`);
     } catch (err) {
       log(`NPC layer unavailable: ${err.message}`);
     }
@@ -466,7 +563,8 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
     log(`lifts unavailable: ${err.message}`);
   }
   try {
-    const t = await loadTable(casc, 'WMOAreaTable', log);
+    // (with what the game's server has sent since its files were made: the rooms of a dungeon added later come that way)
+    const t = await loadSentTable(casc, 'WMOAreaTable', log, sentRecords());
     if (t) {
       const rs = sig('rooms', ROOMS_VERSION, t.hash, sig(Object.entries(world.data.areas).map(([id, a]) => [id, a.n])));
       if (fresh('rooms.json', rs)) stats.reused++;
@@ -514,7 +612,7 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
     if (!map.tiles.length && !wdt.globalWmo) continue;
     let minH = Infinity, maxH = -Infinity;
     for (const e of map.tiles) { minH = Math.min(minH, e.meta.minH); maxH = Math.max(maxH, e.meta.maxH); }
-    const g = wdt.globalWmo && wdt.globalWmo.isFdid ? wdt.globalWmo : null;
+    const g = oneBuilding(wdt);
     const pages = {};
     for (let level = 1; level <= TOP_LEVEL; level++) pages[level] = (map.pages[level] ?? []).map((e) => [e.x, e.y, round1(e.meta.minH), round1(e.meta.maxH), e.meta.water ? 1 : 0]);
     // (a map that is one building: 'middle' is how that building is placed - see below - so that a map built before it was put right is written anew)
@@ -522,6 +620,8 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
     // the walkable-ground data has its own revision (it changes when a building model does)
     const navRev = map.nav?.length ? sig(map.nav.map((n) => n.sig)) : null;
     if (navRev) rev = sig(rev, navRev);
+    // ...and so has the minimap's plan of a map that is one building
+    if (map.planEntry?.meta) rev = sig(rev, map.planEntry.sig);
     const mapJson = {
       id: row.ID, name: row.MapName_lang, directory: row.Directory, instanceType: row.InstanceType,
       parentMap: row.ParentMapID, areaTable: row.AreaTableID,
@@ -534,19 +634,18 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
       wmoCount: map.wmosEntry?.meta?.count ?? 0,
       creatures: map.creaturesEntry?.meta ?? null,
       npcs: map.npcsEntry?.meta ?? null, // maps/<id>/npcs.bin
-      nav: navRev ? { tiles: map.nav.length, rev: navRev, cells: 512 } : null, // maps/<id>/nav/<col>_<row>.bin
+      // maps/<id>/nav/<col>_<row>.bin: one for each of the map's tiles. A map that is one building
+      // has no tiles, so it says which squares there are (`at`: [col, row] each).
+      nav: navRev ? { tiles: map.nav.length, rev: navRev, cells: 512, ...(map.tiles.length ? {} : { at: map.nav.map((n) => [n.x, n.y]) }) } : null,
+      // maps/<id>/minimap.bin: the minimap's plan of a map that is one building, for finding you on it
+      // (jobs/minimap.js): how many rooms the building has and how many of them have a picture,
+      // how big the plan is (two pixels a yard). null: there is none.
+      minimap: map.planEntry?.meta ? { rev: map.planEntry.sig.slice(0, 10), ...map.planEntry.meta } : null,
       heightRange: map.tiles.length ? [minH, maxH] : null,
       // A map that is one building (the Deeprun Tram, a dungeon) has it placed from the middle of
-      // the world, not from the map's corner as everything that stands on a map with ground is:
-      // the game's files put every one of them at (0, 0, 0), and you walk about in them at the
-      // building's own coordinates. (Placed from the corner, the building stood 17,067 yards north
-      // and west of everyone in it. `middle` says it is placed aright: the page moves one that is
-      // not, from a map built before this - viewer/js/scene.js.)
-      globalWmo: g ? {
-        fdid: g.fdid, uniqueId: g.uniqueId, pos: [-g.pos[2], -g.pos[0], g.pos[1]], rot: g.rot, scale: g.scale, doodadSet: g.doodadSet, nameSet: g.nameSet,
-        bounds: [-g.extents[5], -g.extents[3], g.extents[1], -g.extents[2], -g.extents[0], g.extents[4]],
-        middle: true,
-      } : null,
+      // the world (see oneBuilding). `middle` says it is placed aright: the page moves one that
+      // is not, from a map built before this - viewer/js/scene.js.
+      globalWmo: g ? { ...g, middle: true } : null,
       rev,
     };
     const rel = `maps/${row.ID}/map.json`;
@@ -593,6 +692,8 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
     danger,
     npcs: npcInfo,
     questie,
+    // (the Atlas database the creatures, NPCs and quests were built with, as it was fetched then: null = with none)
+    atlas,
     maps: manifestMaps,
   };
   const changed = prevManifest?.revision !== revision;

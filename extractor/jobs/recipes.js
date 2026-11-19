@@ -37,8 +37,28 @@ import { writeFileAtomic } from '../container.js';
 import { loadTable, TABLE_FDID } from '../tables.js';
 import { readCache, cacheStamp } from '../hotfix.js';
 import { findQuestieDb, questieStamp, readQuestie } from '../questie.js';
+import { readAtlas } from '../atlas.js';
 
-export const RECIPES_VERSION = 2;
+export const RECIPES_VERSION = 3;
+
+/**
+ * What the Atlas database knows from vendors' and trainers' own windows (the addon's notes, from
+ * every copy): the things some vendor sells for money, and the skill a trainer asks before
+ * teaching a spell (the lowest any of them asks). With a mark of the two, so that the list is
+ * made again when they change and not whenever the database does.
+ */
+function learned(cfg) {
+  const sold = new Set(), asks = new Map();
+  try {
+    const atlas = cfg.atlas === false ? null : readAtlas(cfg.dataDir);
+    for (const r of atlas?.npc.values() ?? []) {
+      for (const s of Array.isArray(r.sells) ? r.sells : []) if (Array.isArray(s) && Number.isInteger(s[0]) && s[1] > 0) sold.add(s[0]);
+      for (const t of Array.isArray(r.teaches) ? r.teaches : []) if (Array.isArray(t) && Number.isInteger(t[0]) && t[3] > 0) asks.set(t[0], Math.min(asks.get(t[0]) ?? Infinity, t[3]));
+    }
+  } catch { /* no database fetched: QuestieDB and the game's tables alone */ }
+  const mark = crypto.createHash('sha1').update(JSON.stringify([[...sold].sort((a, b) => a - b), [...asks].sort((a, b) => a[0] - b[0])])).digest('hex').slice(0, 12);
+  return { sold, asks, mark };
+}
 export const RECIPES_FILE = 'recipes.json';
 const TABLES = ['SkillLine', 'SkillLineAbility', 'SpellReagents', 'SpellEffect', 'SpellName', 'ItemEffect', 'ItemXItemEffect'];
 const PROFESSIONS = new Set([11, 9]); // the kinds of skill line: professions, and the ones everybody may have (cooking, first aid, fishing)
@@ -51,7 +71,7 @@ function questieFile(cfg) { try { return findQuestieDb(cfg); } catch { return nu
 export function recipesSig(casc, cfg) {
   let questie = null;
   try { const f = questieFile(cfg); questie = f ? questieStamp(f) : null; } catch { /* not installed */ }
-  const parts = [RECIPES_VERSION, ...TABLES.map((t) => { try { return casc.contentHash(TABLE_FDID[t]); } catch { return null; } }), cacheStamp(cfg), questie];
+  const parts = [RECIPES_VERSION, ...TABLES.map((t) => { try { return casc.contentHash(TABLE_FDID[t]); } catch { return null; } }), cacheStamp(cfg), questie, learned(cfg).mark];
   return crypto.createHash('sha1').update(JSON.stringify(parts)).digest('hex').slice(0, 20);
 }
 
@@ -100,6 +120,7 @@ export async function ensureRecipes(casc, cfg, log = () => {}) {
       if (spell && !taught.has(spell)) taught.set(spell, x.ItemID);
     }
   }
+  const known = learned(cfg);
   const recipes = [], seen = new Set();
   for (const a of [...T.SkillLineAbility].sort((x, y) => x.SkillLine - y.SkillLine || x.Spell - y.Spell)) {
     if (!skills[a.SkillLine] || seen.has(a.Spell)) continue;
@@ -107,10 +128,12 @@ export async function ensureRecipes(casc, cfg, log = () => {}) {
     if (!name || (!uses && !makes)) continue; // (not a recipe: the profession itself, finding herbs, a rank of the skill...)
     if (!uses) continue;                      // (made out of nothing: nothing to cost)
     seen.add(a.Spell);
-    recipes.push([a.Spell, name, a.SkillLine, Math.max(0, a.MinSkillLineRank | 0), Math.max(0, a.TrivialSkillLineRankLow | 0), Math.max(0, a.TrivialSkillLineRankHigh | 0), makes?.[0] ?? 0, makes?.[1] ?? 0, uses, taught.get(a.Spell) ?? 0]);
+    // (learnt at: the game's table has 1 for most of what a trainer teaches; a trainer's own window says what it asks)
+    recipes.push([a.Spell, name, a.SkillLine, Math.max(0, a.MinSkillLineRank | 0, known.asks.get(a.Spell) ?? 0), Math.max(0, a.TrivialSkillLineRankLow | 0), Math.max(0, a.TrivialSkillLineRankHigh | 0), makes?.[0] ?? 0, makes?.[1] ?? 0, uses, taught.get(a.Spell) ?? 0]);
   }
   // the reagents a vendor sells, where QuestieDB is there to say
   const sold = [];
+  const wantedAll = new Set(recipes.flatMap((r) => r[8].map((x) => x[0])));
   try {
     const file = questieFile(cfg);
     if (file) {
@@ -119,6 +142,8 @@ export async function ensureRecipes(casc, cfg, log = () => {}) {
       for (const id of [...wanted].sort((a, b) => a - b)) if (db.item(id)?.vendors?.length) sold.push(id);
     } else log('recipes: QuestieDB is not on this computer yet (Update map fetches it): which reagents a vendor sells is not known');
   } catch (err) { log(`recipes: QuestieDB could not be read (${err.message}): which reagents a vendor sells is not known`); }
+  // (and the ones a vendor's own window showed for sale, where the Atlas database has it)
+  { const have = new Set(sold); for (const id of [...wantedAll].sort((a, b) => a - b)) if (!have.has(id) && known.sold.has(id)) sold.push(id); sold.sort((a, b) => a - b); }
   const used = new Set(recipes.map((r) => r[2]));
   for (const id of Object.keys(skills)) if (!used.has(Number(id))) delete skills[id];
   fs.mkdirSync(cfg.dataDir, { recursive: true });

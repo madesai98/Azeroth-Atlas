@@ -9,6 +9,7 @@ import { loadConfig, readConfigFile, PROJECT_ROOT, CONFIG_FILE } from '../extrac
 import { DATA_STAMP } from '../extractor/stamp.js';
 import { installedBuild } from '../extractor/casc/casc.js';
 import { findQuestieDb, builtFromQuestie } from '../extractor/questie.js';
+import { atlasStamp } from '../extractor/atlas.js';
 import { PlayerTracker } from './tracker.js';
 import { addonStatus, installAddon, teachGuideAddons, flavourFolder, addonsDir } from './addon.js';
 import { SeenStore } from './seen.js';
@@ -18,6 +19,8 @@ import { Changes } from './changes.js';
 import { AppUpdate } from './appupdate.js';
 import { MIME, sendFile, safeJoin } from './http.js';
 import { AtlasDb } from './atlasdb.js';
+import { CombatLog } from './combatlog.js';
+import { Minimap } from './minimap.js';
 import { clockFigures, writeClockAddon } from './boats.js';
 import { Auctions } from './auctions.js';
 import { openLogs, logDir, note, noteCrashes } from './log.js';
@@ -69,9 +72,46 @@ const handBoats = () => {
     if (r?.written) note('database', 'the boats: where each line stands on the server\'s clock, as the Atlas database has measured it, written for the addon', { lines: r.lines, fresh: r.fresh || undefined });
   } catch (err) { note('database', 'the boats\' figures could not be written for the addon', { error: err.message }); }
 };
-const atlas = new AtlasDb(cfg, configFile, { hold: () => job.running, after: handBoats });
+// The database fetched anew: the map's creatures, NPCs and quests are built again with it, by
+// itself. A short job - only the maps the database changed anything on are done again - and
+// the one way what the other copies have learned reaches this one's map without anybody having
+// to press a button for it. Once for each database, so that one the map cannot be built with
+// is not tried over and over. ("database": { "apply": false } in config.json leaves it to the
+// Update map button; so does a map that also wants building for another reason.)
+let appliedFor = null;
+const applyDatabase = () => {
+  try {
+    if (job.running || cfg.database === false || cfg.database?.apply === false) return;
+    const st = status();
+    if (!st.extracted || st.updateReason !== 'database') return;
+    const now = atlasStamp(cfg.dataDir)?.hash ?? null;
+    if (now === appliedFor) return;
+    appliedFor = now;
+    note('map', 'the Atlas database has been fetched anew: the map is updated with it');
+    startUpdate(false);
+  } catch (err) { note('map', 'the map could not be updated with the Atlas database by itself', { error: err.message }); }
+};
+const atlas = new AtlasDb(cfg, configFile, { hold: () => job.running, after: () => { handBoats(); applyDatabase(); } });
 atlas.start();
 handBoats();
+setTimeout(applyDatabase, 8000).unref?.();
+// Where you are inside a dungeon, read off the game's minimap: the game hides it from the addon
+// there, and the minimap's picture shows it (see minimap.js). Only while a map page is open and
+// you are in a dungeon the map has a plan of. ("minimap": false in config.json switches it off)
+const minimap = cfg.minimap === false ? null : new Minimap(cfg, { tracker });
+if (minimap) { tracker.eyes = minimap; minimap.start(); }
+// What the game's own combat log says of the creatures you fight: where each was, its level and
+// health, how it stands towards your side - and, inside a dungeon, where you are (see combatlog.js).
+// ("combatLog": false in config.json leaves the log unread)
+const combat = cfg.combatLog === false ? null : new CombatLog(cfg, {
+  side: () => { const f = tracker.state?.status === 'live' ? tracker.state.player?.faction : null; return f === 'horde' ? 'H' : f === 'alliance' ? 'A' : null; },
+  onNew: () => atlas.nudge(),
+  // (where you are is worth showing while it is news: a log read hours later says where you were.
+  // And not while the minimap has you: that is where you are now, the log where you were at a
+  // blow - which the minimap's place is held against, and looked for near - minimap.js, logged)
+  onFix: (fix) => { if (Date.now() - fix.at < 60000 && !minimap?.logged(fix)) tracker.placed(fix); },
+});
+combat?.start();
 // What things cost at the auction house, and how that has moved (see auctions.js).
 const auctions = new Auctions(cfg, configFile, { hold: () => job.running });
 auctions.start();
@@ -79,8 +119,8 @@ const VIEWER_DIR = path.join(PROJECT_ROOT, 'viewer');
 // The page's own files, watched: a page that is open loads itself again when they change (changes.js).
 const changes = new Changes(VIEWER_DIR);
 // "Report a problem": everything that may explain one, in a zip (report.js)
-const reports = new Reports({ configFile, cfg, busy: (on) => { reporting = on; busy(); }, live: { status: () => status(), tracker, mail, atlas, auctions, addon: () => addonStatus(cfg) } });
-note('server', 'the settings in use', { game: cfg.installRoot, found: !!cfg.foundGame, flavour: flavourFolder(cfg), data: cfg.dataDir, port: cfg.port, ingame: cfg.ingame !== false, autoUpdate: cfg.autoUpdate ?? true, oldAddonInUse: oldAddon });
+const reports = new Reports({ configFile, cfg, busy: (on) => { reporting = on; busy(); }, live: { status: () => status(), tracker, mail, atlas, auctions, minimap, addon: () => addonStatus(cfg) } });
+note('server', 'the settings in use', { game: cfg.installRoot, found: !!cfg.foundGame, flavour: flavourFolder(cfg), data: cfg.dataDir, port: cfg.port, ingame: cfg.ingame !== false, minimap: cfg.minimap !== false, autoUpdate: cfg.autoUpdate ?? true, oldAddonInUse: oldAddon });
 
 // ---- update job ---------------------------------------------------------------------------
 
@@ -136,14 +176,24 @@ function status() {
   // The map tool itself has been updated since the map was built, and builds some of it differently
   // now (extractor/stamp.js): the page goes on working with the map as it is, and offers to build it again.
   const newTool = !!installed && !!manifest && manifest.tool !== DATA_STAMP;
+  // The Atlas database has been fetched anew since the map's creatures, NPCs and quests were
+  // built with it (extractor/atlas.js lays it over QuestieDB): what every copy has learned since
+  // is on this disk and not yet on the map.
+  let newDatabase = false;
+  // (a database on this disk that is another than the map was built with. None on the disk -
+  // not fetched yet, or its folder gone - is nothing new: building again would only take out
+  // what the last one put in, and it is fetched again by itself)
+  try { const have = cfg.atlas === false ? null : atlasStamp(cfg.dataDir); newDatabase = !!installed && !!manifest && !!have && have.hash !== (manifest.atlas?.hash ?? null); } catch { /* as it was */ }
   return {
     installed, installError,
     extracted: manifest ? { build: manifest.build, revision: manifest.revision, extractedAt: manifest.extractedAt, formatVersion: manifest.formatVersion } : null,
-    updateAvailable: newBuild || newCreatureData || newTool,
-    updateReason: newBuild ? 'build' : newCreatureData ? 'creatures' : newTool ? 'tool' : null,
+    updateAvailable: newBuild || newCreatureData || newTool || newDatabase,
+    updateReason: newBuild ? 'build' : newCreatureData ? 'creatures' : newTool ? 'tool' : newDatabase ? 'database' : null,
     job: { ...job, child: undefined },
     app: appUpdate.status(),
     game: { folder: cfg.installRoot, found: !!cfg.foundGame },
+    // finding you on the game's minimap inside a dungeon (minimap.js): how it stands, and its last figures (null: switched off)
+    minimap: minimap?.status() ?? null,
   };
 }
 
@@ -228,14 +278,16 @@ const server = http.createServer((req, res) => {
   if (p === '/api/database') {
     // the Atlas database: what this copy sends and has fetched (?share=0 or 1: keep what it learns to itself, or send it; ?run=1: now)
     const json = (code, body) => { res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
-    if (req.method === 'GET') { json(200, atlas.status()); return; }
+    // (fights: what the game's combat log has given so far - combatlog.js; null where it is left unread)
+    const said = () => ({ ...atlas.status(), fights: combat?.status() ?? null });
+    if (req.method === 'GET') { json(200, said()); return; }
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
     const origin = req.headers.origin;
     if (origin && new URL(origin).host !== req.headers.host) { res.writeHead(403); res.end(); return; }
     try {
       if (url.searchParams.has('share')) atlas.setShare(url.searchParams.get('share') === '1');
       if (url.searchParams.get('run') === '1') atlas.run();
-      json(200, atlas.status());
+      json(200, said());
     } catch (err) { json(500, { error: err.message }); }
     return;
   }
@@ -340,7 +392,7 @@ const server = http.createServer((req, res) => {
 // reads the game window is put away first), and not left behind should the watcher go.
 if (process.send) {
   // (a map build in hand goes with it: nobody would see it finish, and the next one picks up where it stopped)
-  const leave = () => { note('server', 'asked to make way: its code has changed, or the application is closing'); try { tracker.stop(); } catch { /* going anyway */ } try { atlas.stop(); } catch { /* going anyway */ } try { auctions.stop(); } catch { /* going anyway */ } try { if (job.running) job.child?.kill(); } catch { /* gone */ } process.exit(0); };
+  const leave = () => { note('server', 'asked to make way: its code has changed, or the application is closing'); try { tracker.stop(); } catch { /* going anyway */ } try { minimap?.stop(); } catch { /* going anyway */ } try { atlas.stop(); } catch { /* going anyway */ } try { combat?.stop(); } catch { /* going anyway */ } try { auctions.stop(); } catch { /* going anyway */ } try { if (job.running) job.child?.kill(); } catch { /* gone */ } process.exit(0); };
   process.on('message', (m) => { if (m?.stop) leave(); });
   process.on('disconnect', leave);
 }

@@ -71,7 +71,8 @@ local L_PARTY, L_TEXT, L_TARGET, L_FIX = 1, 2, 4, 8
 -- the NPC whose window you last opened; and, a little at a time, your quests: the ones in your
 -- log (kind 0) and the ones you have done (kind 1, running on into kind 0 from key 8)
 -- (kind 7 has more than the NPC under its other keys: 1 the route mailboxes, 2 the level you
--- chose, 8 the server's clock and from 16 on a boat line each: see Route.lua and Transit.lua)
+-- chose, 8 the server's clock and from 16 on a boat line each: see Route.lua and Transit.lua;
+-- 9 where the game's minimap is on the screen: see MinimapReport)
 local T_PARTY, T_STATS, T_BIND, T_BINDPOS, T_FLIGHTS, T_TALK = 2, 3, 4, 5, 6, 7
 local Q_LOG, Q_DONE = 0, 1
 -- where the waypoint comes from: your guide's step, a journey of your own in Shortest Path
@@ -728,6 +729,108 @@ local function Byte3(v)
   return strchar(floor(v / 65536), floor(v / 256) % 256, v % 256)
 end
 
+-- ---- where the game's minimap is on the screen ------------------------------------------------
+-- Inside a dungeon the game tells an addon which dungeon it is and nothing of where you are in
+-- it. Its minimap shows that all the same, and the 3D map reads it off the picture of the game
+-- window, as it reads the strip (server/minimap.js). For that it has to know where on the
+-- screen the minimap is, to a pixel. So it is said here: the middle of the minimap's own frame
+-- and half its width and height, in pixels of the screen counted from the top left corner; how
+-- far it is zoomed in, and how many yards it shows from its middle to its edge; whether it
+-- turns with you; whether it is round. All of it is only read: nothing about the minimap is
+-- changed.
+--
+-- Nobody could try this in the game before it was sent out, so it is written to do no harm:
+-- every call into the game is made so that a refusal cannot stop the strip (pcall), and what
+-- the game hands out as a "secret" - it does, of some things, in a fight and in a dungeon - is
+-- left alone. Where the frame is on the screen is only asked outside a fight; in one, and
+-- wherever the game will not say, the last figures that were good are said again. (The 3D map
+-- does not take them on trust either: it looks for the minimap's rim on the picture.)
+-- Nine bytes twice over: what is said (128 said at all, 1 where it is, 2 it turns with you,
+-- 4 it is round, 8 its shape is known, 16 it is shown, 32 its zoom, 64 whether it turns), the
+-- middle across and down (eighths of a pixel), half the width and half the height (32nds), the
+-- zoom (and how many steps of it there are, times 16), the yards to its edge (16ths), the
+-- screen's width and height in pixels, a spare byte, and 1.
+shared.minimap = { known = false, cx = 0, cy = 0, hw = 0, hh = 0, zoom = -1, levels = 0, reach = 0, round = true, shown = false, sw = 0, sh = 0 }
+function shared.MinimapReport()
+  local m = shared.minimap
+  local map = _G.Minimap
+  local frame = type(map) == "table" and map or nil
+  local fighting = false
+  if InCombatLockdown then
+    local ok, v = pcall(InCombatLockdown)
+    fighting = not (ok and not secret(v) and v == false)
+  end
+  if frame and not fighting then
+    local sw, sh, left, bottom, width, height
+    if GetPhysicalScreenSize then
+      local ok, a, b = pcall(GetPhysicalScreenSize)
+      if ok then sw, sh = plain(a), plain(b) end
+    end
+    -- (as the screen has it: the frame's own figures times its scale)
+    if type(frame.GetScaledRect) == "function" then
+      local ok, a, b, c, d = pcall(frame.GetScaledRect, frame)
+      if ok then left, bottom, width, height = plain(a), plain(b), plain(c), plain(d) end
+    end
+    if not (left and bottom and width and height) and type(frame.GetRect) == "function" and type(frame.GetEffectiveScale) == "function" then
+      local ok, a, b, c, d = pcall(frame.GetRect, frame)
+      local ok2, scale = pcall(frame.GetEffectiveScale, frame)
+      scale = ok2 and plain(scale) or nil
+      a, b, c, d = plain(a), plain(b), plain(c), plain(d)
+      if ok and scale and a and b and c and d then left, bottom, width, height = a * scale, b * scale, c * scale, d * scale end
+    end
+    if sw and sh and sh > 0 and left and bottom and width and height and width > 0 and height > 0 then
+      -- (the interface is 768 units high whatever the screen is: so many pixels to a unit)
+      local k = sh / 768
+      m.known = true
+      m.cx, m.cy = (left + width / 2) * k, sh - (bottom + height / 2) * k
+      m.hw, m.hh = width / 2 * k, height / 2 * k
+      m.sw, m.sh = sw, sh
+    end
+  end
+  if frame then
+    if type(frame.GetZoom) == "function" then
+      local ok, v = pcall(frame.GetZoom, frame)
+      v = ok and plain(v) or nil
+      if v and v >= 0 then m.zoom = v end
+    end
+    if type(frame.GetZoomLevels) == "function" then
+      local ok, v = pcall(frame.GetZoomLevels, frame)
+      v = ok and plain(v) or nil
+      if v and v >= 0 then m.levels = v end
+    end
+    if type(frame.IsVisible) == "function" then
+      local ok, v = pcall(frame.IsVisible, frame)
+      if ok and not secret(v) then m.shown = v == true end
+    end
+  end
+  if C_Minimap and C_Minimap.GetViewRadius then
+    local ok, v = pcall(C_Minimap.GetViewRadius)
+    v = ok and plain(v) or nil
+    if v and v > 0 then m.reach = v end
+  end
+  -- whether it turns with you: the game's own setting (and its say on whether that is heeded here)
+  local setting = (C_CVar and C_CVar.GetCVar) or GetCVar
+  if setting then
+    local ok, v = pcall(setting, "rotateMinimap")
+    v = ok and text(v) or nil
+    if v then m.turns = v == "1" end
+  end
+  if m.turns and C_Minimap and C_Minimap.IsRotateMinimapIgnored then
+    local ok, v = pcall(C_Minimap.IsRotateMinimapIgnored)
+    if ok and yes(v) then m.turns = false end
+  end
+  -- its shape: round, as the game draws it - unless an addon that reshapes it says otherwise (the way such addons say it)
+  m.round = true
+  if type(GetMinimapShape) == "function" then
+    local ok, v = pcall(GetMinimapShape)
+    v = ok and text(v) or nil
+    if v then m.round = v == "ROUND" end
+  end
+  local said = 128 + 8 + (m.known and 1 or 0) + (m.turns and 2 or 0) + (m.round and 4 or 0) + (m.shown and 16 or 0) + (m.zoom >= 0 and 32 or 0) + (m.turns ~= nil and 64 or 0)
+  return strchar(said) .. Byte2(m.cx * 8) .. Byte2(m.cy * 8) .. Byte2(m.hw * 32) .. Byte2(m.hh * 32)
+    .. strchar(clamp(m.zoom >= 0 and m.zoom or 0, 15) + clamp(m.levels, 15) * 16) .. Byte2(m.reach * 16) .. Byte2(m.sw) .. Byte2(m.sh) .. strchar(0, 1)
+end
+
 -- ---- who you are talking to ---------------------------------------------------------------------
 -- When a window opens that only an NPC (or a quest object) opens - a quest, gossip, a shop, a
 -- trainer, a flight map, the bank - you are standing next to it. Its id goes to the map, which
@@ -771,10 +874,21 @@ local function Fought(looting)
     if not (GetNumLootItems and GetLootSourceInfo) then return nil end
     local ok, n = pcall(GetNumLootItems)
     n = ok and plain(n) or 0
+    local thing = nil
     for slot = 1, n do
       local ok2, guid = pcall(GetLootSourceInfo, slot)
       local id, object = WhoIs(nil, ok2 and guid or nil)
       if id and object == 0 then return id end
+      if id and object == 1 and not thing then thing = id end
+    end
+    -- What you are taking things out of is no creature but an object: a chest, a herb, a vein of
+    -- ore. You are standing at it, as surely as at someone you talk to: it is said as an object
+    -- whose window you opened (the second answer: 1). Not what you fish out of the water: that
+    -- comes out of your own float, which is an object of yours and stands nowhere.
+    if thing then
+      local okF, fishing = false, false
+      if IsFishingLoot then okF, fishing = pcall(IsFishingLoot) end
+      if not (okF and yes(fishing)) then return thing, 1 end
     end
     return nil
   end
@@ -797,7 +911,9 @@ end
 
 local function Talking()
   -- (what you are looting first: the game may well call that "npc" too, and it is no talk)
-  local id, object = Fought(true), 2
+  -- (a creature you loot is one you fought: 2; an object you take things out of is said as an object: 1)
+  local id, looted = Fought(true)
+  local object = looted or 2
   if not id then
     id, object = WhoIs("npc")
     if not id then id, object = WhoIs("questnpc") end
@@ -994,6 +1110,11 @@ local function BuildMessages()
     if ok and type(reports) == "table" then
       for _, r in ipairs(reports) do list[#list + 1] = { T_TALK, r[1], r[2] } end
     end
+  end
+  -- where the game's minimap is on the screen (the 3D map finds you on it inside a dungeon: MinimapReport)
+  if shared.MinimapReport then
+    local ok, bytes = shared.Try("minimap report", shared.MinimapReport)
+    if ok and type(bytes) == "string" then list[#list + 1] = { T_TALK, 9, bytes } end
   end
   -- the NPC you just met, or the creature you just fought (and how many seconds ago), repeated for half a minute so that it is sure to arrive
   if talk.id > 0 and GetTime() - talk.at < 30 then
@@ -1360,6 +1481,35 @@ function shared.SetHearth(use)
   if shared.HearthChanged then shared.Try("hearth changed", shared.HearthChanged) end
 end
 
+-- The game's combat log. The game can write down every blow of a fight in a file made for
+-- programs outside it to read (Logs\WoWCombatLog-....txt): /combatlog switches that on and
+-- off, and it is off again at every login. The 3D map reads the file for what it says of the
+-- creatures you fight - where each was, which level, how much health - and, inside a dungeon,
+-- for where you are, which the game tells an addon nowhere. So the addon asks the game to keep
+-- the log each time you enter the world, unless you have said not to (the options, or
+-- /atlas fights). It never switches off a log that it did not switch on itself.
+function shared.FightsKept() return not (type(AzerothAtlasDB) == "table" and AzerothAtlasDB.noFights == true) end
+function shared.KeepFights()
+  if not shared.FightsKept() or type(LoggingCombat) ~= "function" then return end
+  local ok, on = pcall(LoggingCombat)
+  if not ok or yes(on) then return end
+  if pcall(LoggingCombat, true) then
+    shared.fightsByUs = true
+    shared.Log("the game's combat log: switched on, for the 3D map")
+  end
+end
+function shared.SetFights(keep)
+  if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end
+  AzerothAtlasDB.noFights = (not keep) or nil
+  if keep then
+    shared.KeepFights()
+  elseif shared.fightsByUs and type(LoggingCombat) == "function" then
+    pcall(LoggingCombat, false)
+    shared.fightsByUs = nil
+    shared.Log("the game's combat log: switched off again")
+  end
+end
+
 -- What else you could be heading for (for Route.lua, which asks for the routes there when it
 -- changes): the places said to the 3D map, your party, and which edition of your quest log this is.
 function shared.Heads() return heads, party, quests.logGen end
@@ -1441,7 +1591,12 @@ strip:SetScript("OnEvent", function(_, event)
     messagesAt = -100
     return
   end
-  if event == "PLAYER_ENTERING_WORLD" then quests.dirty = true; quests.retry = 3; shared.Log("entering the world (a login, a /reload or a loading screen)") end
+  if event == "PLAYER_ENTERING_WORLD" then
+    quests.dirty = true; quests.retry = 3
+    shared.Log("entering the world (a login, a /reload or a loading screen)")
+    -- (the game's combat log is off again at every login: asked for anew, where you let it)
+    shared.Try("combat log", shared.KeepFights)
+  end
   if AzerothAtlasDB then Apply() end
 end)
 
@@ -1479,6 +1634,22 @@ SlashCmdList["AZEROTHATLAS"] = function(msg)
     return
   elseif word == "options" or word == "config" or word == "settings" then
     if not (shared.OpenOptions and shared.OpenOptions()) then say("the options are under Esc > Options > AddOns > Azeroth Atlas.") end
+    return
+  elseif word == "fights" or word == "combatlog" then
+    -- /atlas fights: whether the game is asked to keep its combat log for the 3D map
+    shared.SetFights(not shared.FightsKept())
+    say(shared.FightsKept() and "the game is asked to keep its combat log (Logs\\WoWCombatLog...txt): the 3D map reads it for the creatures you fight, and for where you are inside a dungeon."
+      or "the game is no longer asked to keep its combat log. (/combatlog is the game's own switch for it.)")
+    return
+  end
+  if word == "met" then
+    -- /atlas met: how many creatures' level, health and side are noted for the 3D map (Met.lua)
+    if shared.MetSay then shared.MetSay() else say("this copy of the addon does not note who you meet: update it from the 3D map, and start the game again.") end
+    return
+  end
+  if word == "learned" then
+    -- /atlas learned: how many vendors, trainers and quests are noted for the 3D map (Learned.lua)
+    if shared.LearnedSay then shared.LearnedSay() else say("this copy of the addon does not note vendors, trainers and quest pins: update it from the 3D map, and start the game again.") end
     return
   end
   if word == "measure" then

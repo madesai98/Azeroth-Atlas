@@ -20,7 +20,7 @@
 //     a neutral port, and the odd quest villain in a capital.
 import { packContainer, writeFileAtomic } from '../container.js';
 
-export const CREATURES_VERSION = 9;
+export const CREATURES_VERSION = 10; // (10: a side the Atlas database knows where no faction is recorded - reactions())
 // What extract.js adds to world.json from QuestieDB and the map's own area grids: the area each
 // innkeeper stands in, the dungeons' doors. Raise it when that changes: the page then offers
 // "Update map", which writes world.json anew and builds nothing else again.
@@ -32,16 +32,26 @@ const ALLIANCE = 1 | 2, HORDE = 1 | 4;
 const FRIENDLY = 0, NEUTRAL = 1, HOSTILE = 2;
 const WIDE = 5; // level span from which a recorded range is not trusted
 
-/** @returns [reactionToAlliance, reactionToHorde, true if no side is recorded for it (so neither reaction is known)] */
+/**
+ * @returns [reactionToAlliance, reactionToHorde, true if a side is not recorded for it (so that
+ *   reaction is a guess), which sides ARE known: 1 the Alliance's, 2 the Horde's, 3 both]
+ */
 export function reactions(npc, templates) {
   const t = npc.faction ? templates?.get(npc.faction) : null;
   if (t) {
     const to = (mask) => (t.enemy & mask ? HOSTILE : t.friend & mask ? FRIENDLY : NEUTRAL);
-    return [to(ALLIANCE), to(HORDE), false];
+    return [to(ALLIANCE), to(HORDE), false, 3];
   }
-  // No faction data: all that is known is which side (if any) it is marked friendly to.
+  // No faction data. The Atlas database may still know how it stands towards a side (npc.react,
+  // laid over by atlas.js: the game's combat log said so of a creature somebody fought, or
+  // Wowhead does): [towards the Alliance, towards the Horde] as 1 friendly, 0 neutral, -1
+  // hostile, -2 not known. A side it knows is known. One it does not is guessed, as it always
+  // was, from which side (if any) the creature is marked friendly to.
   const f = npc.friendly ?? '';
-  return [f.includes('A') ? FRIENDLY : HOSTILE, f.includes('H') ? FRIENDLY : HOSTILE, true];
+  const said = (v) => (v === 1 ? FRIENDLY : v === 0 ? NEUTRAL : v === -1 ? HOSTILE : null);
+  const a = said(npc.react?.[0]), h = said(npc.react?.[1]);
+  const known = (a !== null ? 1 : 0) | (h !== null ? 2 : 0);
+  return [a ?? (f.includes('A') ? FRIENDLY : HOSTILE), h ?? (f.includes('H') ? FRIENDLY : HOSTILE), known !== 3, known];
 }
 
 const TOWN_REACH = 40; // yards
@@ -193,7 +203,8 @@ export function placeCreatures(npcs, zones, templates, places = null) {
         i = m.creatures.length;
         m.index.set(key, i);
         const c = { id: npc.id, name: npc.name, min: npc.minLevel, max: npc.maxLevel, rank: npc.rank, a: react[0], h: react[1] };
-        if (unsure) c.u = 1;
+        // (u: a side of it is not recorded; ks: the sides that are, where one is - 1 the Alliance's, 2 the Horde's)
+        if (unsure) { c.u = 1; if (react[3]) c.ks = react[3]; }
         if (town) c.t = town;
         if (wide) {
           const lv = Math.max(npc.minLevel, Math.min(npc.maxLevel, zoneLevel.get(zoneId) ?? npc.minLevel));

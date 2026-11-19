@@ -18,6 +18,21 @@
 //
 // (5, "seen in game", is added by the map itself when you talk to someone: see viewer/js/npcs.js.)
 //
+// The Atlas database (laid over QuestieDB before this runs: extractor/atlas.js) adds two more
+// kinds of spot:
+//
+//   7  seen in game by another player   someone stood beside them and talked, on a copy of the
+//                                       map somewhere: the spot and the height are that
+//                                       player's. Laid over the rest once heights are settled,
+//                                       as the page lays your own sightings over them: it moves
+//                                       the nearest spot of the same NPC, or adds one - and is
+//                                       not believed where it contradicts the reference database
+//                                       by more than a storey or two.
+//      where a fight with it began      from the game's combat log: a spot with no height, like
+//                                       QuestieDB's, which gets one the same way (4 to 0 above).
+//                                       It is the only kind of spot there is inside a dungeon
+//                                       that is new to this game.
+//
 // Dungeons, raids and the other maps you enter through a door are a different case: QuestieDB
 // lists who is in them but not where (a dungeon has no zone map to give a spot on). On a map
 // where QuestieDB places nothing, the reference database's spawns are used outright, for the
@@ -38,11 +53,14 @@
 // That is right for about 91% of people and 97% of creatures; where there are several levels,
 // for about 83% and 81%.
 import { packContainer, writeFileAtomic } from '../container.js';
+import { objectNeeds } from '../world.js';
 import { reactions } from './creatures.js';
 
-export const NPCS_VERSION = 7;
+export const NPCS_VERSION = 11; // (11: another player's sighting leaves alone whom the reference database places; 10: what a vendor sells, how much a trainer teaches, the game's own quest pins; 8: what the Atlas database adds - atlas.js - and the game's own list of bosses; 9: what an object asks of whoever opens it)
 export const NSEC = { META: 1, SPAWNS: 2, OWNER: 3, SOURCE: 4 };
-export const HEIGHT = { NONE: 0, GUESS: 1, ONLY: 2, REFERENCE: 3, AGREED: 4 };
+// (5 and 6 are the page's own: someone you talked to, a creature you fought - viewer/js/npcs.js)
+export const HEIGHT = { NONE: 0, GUESS: 1, ONLY: 2, REFERENCE: 3, AGREED: 4, SHARED: 7 };
+const HEIGHTS = 8; // how many ways a height can be known, counting the page's own
 
 const TILE = 1600 / 3;
 const MATCH = 5;    // yards: a reference spawn of the same creature this close to the spot is the same spawn
@@ -51,12 +69,17 @@ const BURIED = 4;   // yards: a reference height this far under everything there
 const STOREY = 2.5; // yards apart: two different levels
 const NEAR = 60;    // yards: how far around a spot "the people around here" are looked for
 const LEVEL = 6;    // yards: a floor this close to their height is on their level
+const FOUGHT_NEAR = 30; // yards: a fight that began this close to where a creature is known to be says nothing new of where it is
+const SEEN_SAME = 40;   // yards: the spot of an NPC this close to where a player met it is the one they met (as on the page)
+const SEEN_LIFT = 60;   // ...nor one that lifts anybody this far
 
 /**
  * Every creature and object with somewhere to be, per map, as spots on the map. A spot from
  * QuestieDB has no height yet; one from the reference database (see above) comes with its own.
- * @param extra  { areas (world.json's), ref (from readReference()), mapIds: Set of the maps that were extracted } or null
- * @returns Map<mapId, { entries: [...], points: [{ e (index into entries), x, y, z? }], unplaced: string[] }>
+ * @param extra  { areas (world.json's), ref (from readReference(), or null), mapIds: Set of the maps that were extracted,
+ *                 bosses: { [mapId]: [name, ...] } (the game's own list, world.json's),
+ *                 opens (world.json's: the game's locks and what professions work at) } or null
+ * @returns Map<mapId, { entries: [...], points: [{ e (index into entries), x, y, z? }], seen: [{ e, x, y, z }], unplaced: string[], bosses: string[] }>
  */
 export function placeNpcs(db, zones, templates, extra = null) {
   // Questie zone id == the area id of a zone map. Prefer the plain zone map when several share it.
@@ -67,7 +90,7 @@ export function placeNpcs(db, zones, templates, extra = null) {
   const maps = new Map();
   const bucket = (mapId) => {
     let m = maps.get(mapId);
-    if (!m) maps.set(mapId, (m = { entries: [], index: new Map(), points: [], unplaced: [] }));
+    if (!m) maps.set(mapId, (m = { entries: [], index: new Map(), points: [], seen: [], unplaced: [], bosses: [] }));
     return m;
   };
   const place = (thing, key, make) => {
@@ -86,20 +109,38 @@ export function placeNpcs(db, zones, templates, extra = null) {
   const npcEntry = (npc) => {
     const r = reactions(npc, templates);
     const e = { id: npc.id, n: npc.name, a: r[0], h: r[1] };
-    if (r[2]) e.u = 1; // which side it is on is not recorded: a and h are a guess from who it is marked friendly to
+    // which side it is on is not recorded: a and h are a guess from who it is marked friendly to
+    // (ks: the sides that ARE known all the same, 1 the Alliance's, 2 the Horde's - reactions())
+    if (r[2]) { e.u = 1; if (r[3]) e.ks = r[3]; }
     if (npc.subName) e.s = npc.subName;
     if (npc.maxLevel > 0) e.l = [npc.minLevel || npc.maxLevel, npc.maxLevel];
     if (npc.rank) e.r = npc.rank;
-    // (the kind of thing it is - beast, humanoid, undead...: from the reference database, for the creatures it has)
-    const kind = extra?.ref?.templates?.get(npc.id)?.type;
+    // (the kind of thing it is - beast, humanoid, undead...: as the game's own cache or Wowhead has it
+    // (the Atlas database), else from the reference database, for the creatures it has)
+    const kind = npc.type ?? extra?.ref?.templates?.get(npc.id)?.type;
     if (kind >= 1 && kind <= 9) e.ct = kind;
+    // (its health as fights measured it, at its lowest and highest level)
+    if (npc.hp?.[1] > 0) e.hp = npc.hp[0] === npc.hp[1] ? [npc.hp[1]] : [npc.hp[0], npc.hp[1]];
     if (npc.flags) e.f = npc.flags;
+    // (what it sells, as its window showed the players who noted it: [item, copper, name], the
+    // first forty; and how many things it teaches)
+    if (npc.sells?.length) { e.sl = npc.sells.slice(0, 40).map(([item, copper]) => [item, copper, itemName(item)]); if (npc.sells.length > 40) e.sm = npc.sells.length - 40; }
+    if (npc.teaches?.length) e.tc = npc.teaches.length;
     if (npc.questStarts.length) e.qs = npc.questStarts;
     if (npc.questEnds.length) e.qe = npc.questEnds;
     return e;
   };
+  const itemName = (id) => { try { const n = db.item?.(id)?.name; return typeof n === 'string' && n && n !== `Item ${id}` ? n : ''; } catch { return ''; } };
   const objEntry = (obj) => {
     const e = { id: obj.id, k: 1, n: obj.name };
+    // (what it asks of whoever would open it - a skill, a key - and what it is to a profession:
+    // by the server's own word of the object where a game has met it, else the reference database's)
+    const kind = Array.isArray(obj.data) ? [obj.type, ...obj.data] : extra?.ref?.objectKinds?.get(obj.id);
+    if (kind && extra?.opens) {
+      const { need, spot } = objectNeeds(extra.opens, kind[0], kind.slice(1));
+      if (need) e.nd = need;
+      if (spot) e.fo = spot;
+    }
     if (obj.questStarts.length) e.qs = obj.questStarts;
     if (obj.questEnds.length) e.qe = obj.questEnds;
     return e;
@@ -107,6 +148,12 @@ export function placeNpcs(db, zones, templates, extra = null) {
   for (const npc of db.npcs) if (npc.spawns) place(npc, `n${npc.id}`, () => npcEntry(npc));
   for (const obj of db.objects) if (obj.spawns) place(obj, `o${obj.id}`, () => objEntry(obj));
 
+  const entryOn = (mapId, key, make) => {
+    const m = bucket(mapId);
+    let e = m.index.get(key);
+    if (e === undefined) { e = m.entries.length; m.index.set(key, e); m.entries.push(make()); }
+    return [m, e];
+  };
   if (extra?.ref) {
     // Maps QuestieDB places nothing on (dungeons, raids, the tram): the reference database's spawns.
     const own = new Set(maps.keys());
@@ -118,26 +165,64 @@ export function placeNpcs(db, zones, templates, extra = null) {
         for (let i = 0; i < rows.length; i += 4) {
           const mapId = rows[i];
           if (own.has(mapId) || !extra.mapIds.has(mapId)) continue;
-          const m = bucket(mapId), key = prefix + id;
-          let e = m.index.get(key);
-          if (e === undefined) { e = m.entries.length; m.index.set(key, e); m.entries.push(make(thing)); }
+          const [m, e] = entryOn(mapId, prefix + id, () => make(thing));
           m.points.push({ e, x: rows[i + 1], y: rows[i + 2], z: rows[i + 3] });
         }
       }
     };
     fill(extra.ref.creatures, db.npcs, 'n', npcEntry);
     fill(extra.ref.objects, db.objects, 'o', objEntry);
-    // Who QuestieDB lists somewhere without a spot, and neither source could place anywhere.
+  }
+  if (extra?.mapIds) {
+    // What the Atlas database adds (atlas.js). Where a fight with a creature began, by the
+    // game's combat log: a spot like QuestieDB's, with no height - unless the creature is
+    // already known to be within FOUGHT_NEAR yards of it, in which case it says nothing new
+    // (a fight begins where the creature was pulled from, not where its spawn point is).
+    for (const npc of db.npcs) {
+      for (const f of npc.flat ?? []) {
+        if (!extra.mapIds.has(f.map)) continue;
+        const [m, e] = entryOn(f.map, `n${npc.id}`, () => npcEntry(npc));
+        if (m.points.some((p) => p.e === e && Math.hypot(p.x - f.x, p.y - f.y) < FOUGHT_NEAR)) continue;
+        m.points.push({ e, x: f.x, y: f.y });
+      }
+    }
+    // Where players stood beside someone and talked: kept apart, and laid over the spots above
+    // once those have their heights (resolveHeights).
+    const sightings = (things, prefix, make) => {
+      for (const thing of things) {
+        for (const s of thing.seen ?? []) {
+          if (!extra.mapIds.has(s.map)) continue;
+          const [m, e] = entryOn(s.map, prefix + thing.id, () => make(thing));
+          m.seen.push({ e, x: s.x, y: s.y, z: s.z });
+        }
+      }
+    };
+    sightings(db.npcs, 'n', npcEntry);
+    sightings(db.objects, 'o', objEntry);
+    // Who is known to be on a map, and not where: QuestieDB lists them in a zone without a
+    // spot, or the database knows no more of them than their zone - and no source could place
+    // them anywhere. (Most are in dungeons: a dungeon has no zone map to give a spot on.)
     const placed = new Set();
     for (const m of maps.values()) for (const key of m.index.keys()) placed.add(key);
     for (const npc of db.npcs) {
-      if (!npc.spawns || placed.has(`n${npc.id}`)) continue;
-      for (const zoneId of npc.spawns.keys()) {
-        const mapId = extra.areas[zoneId]?.m;
+      if (placed.has(`n${npc.id}`)) continue;
+      for (const zoneId of [...(npc.spawns?.keys() ?? []), ...(npc.zone ? [npc.zone] : [])]) {
+        const mapId = extra.areas?.[zoneId]?.m;
         if (mapId === undefined || !extra.mapIds.has(mapId)) continue;
+        // (a zone of the open world lists everything ever filed under it: only where a place is one building, or QuestieDB itself says "here, somewhere")
+        if (!npc.spawns?.has(zoneId) && !extra.inside?.has(mapId)) continue;
         bucket(mapId).unplaced.push(npc.name);
         break;
       }
+    }
+    // The game's own list of the bosses of each dungeon and raid (its table DungeonEncounter),
+    // in the order it has them: so a map can say who they are, placed or not.
+    for (const [mapId, names] of Object.entries(extra.bosses ?? {})) {
+      if (!extra.mapIds.has(+mapId) || !names.length) continue;
+      const m = bucket(+mapId);
+      m.bosses = names;
+      const is = new Set(names);
+      for (const e of m.entries) if (!e.k && is.has(e.n)) e.b = 1;
     }
   }
   for (const m of maps.values()) { delete m.index; m.unplaced = [...new Set(m.unplaced)].sort(); }
@@ -185,7 +270,10 @@ export function resolveHeights(m, mapId, nav, ref) {
     const pa = m.points[a], pb = m.points[b];
     return (Math.floor(pa.y / TILE) - Math.floor(pb.y / TILE)) || (Math.floor(pa.x / TILE) - Math.floor(pb.x / TILE));
   });
-  const spawns = new Float32Array(n * 3), owner = new Uint32Array(n), source = new Uint8Array(n), counts = [0, 0, 0, 0, 0];
+  // (room for the sightings that land where the database has nobody: each may add a spot)
+  const room = n + (m.seen?.length ?? 0);
+  let spawns = new Float32Array(room * 3), owner = new Uint32Array(room), source = new Uint8Array(room);
+  const counts = new Array(HEIGHTS).fill(0);
   // The stretches of walkable ground the reference database has someone standing on.
   const lived = new Set();
   const bears = (solid, z) => {
@@ -259,12 +347,42 @@ export function resolveHeights(m, mapId, nav, ref) {
     source[k] = src;
     counts[src]++;
   }
+  // Where players stood beside someone and talked, as the Atlas database has it from every copy:
+  // laid over what is there as the page lays your own sightings over it. The nearest spot of
+  // the same NPC within SEEN_SAME yards is the one that was met, and takes the sighting's place
+  // and height; where there is none, the sighting is a spot of its own. A sighting's height is
+  // the height of the player who made it, as that player's map had it - and a map can be wrong
+  // about that. So someone the reference database places stays as placed: the reference is
+  // surer of where they stand than any player's map was of where the player did, and the page
+  // counts on that when it puts YOUR height right by theirs. And a sighting that lifts anybody
+  // sixty yards is left out.
+  let count = n;
+  for (const s of m.seen ?? []) {
+    let best = -1, bestD = SEEN_SAME;
+    for (let k = 0; k < count; k++) {
+      if (owner[k] !== s.e) continue;
+      const d = Math.hypot(spawns[k * 3] - s.x, spawns[k * 3 + 1] - s.y);
+      if (d < bestD) { bestD = d; best = k; }
+    }
+    if (best >= 0) {
+      const was = spawns[best * 3 + 2];
+      if (source[best] === HEIGHT.REFERENCE || source[best] === HEIGHT.AGREED) continue;
+      if (Number.isFinite(was) && s.z - was > SEEN_LIFT) continue;
+      counts[source[best]]--;
+    } else best = count++;
+    spawns[best * 3] = s.x; spawns[best * 3 + 1] = s.y; spawns[best * 3 + 2] = s.z;
+    owner[best] = s.e; source[best] = HEIGHT.SHARED;
+    counts[HEIGHT.SHARED]++;
+  }
+  if (count < room) { spawns = spawns.slice(0, count * 3); owner = owner.slice(0, count); source = source.slice(0, count); }
   return { spawns, owner, source, counts };
 }
 
 /** Write one map's file. Returns a short summary for the manifest. */
 export function writeNpcs(out, m, h, info) {
   const meta = { source: info.source, reference: info.reference, entries: m.entries, unplaced: m.unplaced.slice(0, 300) };
+  // (the bosses of the place, by the game's own list and in its order)
+  if (m.bosses?.length) meta.bosses = m.bosses;
   writeFileAtomic(out, packContainer('WFP1', NPCS_VERSION, [
     { id: NSEC.META, data: Buffer.from(JSON.stringify(meta)) },
     { id: NSEC.SPAWNS, data: h.spawns },
@@ -327,6 +445,9 @@ export function buildQuests(db, zones, ref = null) {
     if (z.area && !zoneByArea.has(z.area)) zoneByArea.set(z.area, z);
   }
   const r1 = (v) => Math.round(v * 10) / 10;
+  // (the game's maps by their own numbers, for its quest pins: a zone's map before a continent's)
+  const zoneByUi = new Map();
+  for (const z of [...zones].sort((a, b) => b.type - a.type || a.order - b.order)) if (z.uiMap && Array.isArray(z.region) && !zoneByUi.has(z.uiMap)) zoneByUi.set(z.uiMap, z);
   const first = (spawns) => {
     for (const [zoneId, points] of spawns ?? []) {
       const z = zoneByArea.get(zoneId);
@@ -348,12 +469,24 @@ export function buildQuests(db, zones, ref = null) {
     if (n.rank) m.rk = n.rank;
     const t = ref?.templates.get(id);
     if (t) { if (t.hp[1] > 0) m.hp = Math.round((t.hp[0] + t.hp[1]) / 2); if (t.type >= 1 && t.type <= 9) m.ct = t.type; }
+    // (its health as fights in this game measured it, and its kind as the game says it, where the Atlas database has them: atlas.js)
+    if (n.hp?.[1] > 0) m.hp = Math.round((n.hp[0] + n.hp[1]) / 2);
+    if (n.type >= 1 && n.type <= 9) m.ct = n.type;
     const back = ref?.respawn.get(id);
     if (back > 0) m.rs = back;
     mobs[id] = m;
   };
-  const needNpc = (id) => { const n = npcById.get(id); if (n && !npcs[id]) npcs[id] = [n.name, ...(first(n.spawns) ?? [])]; };
-  const needObj = (id) => { const o = objById.get(id); if (o && !objects[id]) objects[id] = [o.name, ...(first(o.spawns) ?? [])]; };
+  // Where one of them is, for someone who has no spot on a zone's map: where a player stood
+  // beside them, where a fight with them began, or where the reference database has them (the
+  // people inside a dungeon have no other place than these).
+  const elsewhere = (thing, table) => {
+    const p = thing.seen?.[0] ?? thing.flat?.[0];
+    if (p) return [p.map, r1(p.x), r1(p.y)];
+    const rows = table?.get(thing.id);
+    return rows?.length >= 4 ? [rows[0], r1(rows[1]), r1(rows[2])] : null;
+  };
+  const needNpc = (id) => { const n = npcById.get(id); if (n && !npcs[id]) npcs[id] = [n.name, ...(first(n.spawns) ?? elsewhere(n, ref?.creatures) ?? [])]; };
+  const needObj = (id) => { const o = objById.get(id); if (o && !objects[id]) objects[id] = [o.name, ...(first(o.spawns) ?? elsewhere(o, ref?.objects) ?? [])]; };
   const needItem = (id) => {
     if (items[id]) return;
     const it = db.item(id);
@@ -403,15 +536,17 @@ export function buildQuests(db, zones, ref = null) {
     if (q.objectives.creatures.length) { o.oc = q.objectives.creatures; o.oc.forEach(needNpc); o.oc.forEach(needMob); }
     if (q.objectives.killCredit.length) { o.ok = q.objectives.killCredit; o.ok.forEach(needNpc); o.ok.forEach(needMob); }
     // how many of each thing it asks for, and what kind of quest it is (the reference database's, for the quests it has)
+    // (...and where it does not have the quest - one new to this game - what the Atlas database
+    // has of it: the counts as the game's own cache or Wowhead give them. atlas.js)
     const known = ref?.quests.get(q.id);
-    if (known) {
-      if (known.needs.length) {
-        o.nd = known.needs;
-        for (const [kind, id] of known.needs) { if (kind === 'i') needItem(id); else if (kind === 'o') needObj(id); else { needNpc(id); needMob(id); } }
-      }
-      if (known.type) o.ty = known.type;
-      if (known.limit) o.tl = known.limit;
+    const needs = known?.needs.length ? known.needs : q.needs ?? [];
+    if (needs.length) {
+      o.nd = needs;
+      for (const [kind, id] of needs) { if (kind === 'i') needItem(id); else if (kind === 'o') needObj(id); else { needNpc(id); needMob(id); } }
     }
+    const type = known?.type || q.type, limit = known?.limit || q.limit;
+    if (type) o.ty = type;
+    if (limit) o.tl = limit;
     if (q.objectives.objects.length) { o.oo = q.objectives.objects; o.oo.forEach(needObj); }
     if (q.objectives.items.length) { o.oi = q.objectives.items; o.oi.forEach(needItem); }
     if (q.trigger) {
@@ -422,6 +557,25 @@ export function buildQuests(db, zones, ref = null) {
         for (const p of points) if (Array.isArray(p) && p[0] >= 0 && p[1] >= 0) spots.push([z.map, r1(z.region[2] - (p[1] / 100) * (z.region[2] - z.region[0])), r1(z.region[3] - (p[0] / 100) * (z.region[3] - z.region[1]))]);
       }
       if (spots.length) o.tr = { t: q.trigger.text, at: spots };
+    }
+    // Where the game's own map puts the quest (the addon's notes of its pins: where it starts, an
+    // objective, where it is handed in), as places in the world: { s, o, e: [[map, x, y], ...] }.
+    // For a quest nothing else places, this is all there is to go by.
+    if (q.pins) {
+      const gp = {};
+      for (const what of ['s', 'o', 'e']) {
+        const spots = [];
+        for (const [key, text] of Object.entries(q.pins[what] ?? {})) {
+          const z = key[0] === 'u' ? zoneByUi.get(Number(key.slice(1))) : null;
+          if (!z || typeof text !== 'string') continue;
+          for (const pin of text.split(' ')) {
+            const [across, down] = pin.split(',').map(Number);
+            if ([across, down].every((v) => Number.isFinite(v) && v >= 0 && v <= 100)) spots.push([z.map, r1(z.region[2] - (down / 100) * (z.region[2] - z.region[0])), r1(z.region[3] - (across / 100) * (z.region[3] - z.region[1]))]);
+          }
+        }
+        if (spots.length) gp[what] = spots;
+      }
+      if (Object.keys(gp).length) o.gp = gp;
     }
     quests[q.id] = o;
   }

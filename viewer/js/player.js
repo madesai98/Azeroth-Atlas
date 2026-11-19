@@ -2,6 +2,11 @@
 // Data comes from the local server (server/tracker.js), which reads the AzerothAtlas addon's
 // coded strip from the game window. How high you are is worked out in height.js.
 //
+// Inside a dungeon the strip says which dungeon and nothing of where: the game hides it. There
+// the server reads your place off the game's minimap (server/minimap.js), a few times a second,
+// and - failing that - has the place of your last blow from the game's combat log
+// (server/combatlog.js). Either comes as state.placed, and is taken as where you are (receive).
+//
 // The following camera is here too. With "Follow me" on, the camera is tied to your character:
 // it looks at them from a distance, a tilt and a compass direction of your choosing (the "rig"),
 // and goes where they go. You may swing it around them and zoom; moving the map from under them
@@ -21,6 +26,10 @@ const LOOK_MS = 250;         // how often the kind of place is looked at
 export const ZOOM_DEFAULT = { in: 35, town: 110, out: 300 }; // yards from you, by the kind of place
 
 const INSIDE_KEY = 'wfmap.inside';     // the dungeon you were last in, kept across reloads of the page
+const PLACED_FOR = 15000;             // ms: how long where the combat log or the minimap last had you counts as where you are
+const PLACED_STALE = 3000;            // ...and after this long with no new place from the minimap, the figure is drawn as one last seen there
+const STEP_MOST = 700;                // ms: from one place read off the minimap to the next, at most (longer: no gliding between them)
+const STEP_FAR = 14;                  // yards: ...and no further apart than this
 const INSIDE_FOR = 3 * 3600 * 1000;    // ...for this long: a ghost does not wait longer than that
 
 export class PlayerLink {
@@ -45,6 +54,8 @@ export class PlayerLink {
     // the dungeon you were last in while alive or dead in it ({ map, at }), and - dead outside it - the dungeon your body is in (see receive)
     this.inside = null;
     this.bodyIn = null;
+    // the last two places read off the minimap, for gliding from one to the next (see #glide): { from, to, at, span }
+    this.walk = null;
     try { const s = JSON.parse(localStorage.getItem(INSIDE_KEY)); if (s && Number.isInteger(s.map) && Date.now() - s.at < INSIDE_FOR) this.inside = s; } catch { /* nothing kept */ }
   }
 
@@ -84,8 +95,25 @@ export class PlayerLink {
         const z = this.app.world?.zones.find((q) => q.uiMap === p.zone);
         if (z) this.me = { map: z.map, x: z.region[2] - p.y * (z.region[2] - z.region[0]), y: z.region[3] - p.x * (z.region[3] - z.region[1]), z: null };
       }
+      // Inside a dungeon the game tells the addon which dungeon and nothing of where. Something
+      // else may say where (state.placed, from the server). The game's minimap does, all the
+      // time: the server finds its picture on the dungeon's plan a few times a second
+      // (server/minimap.js) - that is where you are, as surely as what the strip says outdoors.
+      // And the game's own combat log does, with every blow of yours (server/combatlog.js): where
+      // you WERE at that blow, shown while the minimap has nothing to say. Either is only taken
+      // while it is news.
+      let placedFacing = null;
+      const at = state.placed;
+      if (!this.me && p.inInstance && at && at.map === p.map && Number.isFinite(at.x) && Number.isFinite(at.y) && Math.abs(Date.now() - at.t) < PLACED_FOR) {
+        this.me = { map: p.map, x: at.x, y: at.y, z: null, placed: at.from ?? 'log', placedAt: at.t };
+        placedFacing = Number.isFinite(at.facing) ? at.facing : null;
+        // (from the minimap: the heights the rooms you may be in span - which floor, where two lie over each other)
+        if (Array.isArray(at.band) && at.band.length === 2 && at.band.every(Number.isFinite)) this.me.band = at.band;
+        if (this.me.placed === 'minimap') this.#stepped(at);
+      } else if (!p.inInstance) this.walk = null;
       if (this.me) {
-        this.me.heading = p.facing === null ? null : (360 - (p.facing * 180) / Math.PI) % 360;
+        const facing = p.facing ?? placedFacing;
+        this.me.heading = facing === null || facing === undefined ? null : (360 - (facing * 180) / Math.PI) % 360;
         this.me.indoors = !!p.indoors;
         this.me.taxi = !!p.taxi;
         this.me.zone = p.zone ?? 0; // the game's own map of where you are (a zone's, or a city's)
@@ -103,7 +131,8 @@ export class PlayerLink {
         this.me.descend = p.descend ?? null;
         this.me.speed = p.speed ?? null;
         this.me.place = p.place ?? null;
-        this.me.t = p.t ?? null;
+        // (a place read off the minimap has its own moment: the strip has said the same thing all the while)
+        this.me.t = this.me.placed === 'minimap' ? this.me.placedAt : p.t ?? null;
         // (and your height as the game measured it, when it has: how far above or below two places of its map you are)
         this.me.fix = p.fix ?? null;
         this.height.reading(this.me);
@@ -150,6 +179,37 @@ export class PlayerLink {
     // following - see main.js - so while it is on, this is always wanted.)
     if (this.live && p && this.follow && this.app.scene && p.map !== this.app.scene.map.id) this.#switchMap(p.map);
     this.onChange();
+  }
+
+  /**
+   * A place read off the minimap has come. They come four or five a second, a yard or two apart
+   * at a run: shown each as it came, the figure would go in jumps. So it glides from the one
+   * before to this one in the time that lay between them - a quarter of a second behind you, and
+   * smoothly. (Not across a gap: after a pause, or a leap, it is simply where the new one says.)
+   */
+  #stepped(at) {
+    const w = this.walk;
+    if (w && w.t === at.t) return; // (the same place again: the link says other things in between)
+    const now = performance.now();
+    const to = [at.x, at.y];
+    const span = w ? at.t - w.t : Infinity;
+    const near = w && span > 0 && span <= STEP_MOST && Math.hypot(to[0] - w.to[0], to[1] - w.to[1]) <= STEP_FAR;
+    // (from where the glide had got to, so that a place that comes early does not jerk it back)
+    this.walk = { from: near ? this.#glide(now) ?? w.to : to, to, at: now, span: near ? span : 0, t: at.t };
+  }
+
+  /** Where the glide from the last place read off the minimap to the newest has got to: [x, y] - or null: no such places. */
+  #glide(now) {
+    const w = this.walk;
+    if (!w) return null;
+    const u = w.span > 0 ? clamp((now - w.at) / w.span, 0, 1) : 1;
+    return [w.from[0] + (w.to[0] - w.from[0]) * u, w.from[1] + (w.to[1] - w.from[1]) * u];
+  }
+
+  /** True while the place shown is one the minimap gave a while ago and nothing has come since (drawn as last seen there). */
+  get waning() {
+    const me = this.me;
+    return !!me && me.placed === 'minimap' && Date.now() - me.placedAt > PLACED_STALE;
   }
 
   async #switchMap(id) {
@@ -299,9 +359,12 @@ export class PlayerLink {
     const jumped = !this.shown || Math.hypot(me.x - this.shown[0], me.y - this.shown[1]) > 120;
     if (jumped) this.height.reset(); // first fix or a teleport: no way in between to go by
     const target = [me.x, me.y, this.height.update(me)];
+    // (read off the minimap: on the way from the place before to this one - #stepped)
+    const glide = me.placed === 'minimap' && !jumped ? this.#glide(now) : null;
+    if (glide) { target[0] = glide[0]; target[1] = glide[1]; }
     this.#fly(dt);
-    // (keep refreshing until the buildings here have loaded - and on a flight path, where wings are beating)
-    let moving = this.height.pending || !!this.flight;
+    // (keep refreshing until the buildings here have loaded - and on a flight path, where wings are beating - and while gliding)
+    let moving = this.height.pending || !!this.flight || (!!glide && this.walk.span > 0 && now - this.walk.at < this.walk.span);
     if (jumped) {
       // do not glide across the map
       const first = !this.shown;
@@ -340,7 +403,8 @@ export class PlayerLink {
     const s = this.state;
     if (this.shown && this.onThisMap) {
       // stale = last known position while the signal is lost (drawn greyed out)
-      out.player = { x: this.shown[0], y: this.shown[1], z: this.shown[2], heading: this.heading, dead: s.player.dead, stale: !this.live };
+      // (...or where the minimap last had you, some seconds ago: it shows nothing just now, or is covered)
+      out.player = { x: this.shown[0], y: this.shown[1], z: this.shown[2], heading: this.heading, dead: s.player.dead, stale: !this.live || this.waning };
       // on a flight path: drawn riding what flies your side's (figure.js), turned as it is
       if (this.flight && this.me?.taxi) out.player.flight = { ...this.flight, faction: s.player.faction };
     } else if (this.me && s.player) {
