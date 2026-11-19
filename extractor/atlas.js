@@ -32,6 +32,8 @@
 //   hp      [health at its lowest level, at its highest], measured in fights where it was
 //   seen    [{ map, x, y, z, n }]: where players stood beside it and talked (n: how many said so)
 //   flat    [{ map, x, y }]: where fights with it began, with no height (the map finds one)
+//   level   [{ map, x, y, z, n }]: a spot of the map's own for it, and the height of the level a
+//           player fought it on there (n: how many said so) - for where the map can only guess
 //   boss    1: the game's cache marks it a leader
 //
 // With no database fetched yet (a copy that has never been online, or has it switched off),
@@ -171,6 +173,9 @@ export function layOver(db, atlas, zones = null) {
     if (seen.length) { n.seen = seen; c.seen++; }
     const flat = spots(r.f, 2);
     if (flat.length) { n.flat = flat; c.fought++; }
+    // (which level it is on, where a player's fight settled what a map could only guess)
+    const level = spots(r.fz, 3);
+    if (level.length) n.level = level;
     // (on a continent's own map only, and nothing else says where: about there)
     if (!n.flat && !n.seen && !(n.spawns && [...n.spawns.values()].some((list) => Array.isArray(list) && list.some((p) => p[0] >= 0 && p[1] >= 0)))) {
       const far = wide(r.at, zones);

@@ -98,7 +98,9 @@ setTimeout(applyDatabase, 8000).unref?.();
 // Where you are inside a dungeon, read off the game's minimap: the game hides it from the addon
 // there, and the minimap's picture shows it (see minimap.js). Only while a map page is open and
 // you are in a dungeon the map has a plan of. ("minimap": false in config.json switches it off)
-const minimap = cfg.minimap === false ? null : new Minimap(cfg, { tracker });
+// (what following you through a dungeon teaches of the dungeon itself - a door, a way its floors
+// do not have, how far off the minimap's place is - goes to the Atlas database with the rest)
+const minimap = cfg.minimap === false ? null : new Minimap(cfg, { tracker, onLearned: () => atlas.nudge() });
 if (minimap) { tracker.eyes = minimap; minimap.start(); }
 // What the game's own combat log says of the creatures you fight: where each was, its level and
 // health, how it stands towards your side - and, inside a dungeon, where you are (see combatlog.js).

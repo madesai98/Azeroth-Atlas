@@ -26,8 +26,9 @@ export const HEIGHT_HOW = [
   'seen in game: you talked to them here',
   'seen in game: you fought them on this level',
   'seen in game by another player, who talked to them here',
+  'fought on this level by another player',
 ];
-export const SEEN = 5, FOUGHT = 6, SHARED = 7;
+export const SEEN = 5, FOUGHT = 6, SHARED = 7, FOUGHT_SHARED = 8;
 
 /**
  * Is how this creature stands towards a side a guess? (side: 'a' or 'h'.) `u` marks one with a
@@ -274,8 +275,9 @@ export class NpcLayer {
     }
     let i = this.#nearest(e, r.x, r.y, SAME);
     if (vet && i >= 0 && Number.isFinite(d.z[i]) && ((d.src[i] >= 3 && d.src[i] <= 4 && Math.abs(r.z - d.z[i]) > 6) || r.z - d.z[i] > 60)) { this.rejected++; return -1; }
-    // (a fight adds nobody, and moves nobody the reference database places, or you or another player have talked to)
-    if (r.fight && (i < 0 || (d.src[i] >= 3 && d.src[i] !== FOUGHT))) return -1;
+    // (a fight adds nobody, and moves nobody the reference database places, or you or another player have talked to;
+    // a level another player's fight settled is no surer than one your own does)
+    if (r.fight && (i < 0 || (d.src[i] >= 3 && d.src[i] !== FOUGHT && d.src[i] !== FOUGHT_SHARED))) return -1;
     if (i < 0) {
       if (d.n >= d.owner.length) return -1;
       i = d.n++;
@@ -917,7 +919,7 @@ export class NpcLayer {
    * thing only: which LEVEL a creature is on, where that was the map's own guess.
    *  - Of its spawn points within FIGHT_REACH of you: if one is on your level already, nothing
    *    is touched (that may well be the one you fought).
-   *  - Otherwise the nearest of them whose height the map guessed (or an earlier fight set) is
+   *  - Otherwise the nearest of them whose height the map guessed (or an earlier fight set, yours or another player's) is
    *    put on the floor at its own spot that is on your level - if there is one there, and no
    *    other floor at that spot is nearly as near your height.
    *  - Nobody is added; nobody the reference database places, or you have talked to, is moved;
@@ -937,7 +939,7 @@ export class NpcLayer {
       const dist = Math.hypot(d.x[i] - m.x, d.y[i] - m.y);
       if (dist > FIGHT_REACH) continue;
       if (Number.isFinite(d.z[i]) && Math.abs(d.z[i] - mineZ) <= level(dist)) return;
-      if ((d.src[i] > 2 && d.src[i] !== FOUGHT) || dist >= pickD) continue;
+      if ((d.src[i] > 2 && d.src[i] !== FOUGHT && d.src[i] !== FOUGHT_SHARED) || dist >= pickD) continue;
       const floors = (tracker.standableAt?.(d.x[i], d.y[i]) ?? []).slice().sort((a, b) => Math.abs(a - mineZ) - Math.abs(b - mineZ));
       if (!floors.length || Math.abs(floors[0] - mineZ) > level(dist)) continue;
       if (floors.length > 1 && Math.abs(floors[1] - mineZ) - Math.abs(floors[0] - mineZ) < FIGHT_CLEAR) continue;

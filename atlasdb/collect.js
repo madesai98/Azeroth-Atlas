@@ -15,6 +15,13 @@
 //   - what the addon noted in windows the game opened for you: what a vendor sells and for how
 //     much, what a trainer teaches and asks, and where the game's own map puts the quests in
 //     your log (addon/AzerothAtlas/Learned.lua, read by learned.js; the same file again). Read only.
+//   - what following you through a dungeon taught the map of the dungeon itself (the game hides
+//     where you are in one, and the map reads it off the minimap: server/minimap.js): a door the
+//     map's data does not have, a way its floors do not have (a lift, a portal), and how far the
+//     minimap's place was from the combat log's, by the part of the dungeon (places.js; kept in
+//     <dataDir>/user/dungeon-*.json).
+//   - which level of a cave or a building a creature is on, where the map had only guessed and a
+//     fight of yours settled it (the fights among <dataDir>/user/npcs-seen.json).
 //   - the boats, zeppelins and tram: every sighting the addon has taken (your own rides, and
 //     what other players' addons passed on), which it keeps for this in the game's saved
 //     settings (<game>/WTF/Account/*/SavedVariables/AzerothAtlas.lua; see boats.js). Read only.
@@ -23,7 +30,9 @@
 // realm, your computer's name. A sighting of an NPC goes as "this NPC stands here"; where you
 // stood and when you saw it stay on your disk. Of a fight the same: "a creature of this kind was
 // here", "at this level it has this much health", "it is hostile to this side" - not who fought
-// it, when, how the fight went, or anything else of the log. A sighting of a boat goes as "a craft of this
+// it, when, how the fight went, or anything else of the log. Of a dungeon: "this door puts you
+// here", "from here one gets to there", "in this part of it the minimap's place is this far off" -
+// not when you were in it, how often you died there, or which way you went through it. A sighting of a boat goes as "a craft of this
 // line left this stop at this moment, by this way" (a ride, or which addon passed it on), with
 // no names, yours or anybody's: the moment is the whole of what it says, so it has to go, and
 // of a ride of your own it does say that this copy's player was aboard then. What is sent is
@@ -36,6 +45,7 @@ import { fromCache, hashOf } from './records.js';
 import { SERVER_TIME } from './rtdb.js';
 import { sightingsIn, metIn, pack, unpack } from './boats.js';
 import { learnedIn } from './learned.js';
+import { placeLines } from './places.js';
 
 const BATCH = 400 * 1024; // bytes of facts to one delivery
 const BOATS_AGE = 45 * 86400; // seconds: a boat sighting older than this is not sent (what was sent is remembered a little longer)
@@ -106,8 +116,9 @@ export async function gather(cfg, dataDir) {
     const r2 = (v) => Math.round(v * 100) / 100;
     for (const s of d.seen ?? []) {
       if (!Number.isInteger(s.map) || !Number.isInteger(s.id) || s.id <= 0 || ![s.x, s.y, s.z].every((v) => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) < 40000)) continue;
-      // (what a fight settled stays on this disk: a sighting sent is "this NPC stands here", from someone who stood beside them and talked)
-      if (s.fight) continue;
+      // (what a fight settled is another kind of fact - "a creature of this kind is on this level here" - and says
+      // less than a sighting, which is "this NPC stands here", from someone who stood beside them and talked)
+      if (s.fight) { if (!s.object) found.logged.push(`h,${s.id},${s.map},${r2(s.x)},${r2(s.y)},${r2(s.z)}`); continue; }
       found.seen.push([s.object ? 'o' : 'n', s.id, s.map, r2(s.x), r2(s.y), r2(s.z)]);
     }
   } catch { /* nothing seen yet */ }
@@ -130,6 +141,8 @@ export async function gather(cfg, dataDir) {
       for (const side of ['A', 'H']) if ([1, 0, -1].includes(by?.[side])) found.logged.push(`r,${+id},${side},${by[side]}`);
     }
   } catch { /* no fights read yet */ }
+  // what following you through the dungeons taught the map of them: doors, ways, checks (places.js)
+  try { for (const line of placeLines(dataDir)) found.logged.push(line); } catch { /* nothing noted yet */ }
   // the boats: what the addon has kept for sending, in every account's saved settings
   try {
     const accounts = path.join(cfg.installRoot, folder, 'WTF', 'Account');

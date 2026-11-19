@@ -1,7 +1,7 @@
 // The NPC panel: the switches for who is shown, the card for the NPC you click, and the line
 // that says what was learned when you talk to someone in the game. (The data and the drawing
 // are in npcs.js.)
-import { KINDS, GROUPS, RANKS, TYPES, HEIGHT_HOW, SEEN, FOUGHT, SHARED, iconStyle, kindIcon, searchText } from './npcs.js';
+import { KINDS, GROUPS, RANKS, TYPES, HEIGHT_HOW, SEEN, FOUGHT, SHARED, FOUGHT_SHARED, iconStyle, kindIcon, searchText } from './npcs.js';
 
 /** An amount of copper as the game writes money: "1g 20s 5c". */
 const coins = (c) => { c = Math.max(0, Math.round(c)); const g = Math.floor(c / 10000), si = Math.floor((c % 10000) / 100), co = c % 100; return [g ? `${g}g` : '', si ? `${si}s` : '', co || (!g && !si) ? `${co}c` : ''].filter(Boolean).join(' '); };
@@ -113,8 +113,8 @@ export function bindNpcs(app, sheet) {
     else if (!layer.data) text = app.scene?.map.npcs ? 'Loading…' : 'No NPCs recorded for this map.';
     else {
       const h = layer.heights(), total = layer.data.n, pct = (c) => `${Math.round((c / Math.max(1, total)) * 100)}%`;
-      const mine = h[SEEN] + h[FOUGHT], others = h[SHARED] ?? 0, sure = h[4] + h[3] + mine + others;
-      text = !total ? `Nobody could be placed on this map (${layer.data.source}).` : `${layer.count.toLocaleString()} shown of ${total.toLocaleString()} (${layer.data.source}). Heights: ${pct(sure)} known${mine ? ` (${mine} seen by you)` : ''}${others ? ` (${others} seen by other players)` : ''}, ${pct(h[2])} the only place to stand, ${pct(h[1] + h[0])} a best guess.`;
+      const mine = h[SEEN] + h[FOUGHT], others = (h[SHARED] ?? 0) + (h[FOUGHT_SHARED] ?? 0), sure = h[4] + h[3] + mine + others;
+      text = !total ? `Nobody could be placed on this map (${layer.data.source}).` : `${layer.count.toLocaleString()} shown of ${total.toLocaleString()} (${layer.data.source}). Heights: ${pct(sure)} known${mine ? ` (${mine} seen by you)` : ''}${others ? ` (${others} seen or fought by other players)` : ''}, ${pct(h[2])} the only place to stand, ${pct(h[1] + h[0])} a best guess.`;
       // the bosses of the place, by the game's own list, and how many of them the map can show
       const bosses = layer.data.bosses;
       if (bosses.length) {

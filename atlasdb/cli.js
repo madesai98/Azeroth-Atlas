@@ -7,7 +7,10 @@
 //   node atlasdb/cli.js pull               fetch the database as published
 //   node atlasdb/cli.js questie            fetch QuestieDB as the database has it (what the map's creatures, NPCs and quests are
 //                                          built from: a scheduled function puts every new version there), if this disk has another
-//   node atlasdb/cli.js show npc 263380    one record (as published; --local: as last fetched)
+//   node atlasdb/cli.js show npc 263380    one record (as published; --local: as last fetched); "show place 90": a dungeon
+//   node atlasdb/cli.js places             the dungeons: the doors and ways the copies found, and how far off the minimap's
+//                                          place is in each (as published; --local: as last fetched; --sent, for the
+//                                          maintainers: as what was sent comes to now, published or not)
 //   node atlasdb/cli.js status             what is published, and what this copy has sent
 //   node atlasdb/cli.js whoami             the name this copy is signed in under
 //   node atlasdb/cli.js votes              where the copies' game caches disagree, and how each vote went
@@ -28,6 +31,7 @@ import { Rtdb, entries } from './rtdb.js';
 import { LocalStore } from './local.js';
 import { gather, share, fetchBoats } from './collect.js';
 import { buildTruth, publish, pull, lookup, fold } from './publish.js';
+import { readPlace, believed } from './places.js';
 import { databaseSettings } from './settings.js';
 import { signIn } from './signin.js';
 import { pullQuestie, fetchedSource } from './questiedb.js';
@@ -81,9 +85,10 @@ try {
     for (const n of found.notes) log(n);
     if (value('only') === 'seen') { found.npc.clear(); found.object.clear(); found.quest.clear(); }
     if (value('only') === 'cache') found.seen.length = 0;
-    log(`found: ${found.npc.size} creatures, ${found.object.size} objects and ${found.quest.size} quests in the game's cache (game build ${found.build || '?'}), ${found.seen.length} sightings, ${found.logged.length} facts of creatures fought or met (a place, health at a level, a side), ${found.boats.length} sightings of boats, zeppelins and the tram`);
+    const ofDungeons = found.logged.filter((l) => /^[djc],/.test(l)).length;
+    log(`found: ${found.npc.size} creatures, ${found.object.size} objects and ${found.quest.size} quests in the game's cache (game build ${found.build || '?'}), ${found.seen.length} sightings, ${found.logged.length - ofDungeons} facts of creatures fought or met and of what the game's windows showed, ${ofDungeons} of the insides of dungeons (a door, a way, how far off the minimap's place is), ${found.boats.length} sightings of boats, zeppelins and the tram`);
     const r = await share(db, store, found, { app, dry: flag('dry'), copy });
-    log(`${r.dry ? 'would send' : 'sent'}: ${r.sent.npc} creatures, ${r.sent.object} objects, ${r.sent.quest} quests, ${r.sent.seen} sightings, ${r.sent.logged ?? 0} facts of creatures fought or met in ${r.deliveries} ${r.deliveries === 1 ? 'delivery' : 'deliveries'} (${kb(r.bytes)}), ${r.sent.boats} sightings of boats; the rest was sent before`);
+    log(`${r.dry ? 'would send' : 'sent'}: ${r.sent.npc} creatures, ${r.sent.object} objects, ${r.sent.quest} quests, ${r.sent.seen} sightings, ${r.sent.logged ?? 0} other facts (creatures fought or met, the game's windows, the insides of dungeons) in ${r.deliveries} ${r.deliveries === 1 ? 'delivery' : 'deliveries'} (${kb(r.bytes)}), ${r.sent.boats} sightings of boats; the rest was sent before`);
     if (r.boatsError) log(`the boats could not be sent: ${r.boatsError}`);
     if (json) console.log(JSON.stringify({ collect: r }));
   } else if (command === 'publish') {
@@ -101,10 +106,32 @@ try {
     if (json) console.log(JSON.stringify({ questie: r }));
   } else if (command === 'show') {
     const kind = words[1], id = Number(words[2]);
-    if (!['npc', 'object', 'quest'].includes(kind) || !Number.isInteger(id)) fail('show npc|object|quest <id>', 2);
+    if (!['npc', 'object', 'quest', 'place'].includes(kind) || !Number.isInteger(id)) fail('show npc|object|quest <id>, or show place <map>', 2);
     else {
       const rec = flag('local') ? lookup(store, kind, id) : await db.get(`truth/${kind}/b${Math.floor(id / 500) * 500}/i${id}`);
       console.log(rec ? JSON.stringify(rec, null, 1) : 'not in the database');
+    }
+  } else if (command === 'places') {
+    // the dungeons, a line each and what is known of it under that
+    let recs;
+    if (flag('sent')) recs = [...fold(await db.get('inbox')).places].map(([map, rec]) => [map, rec]);
+    else if (flag('local')) recs = Object.values(store.read('truth-place.json', {})).flatMap((part) => Object.entries(part ?? {}).map(([key, rec]) => [Number(key.slice(1)), rec]));
+    else recs = entries(await db.get('truth/place')).flatMap(([, part]) => entries(part).map(([key, rec]) => [Number(String(key).slice(1)), rec]));
+    recs.sort((a, b) => a[0] - b[0]);
+    let names = {};
+    try { names = Object.fromEntries((JSON.parse(fs.readFileSync(path.join(cfg.dataDir, 'manifest.json'), 'utf8')).maps ?? []).map((m) => [m.id, m.name])); } catch { /* no map built: numbers only */ }
+    if (json) console.log(JSON.stringify({ places: Object.fromEntries(recs.map(([map, rec]) => [map, readPlace(rec)])) }));
+    else {
+      if (!recs.length) console.log(flag('sent') ? 'no copy has sent anything of a dungeon yet' : 'nothing of a dungeon is in the database yet');
+      const at = (p) => `${p[0]}, ${p[1]}${p[2] === null ? '' : `, ${p[2]} up`}`;
+      for (const [map, rec] of recs) {
+        const p = readPlace(rec);
+        console.log(`${names[map] ?? 'map'} (${map}): ${p.doors.length} ${p.doors.length === 1 ? 'door' : 'doors'}, ${p.ways.length} ${p.ways.length === 1 ? 'way' : 'ways'}${p.checked ? `; the minimap's place is ${p.checked.off} yards off on average, over ${p.checked.n} checks by ${p.checked.copies} ${p.checked.copies === 1 ? 'copy' : 'copies'}` : '; no checks yet'}`);
+        for (const d of p.doors) console.log(`  door at ${at([d.x, d.y, d.z])}: ${d.copies} ${d.copies === 1 ? 'copy' : 'copies'}, ${d.times} ${d.times === 1 ? 'time' : 'times'}${believed.door(d) ? '' : ' (not gone by yet)'}`);
+        for (const w of p.ways) console.log(`  way from ${at(w.a)} to ${at(w.b)}: ${w.copies} ${w.copies === 1 ? 'copy' : 'copies'}, ${w.times} ${w.times === 1 ? 'time' : 'times'}${believed.way(w) ? '' : ' (not gone by yet)'}`);
+        const moved = p.cells.filter((c) => believed.shift(c));
+        if (moved.length) console.log(`  ${moved.length} ${moved.length === 1 ? 'part' : 'parts'} where the copies agree the minimap's place is off, and it is put right: ${moved.slice(0, 6).map((c) => `${believed.shift(c).map((v) => v.toFixed(1)).join(' north, ')} west round ${(c.cx + 0.5) * 32}, ${(c.cy + 0.5) * 32}`).join('; ')}`);
+      }
     }
   } else if (command === 'status') {
     const meta = await db.get('meta');
@@ -150,7 +177,7 @@ try {
     await step('boats', async () => fetchBoats(db, store));
     console.log(json ? JSON.stringify(out) : JSON.stringify(out, null, 1));
   } else {
-    fail(`unknown command "${command}": collect, publish, pull, show, status, whoami, votes, auto`, 2);
+    fail(`unknown command "${command}": collect, publish, pull, show, places, status, whoami, votes, auto`, 2);
   }
 } catch (err) {
   fail(said(err));

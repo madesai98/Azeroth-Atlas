@@ -43,6 +43,15 @@
 //                         away - the floors may have a gap the map does not know of, a spell
 //                         may have moved you - but it has to hold for three pictures running,
 //                         moving as you move, before it is believed.
+//   the ways gone before  Such a place, once believed, is a way the map's floors do not have:
+//                         a lift it does not know, a doorway its floors are shut at, a portal.
+//                         What is said of it then - from the last place the picture told for
+//                         sure, to where the place you could not have walked to was first seen
+//                         - is kept, and sent on with what every copy learns (minimap.js,
+//                         atlasdb/places.js). And the ways that are known, from here or from
+//                         other copies, come with every picture: where you are not found where
+//                         you can have walked to, and stood near the one end of such a way, its
+//                         other end is looked at before anything else, and believed at once.
 //
 // A fit that is poor, or two places that fit alike, give nothing: { ok: false, reason }.
 import { Locator, loadReference, readArrow, fitRim, findRim, insideRim, rimOf, angDiff, norm } from './minimap-match.js';
@@ -91,6 +100,11 @@ const DOOR_SLACK = 8;     // yards from the game's spot for a door within which 
 const DOOR_FOR = 2500;    // ms after coming in for which only the door is looked at
 const TRAIL_MOST = 80;    // yards you may have gone since the trail's last place, beyond which it is no trail any more
 const STILL_MOST = 9;     // readings of the place you stand at that are averaged
+const WAY_NEAR = 10;      // yards from the end of a known way within which you are taken to be at it, and looked for at its other end
+const WAY_TALL = 8;       // yards of height an end of a way may be off by
+const WAY_UNSEEN = 12;    // yards you may have gone between the last sure place and the place you cannot have walked to, for the two to be the ends of a way
+const WAYS_TRIED = 3;     // known ways looked at with one picture, the nearest first
+const LEVEL_WIDE = 4;     // yards: floors spanning more than this are not one height
 
 /** The square of the game's picture to be sent: the minimap and its rim, with a little to spare. [x, y, w, h] */
 export function squareFor(geo, client) {
@@ -237,12 +251,19 @@ export class Finder {
    *            that in the air), speed (yards a second, now), falling } - or left out: the addon does not say (then every
    *            picture is taken on its own, as before there was a trail),
    *            door: { at (when you came in), odo, air (what motion had then), spots: [{ x, y, z (or null), facing (or null) }] }
-   *            - you have come in from outside and nothing has been found since: where the door is (or the doors) }
+   *            - you have come in from outside and nothing has been found since: where the door is (or the doors),
+   *            ways: [{ a: [x, y, z or null], b: [x, y, z or null] }] - the ways of this dungeon that its floors do not
+   *            have, from a to b (or left out) }
    * @returns { ok, reason, map, at, x, y, facing, rotation, score, margin, mode, ms, view, band, rooms, hidden, odd, floor,
    *            geo (where the minimap was taken to be: #where), want: [x, y, w, h] (the square to send from now on),
    *            how (with a trail: 'followed', 'stood', 'held' - you stand, and the picture does not show the place -,
-   *            'looked round', 'carried on' - a picture with something over it: where you would have got to -, 'door', 'leap'), held, went (yards since the place before), sharp, slack, floors: [lowest,
-   *            highest] (the floors you may be on), spare (false: nothing found, and it cost next to nothing to look) }
+   *            'looked round', 'carried on' - a picture with something over it: where you would have got to -, 'door', 'leap',
+   *            'way' - by a way known from before -), held, went (yards since the place before), sharp, slack, floors: [lowest,
+   *            highest] (the floors you may be on), spare (false: nothing found, and it cost next to nothing to look),
+   *            leapt (yards, of a leap or a way), way (of a leap: { from: [x, y, z or null], to: [x, y, z or null], unseen
+   *            (yards gone between the two), waited (ms) } - the last place the picture told for sure, and where the place
+   *            you could not have walked to was first seen; left out where the two are not the ends of one step. Of a
+   *            way known from before: that way's own two ends, and known: true) }
    */
   frame(f) {
     const t0 = performance.now();
@@ -295,6 +316,8 @@ export class Finder {
           if (!turns) { const a = readArrow(f.pic, geo.cx - f.origin[0], geo.cy - f.origin[1], geo.half * ARROW_READ); if (a) facing = a.facing; }
           tr.heading = facing ?? tr.heading ?? null;
           Object.assign(out, { x: tr.x, y: tr.y, rotation: tr.rotation, turns, facing, band: t.band ?? null, rooms: t.rooms ?? null, hidden: t.hidden ?? null, odd: t.odd ?? null, runnerUp: null, held: !!t.held, went: t.went, sharp: t.sharp ?? null, slack: tr.slack, floors: t.floors ?? null });
+          if (Number.isFinite(t.leapt)) out.leapt = t.leapt;
+          if (t.way) out.way = t.way;
         } else { this.misses++; out.empty = !!t.empty; if (t.tried) out.tried = t.tried; }
         out.ms = performance.now() - t0;
         return out;
@@ -431,11 +454,14 @@ export class Finder {
 
   /** A trail begun at a place found afresh. */
   #begin(r, f, band, floors = undefined) {
+    const on = floors !== undefined ? floors : this.#floors(r, null, 0, band).floors, z = levelOf(on);
     return {
       x: r.x, y: r.y, rotation: r.rotation, set: r.set, at: f.at, odo: f.motion.odo, air: f.motion.air,
-      floors: floors !== undefined ? floors : this.#floors(r, null, 0, band).floors,
+      floors: on,
       // (the last place the picture told for sure, and what the game had said of your way by then: see #sure)
-      anchor: { x: r.x, y: r.y, odo: f.motion.odo, air: f.motion.air },
+      anchor: { x: r.x, y: r.y, z, odo: f.motion.odo, air: f.motion.air, at: f.at },
+      // (where this trail began: of a place you could not have walked to, the far end of the way you went - see wayOf)
+      born: { x: r.x, y: r.y, z, odo: f.motion.odo, air: f.motion.air, at: f.at },
       slack: 0, still: 0, poor: 0, way: null, heading: null, band: band ?? null, score: r.score, usual: r.score, n: 1, seen: f.at,
     };
   }
@@ -462,7 +488,8 @@ export class Finder {
     return {
       x, y, rotation: r.rotation, set: r.set, at: f.at, odo: f.motion.odo, air: f.motion.air,
       floors,
-      anchor: told ? { x, y, odo: f.motion.odo, air: f.motion.air } : tr.anchor ?? null,
+      anchor: told ? { x, y, z: levelOf(floors), odo: f.motion.odo, air: f.motion.air, at: f.at } : tr.anchor ?? null,
+      born: tr.born ?? null,
       slack, still, poor: good ? 0 : tr.poor + 1, way, heading: tr.heading, band: c.band ?? tr.band, score: r.score, n: (tr.n ?? 1) + 1, seen: f.at,
       // (how well the trail's places usually fit - this game's picture against this plan. A worse fit
       // that stays - a part of the dungeon whose pictures fit less well, something that stays over the
@@ -572,6 +599,9 @@ export class Finder {
       this.rival = null; this.wholeGap = WHOLE_EVERY; this.whole = null;
       return this.#say(f, c, this.track, { how: best.kind, info, went: g.went, sharp: best.r.sharp });
     }
+    // ---- a way the map's floors do not have, known from those who went it before: its far end
+    const known = this.#way(f, c, tr, g, reach, sure, best, fixed, everyTurn);
+    if (known) return known;
     // ---- 3. a place that fits well where the trail cannot have led: followed on its own, and believed once it has held
     let rv = this.rival;
     if (rv) {
@@ -601,9 +631,9 @@ export class Finder {
     if (!rv) rv = this.#whole(f, c, g, lost, sure, fixed);
     this.rival = rv;
     if (rv && rv.n >= CONFIRM) {
-      const leapt = Math.hypot(rv.x - tr.x, rv.y - tr.y);
+      const leapt = Math.hypot(rv.x - tr.x, rv.y - tr.y), way = wayOf(tr, rv);
       this.track = rv; this.rival = null; this.wholeGap = WHOLE_EVERY; this.whole = null;
-      return this.#say(f, c, rv, { how: 'leap', mode: 'search', info: loc.describe(mm, rv), went: g.went, sharp: null, leapt });
+      return this.#say(f, c, rv, { how: 'leap', mode: 'search', info: loc.describe(mm, rv), went: g.went, sharp: null, leapt, way });
     }
     if (g.still) {
       // You stand, and the picture does not show the place you stand at: something is over the
@@ -624,6 +654,52 @@ export class Finder {
         ? `a place that fits (${best.r.score.toFixed(2)}) where you cannot have walked to in the ${g.went.toFixed(0)} yards you have gone: believed once ${CONFIRM} pictures agree`
         : `nothing fits where you can have got to in the ${g.went.toFixed(0)} yards you have gone (the best: ${best.r.score.toFixed(2)})`,
     };
+  }
+
+  /**
+   * The ways of this dungeon that its floors do not have (f.ways: a lift the map does not know,
+   * a doorway its floors are shut at, a portal - found by players going them: minimap.js). The
+   * trail's own place does not fit, or is where the floors do not lead; and it is near the one
+   * end of such a way. Then you may have gone it: its other end is looked at, and a place there
+   * that fits as a place of the trail's own would is believed at once - with no three pictures
+   * to wait for, and, of a portal, no look through the whole plan to find you by.
+   * @returns what is said of the picture (how: 'way'), or null: no way leads from here to where the picture is
+   */
+  #way(f, c, tr, g, reach, sure, best, fixed, everyTurn) {
+    if (!Array.isArray(f.ways) || !f.ways.length) return null;
+    const { loc, mm } = c, span = tr.floors ? spanOf(tr.floors) : null;
+    const near = [];
+    for (const w of f.ways) {
+      if (!Array.isArray(w?.a) || !Array.isArray(w?.b) || ![w.a[0], w.a[1], w.b[0], w.b[1]].every(Number.isFinite)) continue;
+      const d = Math.hypot(w.a[0] - tr.x, w.a[1] - tr.y);
+      if (d > reach + WAY_NEAR) continue;
+      if (Number.isFinite(w.a[2]) && span && (w.a[2] < span[0] - WAY_TALL || w.a[2] > span[1] + WAY_TALL)) continue; // (it leaves from another storey)
+      near.push({ w, d });
+    }
+    if (!near.length) return null;
+    let got = null;
+    for (const { w } of near.sort((p, q) => p.d - q.d).slice(0, WAYS_TRIED)) {
+      const bz = Number.isFinite(w.b[2]) ? w.b[2] : null, heights = bz !== null ? [bz - WAY_TALL, bz + WAY_TALL] : null;
+      let tried = 0;
+      for (const p of loc.around(mm, { x: w.b[0], y: w.b[1], radius: WAY_NEAR + g.reach + NOISE, heights }, { ...everyTurn, rough: true, keep: 4 })) {
+        if (tried++ >= 2 || p.score < sure - 0.15) break;
+        const q = loc.follow(mm, { from: p, reach: 3, sigma: 1, weight: 0, fixedRotation: fixed, heights: heights ?? 'own' });
+        // (as well as a place of the trail's own would have to; and where the trail has a place that only lacks a floor, no worse than that)
+        if (q.score < sure || q.score < best.r.score + (best.on === false ? -0.02 : 0.03)) continue;
+        if (!got || q.score > got.q.score) got = { q, bz, w };
+      }
+    }
+    if (!got) return null;
+    const { q, bz, w } = got, info = loc.describe(mm, q);
+    // the floors at the far end: those at its height, where that is known and the map has floors there; else by the rooms the picture shows
+    let floors;
+    if (this.ground && bz !== null) { const at = this.ground.floorsNear(q.x, q.y, FLOOR_REACH, bz - WAY_TALL, bz + WAY_TALL); if (at.length) floors = few(at); }
+    const leapt = Math.hypot(q.x - tr.x, q.y - tr.y);
+    this.track = this.#begin(q, f, info.band, floors);
+    this.rival = null; this.wholeGap = WHOLE_EVERY; this.whole = null;
+    // (which way it was is said with the place: borne out, it is one more finding of that way - minimap.js)
+    const way = { from: [w.a[0], w.a[1], w.a[2] ?? null], to: [w.b[0], w.b[1], w.b[2] ?? null], unseen: 0, waited: 0, known: true };
+    return this.#say(f, c, this.track, { how: 'way', mode: 'search', info, went: g.went, sharp: null, leapt, way });
   }
 
   /**
@@ -671,7 +747,7 @@ export class Finder {
     const lift = span ? (this.ground?.lifts ?? []).find((L) => Math.hypot(tr.x - L.x, tr.y - L.y) <= (L.r ?? 7) + 1.5) : null;
     if (lift) span = [Math.min(span[0], lift.lo), Math.max(span[1], lift.hi)];
     return {
-      ok: true, mode: o.mode ?? 'follow', how: o.how, held: !!o.held, score: o.score ?? tr.score, margin: tr.score, went: o.went, sharp: o.sharp, leapt: o.leapt,
+      ok: true, mode: o.mode ?? 'follow', how: o.how, held: !!o.held, score: o.score ?? tr.score, margin: tr.score, went: o.went, sharp: o.sharp, leapt: o.leapt, way: o.way ?? null,
       // the heights you may be at: the floors you may stand on where the map has them, else the rooms the picture shows you may be in
       band: span ? [span[0] - 0.5, span[1] + 0.5] : info?.band ?? tr.band ?? null, floors: span,
       rooms: info?.rooms ?? null, hidden: info?.hidden ?? null, odd: info?.odd ?? null,
@@ -703,6 +779,26 @@ function few(c) {
   const d0 = c[0].d ?? 0, out = [];
   for (const f of c) { if ((f.d ?? 0) > d0 + 1.2 || out.length >= 12) continue; out.push({ t: f.t, cell: f.cell, n: f.n, z: f.z, x: f.x, y: f.y }); }
   return out;
+}
+/** The one height some floors are at - or null: not known, or more than one storey. */
+function levelOf(floors) {
+  if (!floors?.length) return null;
+  const [lo, hi] = spanOf(floors);
+  return hi - lo <= LEVEL_WIDE ? (lo + hi) / 2 : null;
+}
+/**
+ * A place you could not have walked to has been believed: the way you went, where the two are
+ * the ends of one step - from the last place the picture told for sure (the trail's) to where the
+ * other place was first seen (the rival's), with no more than a few yards gone between the two.
+ * Further apart in yards gone, and the trail had been unsure for a while: then this is as likely
+ * the trail put right as a way gone, and nothing is said.
+ */
+function wayOf(tr, rv) {
+  const a = tr.anchor, b = rv.born;
+  if (!a || !b) return null;
+  const unseen = b.odo - a.odo;
+  if (!(unseen >= -0.5) || unseen > WAY_UNSEEN) return null;
+  return { from: [a.x, a.y, a.z ?? null], to: [b.x, b.y, b.z ?? null], unseen: Math.max(0, unseen), waited: b.at - a.at };
 }
 /** The heights some floors span: [lowest, highest]. */
 function spanOf(floors) {

@@ -17,7 +17,8 @@
 //                     showed and noted, a picture of the map, the route mailboxes as they stood,
 //                     and - where you were found on the game's minimap inside a dungeon
 //                     (minimap.js) - the last small square of the game's picture that was looked
-//                     at, where the minimap was taken to be in it, and what the look gave
+//                     at, where the minimap was taken to be in it, and what the look gave; and
+//                     what following you has taught the map of the dungeons (doors, ways, checks)
 //   game/             the game: its build, its settings (Config.wtf), the addons installed and
 //                     which are switched on, what the Azeroth Atlas addon has saved (with its own
 //                     notes of what it did: Route.lua), what the addons it works with have saved,
@@ -363,6 +364,8 @@ export async function buildReport(ctx, ask = {}) {
     const dir = cfg.dataDir;
     file('atlas/data/manifest.json', path.join(dir, 'manifest.json'), { skipOver: 4 * MB, text: true });
     file('atlas/data/npcs-seen.json', path.join(dir, 'user', 'npcs-seen.json'), { skipOver: 2 * MB });
+    // (what following you through the dungeons has taught the map of them: doors, ways, checks - minimap-places.js)
+    for (const name of ['dungeon-doors.json', 'dungeon-ways.json', 'dungeon-checks.json']) file(`atlas/data/${name}`, path.join(dir, 'user', name), { skipOver: 1 * MB });
     add('atlas/data/folder.txt', `${dir}\n\n${list(dir).map((e) => { const st = stat(path.join(dir, e.name)); return `${e.isDirectory() ? ' (folder)' : String(st?.size ?? '?').padStart(9)}  ${st?.mtime.toISOString() ?? ''}  ${e.name}`; }).join('\n')}\n`);
   });
 

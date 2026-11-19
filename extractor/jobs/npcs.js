@@ -32,6 +32,14 @@
 //                                       QuestieDB's, which gets one the same way (4 to 0 above).
 //                                       It is the only kind of spot there is inside a dungeon
 //                                       that is new to this game.
+//   8  fought on this level by          where one floor lies over another the map guesses which a
+//      another player                   creature is on (1). A player who fought one there, on a copy
+//                                       of the map somewhere, was on its level: that copy put the
+//                                       spot on the floor at that height (viewer/js/npcs.js, #fought),
+//                                       and the height came by way of the database. Here it settles
+//                                       the same and no more: a spot whose height is from the map
+//                                       alone, put on the floor of its own nearest that height.
+//                                       Nobody is added or moved across the map by it.
 //
 // Dungeons, raids and the other maps you enter through a door are a different case: QuestieDB
 // lists who is in them but not where (a dungeon has no zone map to give a spot on). On a map
@@ -59,8 +67,8 @@ import { reactions } from './creatures.js';
 export const NPCS_VERSION = 11; // (11: another player's sighting leaves alone whom the reference database places; 10: what a vendor sells, how much a trainer teaches, the game's own quest pins; 8: what the Atlas database adds - atlas.js - and the game's own list of bosses; 9: what an object asks of whoever opens it)
 export const NSEC = { META: 1, SPAWNS: 2, OWNER: 3, SOURCE: 4 };
 // (5 and 6 are the page's own: someone you talked to, a creature you fought - viewer/js/npcs.js)
-export const HEIGHT = { NONE: 0, GUESS: 1, ONLY: 2, REFERENCE: 3, AGREED: 4, SHARED: 7 };
-const HEIGHTS = 8; // how many ways a height can be known, counting the page's own
+export const HEIGHT = { NONE: 0, GUESS: 1, ONLY: 2, REFERENCE: 3, AGREED: 4, SHARED: 7, FOUGHT: 8 };
+const HEIGHTS = 9; // how many ways a height can be known, counting the page's own
 
 const TILE = 1600 / 3;
 const MATCH = 5;    // yards: a reference spawn of the same creature this close to the spot is the same spawn
@@ -72,6 +80,8 @@ const LEVEL = 6;    // yards: a floor this close to their height is on their lev
 const FOUGHT_NEAR = 30; // yards: a fight that began this close to where a creature is known to be says nothing new of where it is
 const SEEN_SAME = 40;   // yards: the spot of an NPC this close to where a player met it is the one they met (as on the page)
 const SEEN_LIFT = 60;   // ...nor one that lifts anybody this far
+const LEVEL_SPOT = 6;   // yards: the spot of a creature this close to where another copy's fight settled its level is that spot
+const LEVEL_FLOOR = 3;  // ...and the floor there within this much of the height that copy gave is the level meant
 
 /**
  * Every creature and object with somewhere to be, per map, as spots on the map. A spot from
@@ -79,7 +89,7 @@ const SEEN_LIFT = 60;   // ...nor one that lifts anybody this far
  * @param extra  { areas (world.json's), ref (from readReference(), or null), mapIds: Set of the maps that were extracted,
  *                 bosses: { [mapId]: [name, ...] } (the game's own list, world.json's),
  *                 opens (world.json's: the game's locks and what professions work at) } or null
- * @returns Map<mapId, { entries: [...], points: [{ e (index into entries), x, y, z? }], seen: [{ e, x, y, z }], unplaced: string[], bosses: string[] }>
+ * @returns Map<mapId, { entries: [...], points: [{ e (index into entries), x, y, z? }], seen: [{ e, x, y, z }], levels: [{ e, x, y, z }], unplaced: string[], bosses: string[] }>
  */
 export function placeNpcs(db, zones, templates, extra = null) {
   // Questie zone id == the area id of a zone map. Prefer the plain zone map when several share it.
@@ -90,7 +100,7 @@ export function placeNpcs(db, zones, templates, extra = null) {
   const maps = new Map();
   const bucket = (mapId) => {
     let m = maps.get(mapId);
-    if (!m) maps.set(mapId, (m = { entries: [], index: new Map(), points: [], seen: [], unplaced: [], bosses: [] }));
+    if (!m) maps.set(mapId, (m = { entries: [], index: new Map(), points: [], seen: [], levels: [], unplaced: [], bosses: [] }));
     return m;
   };
   const place = (thing, key, make) => {
@@ -199,6 +209,14 @@ export function placeNpcs(db, zones, templates, extra = null) {
     };
     sightings(db.npcs, 'n', npcEntry);
     sightings(db.objects, 'o', objEntry);
+    // Which level a creature is on, where a player's fight settled it: for the creatures that are
+    // on the map already (it adds nobody), held against their spots once those have their heights.
+    for (const npc of db.npcs) {
+      for (const l of npc.level ?? []) {
+        const m = maps.get(l.map), e = m?.index.get(`n${npc.id}`);
+        if (e !== undefined) m.levels.push({ e, x: l.x, y: l.y, z: l.z });
+      }
+    }
     // Who is known to be on a map, and not where: QuestieDB lists them in a zone without a
     // spot, or the database knows no more of them than their zone - and no source could place
     // them anywhere. (Most are in dungeons: a dungeon has no zone map to give a spot on.)
@@ -346,6 +364,28 @@ export function resolveHeights(m, mapId, nav, ref) {
     spawns[k * 3 + 2] = z;
     source[k] = src;
     counts[src]++;
+  }
+  // Which level a creature is on, where a player's fight settled it on another copy of the map: the
+  // spot of that creature nearest the one named, where its height is the map's own doing (a guess,
+  // the only floor it saw, or none), is put on the floor of its own nearest the height given - if
+  // there is one within a few yards of that. A spot the reference database places is left alone.
+  for (const l of m.levels ?? []) {
+    if (!nav) break;
+    let best = -1, bestD = LEVEL_SPOT;
+    for (let k = 0; k < n; k++) {
+      if (owner[k] !== l.e || source[k] > HEIGHT.ONLY) continue;
+      const d = Math.hypot(spawns[k * 3] - l.x, spawns[k * 3 + 1] - l.y);
+      if (d < bestD) { bestD = d; best = k; }
+    }
+    if (best < 0) continue;
+    let floors = [];
+    for (let reach = 0; reach <= 2 && !floors.length; reach++) floors = nav.floorsAt(spawns[best * 3], spawns[best * 3 + 1], reach).filter((f) => !f.swim);
+    let pick = null;
+    for (const f of floors) if (Math.abs(f.z - l.z) <= LEVEL_FLOOR && (!pick || Math.abs(f.z - l.z) < Math.abs(pick.z - l.z))) pick = f;
+    if (!pick) continue;
+    counts[source[best]]--;
+    spawns[best * 3 + 2] = pick.z; source[best] = HEIGHT.FOUGHT;
+    counts[HEIGHT.FOUGHT]++;
   }
   // Where players stood beside someone and talked, as the Atlas database has it from every copy:
   // laid over what is there as the page lays your own sightings over it. The nearest spot of

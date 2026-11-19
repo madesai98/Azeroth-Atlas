@@ -70,11 +70,28 @@
 // `seen` is { m<map id>: "x,y,z,n ..." }: sightings, n the number of copies that made them, and
 // `f` is { m<map id>: "x,y x,y ..." }: where creatures of this kind were when a fight with them
 // began, in the game's own yards and with no height (the combat log has none).
+// `fz` is { m<map id>: "x,y,z,n ..." }: a spot of the map's own for a creature of this kind, and
+// the height of the level a player fought it on there (n: how many copies say so) - for a spot
+// with several floors one over the other, where the map could only guess.
 // (The letters before the ids keep the database from turning a list of numbers into an array.)
+//
+// Besides the three kinds of thing there is one record per dungeon, kind "place" (places.js):
+//
+//   place   d "x,y,z,facing,copies,times ..." the doors copies found themselves at having come in,
+//           that the map's own data does not have; w "x,y,z,x,y,z,copies,times ..." the ways its
+//           floors do not have, from a place to a place; c "cell north,cell west,copies,checks,
+//           off north,off west,off,copies with checks enough,their off north,their off west,how
+//           far they differ ..." how far the minimap's place is from the combat log's, by the
+//           32-yard square; a [copies, checks, yards]: the same over the whole dungeon.
+//           (A height or a facing that is not known is left empty.)
 import crypto from 'node:crypto';
 
 export const SCHEMA = 1;
 export const KINDS = ['npc', 'object', 'quest'];
+/** ...and the kind that is no thing but a place: a dungeon, with what the copies learned of its insides (places.js). */
+export const PLACE = 'place';
+/** Every kind there is a shard of. */
+export const PUBLISHED = [...KINDS, PLACE];
 export const BUCKET = 500; // ids to a shard: a copy fetches only the shards that have changed
 
 /** Believed first to last. */

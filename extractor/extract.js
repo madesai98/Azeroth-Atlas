@@ -504,10 +504,12 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
       for (const map of maps) {
         const m = placed.get(map.id);
         if (!m || (!m.points.length && !m.unplaced.length && !m.seen.length && !m.bosses.length)) continue;
+        // (the levels other copies' fights settled: counted in only where a map has some, so that a map with none is not built again for them)
+        const levels = m.levels?.length ? [m.levels] : [];
         const navRev = map.nav?.length ? sig(map.nav.map((n) => n.sig)) : null;
         // (with the Atlas database laid over: by what is on THIS map, so that a new database builds again only the maps it changes anything on)
         const s = laid
-          ? sig(NPCS_VERSION, 'atlas', sig(m.entries, m.points, m.seen, m.unplaced, m.bosses), sig(world.data.zones), factionHash, reference?.sha ?? null, navRev)
+          ? sig(NPCS_VERSION, 'atlas', sig(m.entries, m.points, m.seen, m.unplaced, m.bosses, ...levels), sig(world.data.zones), factionHash, reference?.sha ?? null, navRev)
           : sig(NPCS_VERSION, db.hash, sig(world.data.zones), factionHash, reference?.sha ?? null, navRev, sig(m.bosses));
         map.npcsEntry = { rel: `maps/${map.id}/npcs.bin`, sig: s, meta: null };
         if (fresh(map.npcsEntry.rel, s)) { map.npcsEntry.meta = prev.artifacts[map.npcsEntry.rel].meta; stats.reused++; }
@@ -524,14 +526,14 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
           report({ type: 'progress', done: ++done, total: todo.length });
         }
       }
-      const heights = [0, 0, 0, 0, 0, 0, 0, 0];
+      const heights = [0, 0, 0, 0, 0, 0, 0, 0, 0];
       let spawns = 0, places = 0;
       for (const map of maps) {
         const e = map.npcsEntry;
         if (!e?.meta) continue;
         next.artifacts[e.rel] = { sig: e.sig, meta: e.meta };
         spawns += e.meta.spawns; places++;
-        e.meta.heights.forEach((c, i) => { heights[i] += c; });
+        e.meta.heights.forEach((c, i) => { heights[i] = (heights[i] ?? 0) + c; });
       }
       // the quests (who gives and takes each, what it asks for)
       const qs = sig(NPCS_VERSION, db.hash, laid, sig(world.data.zones), reference?.sha ?? null);
@@ -540,7 +542,7 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
       next.artifacts['quests.json'] = { sig: qs };
       npcInfo = { source, reference: reference?.name ?? null, spawns, heights, quests: db.quests.length };
       const pct = (c) => `${((c / Math.max(1, spawns)) * 100).toFixed(0)}%`;
-      log(`${source}${atlas ? ` and the Atlas database (${atlas.rev})` : ''}: ${spawns.toLocaleString()} NPC and object spawn points placed on ${places} maps. Heights: ${pct(heights[4])} from the reference database and confirmed by the ground, ${pct(heights[3])} from the reference database alone, ${pct(heights[2])} the only place to stand, ${pct(heights[1])} the likeliest of several, ${pct(heights[0])} not known${heights[7] ? `, ${heights[7].toLocaleString()} as another player saw them` : ''}`);
+      log(`${source}${atlas ? ` and the Atlas database (${atlas.rev})` : ''}: ${spawns.toLocaleString()} NPC and object spawn points placed on ${places} maps. Heights: ${pct(heights[4])} from the reference database and confirmed by the ground, ${pct(heights[3])} from the reference database alone, ${pct(heights[2])} the only place to stand, ${pct(heights[1])} the likeliest of several, ${pct(heights[0])} not known${heights[7] ? `, ${heights[7].toLocaleString()} as another player saw them` : ''}${heights[8] ? `, ${heights[8].toLocaleString()} on the level another player fought them on` : ''}`);
     } catch (err) {
       log(`NPC layer unavailable: ${err.message}`);
     }

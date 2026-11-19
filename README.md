@@ -643,7 +643,9 @@ axe, Rockslicer - which opens nothing, and is left out.
 **What other players have seen** is on your map too: the Atlas database puts every copy's
 sightings together, and the map build lays them over the spawn points like your own (height
 source **seen in game by another player**). Yours, where you have one of the same spot, is believed
-first; and someone the reference database places stays as placed, whoever saw them where.
+first; and someone the reference database places stays as placed, whoever saw them where. The
+level another player fought a creature on comes the same way (**fought on this level by another
+player**: see "A creature you fight" below).
 
 - Who is surer decides. Someone the reference database places is surer of where they stand than
   the map is of where you do, so if the two disagree by more than four yards it is your height
@@ -689,8 +691,16 @@ on, where that was the map's own guess.
   is moved; your own height is never put right by one; and nothing happens unless the map is
   sure of your own height.
 - What a fight settled is kept in the same file on your disk and laid over the data each time
-  the map loads. It is **not** sent to the shared database: a sighting sent there says "this
-  NPC stands here", from someone who stood beside them and talked.
+  the map loads.
+- It goes to the shared database as a fact of its own kind - "a creature of this kind is on
+  this level at this spot" - and not as a sighting, which says "this NPC stands here" from
+  someone who stood beside them and talked. Where the copies that fought it at a spot agree
+  on the level (what most say; two levels said by as many settle nothing), every copy's map
+  build puts that spot on the floor of its own nearest that height, if it has one within
+  three yards, and marks it **fought on this level by another player**. That touches only a
+  height the map had guessed or taken from its one floor there: nobody is added, nobody is
+  moved across the map, nobody the reference database places is touched, and on your own map
+  a fight or a talk of your own still counts for more.
 - In a game that will not tell an addon how near a creature is while you fight, only looting
   says it. Either way it needs version 25 of the addon (**Check for updates** installs it;
   then `/reload` in game).
@@ -1878,6 +1888,11 @@ was looked at). `"minimap": false` in `config.json` switches all of it off.
     may have a gap the map does not know of, a spell may have moved you - but it has to hold
     for three pictures running, moving as you move, before you are taken to be there. One
     picture that looks like somewhere else moves nothing;
+  - **a way the floors do not have, gone before** - by you twice, or by other copies of the
+    map (see "What following you teaches the map" below) - is looked at before that: where the
+    trail's own place does not fit, or is on no floor you can have walked to, and you were
+    near the one end of such a way, a place at its other end that fits as well as one of the
+    trail's own is believed at once, with no three pictures to wait for;
   - **the whole plan is looked through a little with each picture**, when the trail's place
     has not fitted for some seconds (you were moved far all at once, or the trail has gone
     wrong). All of it takes seconds; done in one go, the trail saw nothing for as long, and a
@@ -1889,7 +1904,10 @@ was looked at). `"minimap": false` in `config.json` switches all of it off.
   dungeons of the original game), and that is where you are looked for first: found with the
   first picture, where a look through all of Gnomeregan at every turn took ten seconds. A door
   the database does not have is noted the first time you are found standing just inside it
-  (`<dataDir>/user/dungeon-doors.json`) and known from then on.
+  (`<dataDir>/user/dungeon-doors.json`), known from then on, and counted each time you come in
+  by it again. The doors other copies of the map have found come with the Atlas database: one
+  that somebody else came in by twice is where you are looked for the first time you use it
+  (see "What following you teaches the map" below).
 - *Which way you face.* Where the minimap turns with you, its turn is the way you face; where
   it keeps north up, your arrow in its middle says.
 - *Which floor.* The game leaves off its minimap every room that lies wholly above the ceiling
@@ -1909,6 +1927,38 @@ still round a blow, the two should be the same spot, and what lies between them 
 off the minimap's middle is taken to be: after a few such blows that agree with each other, the
 middle is moved by that much (never more than two and a half pixels). When the minimap has
 nothing to say, the log's place is shown as before.
+
+**What following you teaches the map of the dungeon - and every other copy's map.** Three
+things come of following you that no file has. Each is kept, sent to the Atlas database with
+the rest of what a copy learns, put together there with what every other copy found, and
+fetched back by all of them (`server/minimap-places.js`, `atlasdb/places.js`):
+
+| What | How it is learned | What it is good for | Gone by once |
+|---|---|---|---|
+| **A door** the map's data has no spot for (a dungeon new to this game, a back way in) | you are found standing just inside, having come in from outside | the trail begins there with the first picture, with no look through the plan | two copies have found it, or one has come in by it twice (your own: at once, on your own map) |
+| **A way** the map's floors do not have: a lift the reference database lacks, a doorway the floors are shut at, a portal | a place you cannot have walked to holds for three pictures, no more than a dozen yards on from the last place the picture told for sure, and is then borne out by a dozen pictures more | where you are not found where you can have walked to, the far end of a known way is looked at first: you are found with the next picture, where a portal across the dungeon cost a look through the whole plan (eight or nine seconds) | two copies have gone it, or one copy three times (your own: twice, on your own map) |
+| **A check**: how far the minimap's place was from the combat log's while you stood, summed by the 32-yard square of the dungeon | every blow while you stand still, where the game keeps its combat log (above) | the measure of how well all this works in the game itself, dungeon by dungeon (`npm run db -- places` lists it). And where copies agree that a part of a plan sits off one way, every copy's place there is put right by that much, fading out towards the squares nothing is known of | two copies have ten checks each in the square and agree to within a yard, on something between one yard and six |
+
+One finding of a way proves little: the map having lost you and found you again looks the
+same. So a way waits for a second finding, yours or another copy's, and the place it took you
+to must have held. A copy that takes a way other copies found, and is borne out the same,
+adds its own word to theirs. A way leads one way: up a lift is not down it (down is a drop, which the
+floors have anyway). A step of a yard on one storey is a hole in the floors and no way.
+
+The three files (`<dataDir>/user/dungeon-doors.json`, `dungeon-ways.json`,
+`dungeon-checks.json`) hold places inside dungeons and counts, and nothing of when you were
+there or how the run went (a door has the day it was first found, which stays on your disk).
+What is sent of them is a fact a line: "this door puts you here", "from here one gets to
+there", "in this square the minimap's place is this far off, over so many checks". **Share
+what this copy learns** is the switch for it, as for the rest.
+
+Measured on the walks below, with a way the first walk found handed to a second: put across
+the dungeon by a portal you are found with the next picture, standing there or running on,
+where finding you took nine seconds; walking on from the top of a lift the map does not know,
+your height is right with the first picture the floors do not account for, where two pictures
+gave no place and a third was waited for. Fifty ways that lead nowhere you are, laid along
+four minutes of a walk with things over the minimap now and then, changed what no picture
+gave. None of this has been tried in the game: it needs somebody to go such a way twice.
 
 **Measured.** On seven screenshots taken in the Stockade, three of them with the minimap turned,
 every one was found, fitting 0.96 of a possible 1 with the next best place 0.3 behind; the one
@@ -1995,10 +2045,12 @@ Cases a walk does not have, tried in Gnomeregan:
 |---|---|
 | Up the lift, the map knowing it | your place and your height right all the way (141 of 141 pictures) |
 | Up the lift, the map not knowing it | your place right all the way; your height the storey you came from until you walked on from the top, right a second after that |
+| The same, the way known from having been gone before | as above, and your height right with the first picture after you walk on from the top: no picture without a place, none waited for |
 | Twelve seconds on the run with seven tenths of the minimap covered by something dark | no look over a second; nothing said for most of it (the picture fits nowhere), a place carried on to up to 13 yards off; right again within a second of its showing |
 | The same, six tenths covered by something of the floor's colour | carried on throughout, greyed, never more than 5 yards off; right again within a second |
 | Moved across the dungeon all at once (670 yards), and standing there | found after 9 seconds, the old place shown until then |
 | The same, running on | found after 8 seconds, and followed from there |
+| Moved across the dungeon, that way known from having been gone before | found with the next picture, standing there or running on, with no look through the plan |
 
 **What it cannot do.**
 
@@ -2036,11 +2088,16 @@ Cases a walk does not have, tried in Gnomeregan:
   dungeon that has a plan; a lift this game has added is not in it. Your place stays right;
   your height is the storey you came from until you walk on to where that storey has no floor
   under you, and is put right a second or two after (a place you cannot have walked to, borne
-  out by three pictures).
+  out by three pictures). That is then noted as a way, and from the second time you go it -
+  or the first, where other copies have - it is put right with one picture (see "What
+  following you teaches the map"); your height on the lift itself stays the storey you came
+  from all the same.
 - Moved all at once by a spell (a mage's Blink, a warlock's summons) you are shown where you
   were for a second or two more: the new place has to hold for three pictures. Summoned
   across the whole dungeon, finding it takes a look through the whole plan: eight or nine
-  seconds, standing there or running on, with the figure waiting where it was.
+  seconds, standing there or running on, with the figure waiting where it was. A portal that
+  always leads from the same place to the same place becomes a known way like the lift; a
+  summons, which leads from anywhere, does not.
 - An addon older than version 6 of the strip does not say how fast you move: then every picture
   is taken on its own, as before.
 
@@ -2436,11 +2493,12 @@ The extractor keeps what a pathfinder needs, in `dataDir`:
 | `maps/<id>/creatures.bin` (`WFC1`) | Stationed creatures: section 1 JSON (`creatures`: name, `min`/`max` level, `rank`, reaction to Alliance `a` and Horde `h` (0 friendly, 1 neutral, 2 hostile), `est` level estimated, `u` = no side recorded (new to this game: shown only when asked for), `t` = these spawn points are inside a town or city of the Alliance (1) or the Horde (2) and make no zone for that side), 2 spawn points (float32 world x, y), 3 creature index per spawn point, 4 patrol route points, 5 routes (`creature, firstPoint, count`) |
 | `models/wmo/<id>.bin` (`WFM1`) | Section 1 header (JSON: its groups with the game's flags, box and run of vertices; `left`: the groups left out and why - see "What of a building or an object is not drawn"), 2 vertices (36-byte stride, position first), 5 collision triangle indices, 6 the game's per-triangle flags (`0x08` collision, `0x20` render, `0x04` detail, `0x02` no-camera-collide), 7 interior object placements, 8/9 interior liquid surfaces |
 | `models/m2/<id>.bin` (`WFM1`) | Section 4 collision vertices, 5 collision triangles |
-| `maps/<id>/npcs.bin` (`WFP1`) | Every creature and quest object with somewhere to be: section 1 JSON (`entries`: `id`, name `n`, title `s`, levels `l`, rank `r`, reaction to Alliance `a` and Horde `h`, `u` = side not recorded, job flags `f`, `ct` what kind of thing a creature is (the reference database's number: 1 beast to 9 mechanical), quests started `qs` and ended `qe`; `k: 1` = an object), 2 spawn points (float32 x, y, z; z is NaN where not known), 3 entry index per spawn point, 4 how each height is known (0 not known, 1 likeliest of several, 2 only place to stand, 3 reference database, 4 reference and ground agree). `unplaced` in the JSON names who QuestieDB lists on the map that neither source could place |
+| `maps/<id>/npcs.bin` (`WFP1`) | Every creature and quest object with somewhere to be: section 1 JSON (`entries`: `id`, name `n`, title `s`, levels `l`, rank `r`, reaction to Alliance `a` and Horde `h`, `u` = side not recorded, job flags `f`, `ct` what kind of thing a creature is (the reference database's number: 1 beast to 9 mechanical), quests started `qs` and ended `qe`; `k: 1` = an object), 2 spawn points (float32 x, y, z; z is NaN where not known), 3 entry index per spawn point, 4 how each height is known (0 not known, 1 likeliest of several, 2 only place to stand, 3 reference database, 4 reference and ground agree, 7 as another player saw them, 8 on the level another player fought them on; 5 and 6 are the page's own, for your sightings and fights). `unplaced` in the JSON names who QuestieDB lists on the map that neither source could place |
 | `quests.json` | Every quest: name `n`, level `l`, from level `m`, side (1 Alliance, 2 Horde, 3 either), who starts (`s` NPCs, `so` objects, `si` items) and ends it (`e`, `eo`), its text `t`, what it asks for (`oc` creatures, `ok` kill credit, `oo` objects, `oi` items), what comes before and after; from the reference database, where it has the quest: `nd` how many of each (`[kind n / o / i, id, count]`), `ty` its type (elite, dungeon, raid...), `tl` its time limit. Plus `items`: those quests ask for, with what drops them (`d` creatures, `o` objects, `v` vendors) and how often (`dc`, `oc`: per source `[per cent, how many at a time]`); `mobs`: every creature a quest has you kill or that drops something wanted (`sp` spawn points, `lv` levels, `rk` rank, `hp` health, `ct` kind, `rs` seconds to come back); and the name and first position of every NPC and object mentioned. `source` and `reference` name the two databases |
 | `user/npcs-seen.json` | Where you have seen NPCs stand for yourself (see "Seen in game"). Never touched by a map update |
-| `user/dungeon-doors.json` | Where you were found standing just inside a dungeon's door that the map's data has no spot for (see "Inside a dungeon: your place, read off the game's minimap"): map, place, the way you faced. Never touched by a map update |
-| `sources/classic-db/` | The reference database as downloaded, with a note of where it came from |
+| `user/dungeon-doors.json` | Where you were found standing just inside a dungeon's door that the map's data has no spot for (see "Inside a dungeon: your place, read off the game's minimap"): map, place, height where it is known, the way you faced, how often you have come in by it, and the day it was first found. Never touched by a map update |
+| `user/dungeon-ways.json` | The ways you went inside a dungeon that the map's floors do not have (a lift it does not know, a portal): map, the place you left from, the place you came to, how often. Gone by from the second time. Never touched by a map update |
+| `user/dungeon-checks.json` | How far the minimap's place was from the combat log's while you stood, summed by the 32-yard square of each dungeon: how many checks, the sums north, west and in all, and the same as last sent. Never touched by a map update || `sources/classic-db/` | The reference database as downloaded, with a note of where it came from |
 | `sources/questiedb/` | QuestieDB as fetched from the Atlas database (see "Where QuestieDB comes from"): `source.json` says which version is in use, and the files are in a folder of that version's own, laid out as in the addon, with QuestieDB's licence. The version before it is kept until the next one comes |
 | `rooms.json` | What the game calls the rooms of its buildings: `names`, and per building (`wmo`: by the building's number in the game's files) runs of three numbers - which set of names the placed building uses, the room's number in it (-1: the whole building), and the name's place in `names`. For telling floors apart by the name the game shows (see "How your height is known") |
 | `world.json` | Area names/hierarchy, zones with world rectangles, points of interest, liquid types (water / ocean / magma / slime), `lifts` (each lift: map, where it stands, the heights of its two ends `lo` and `hi`, how far from its middle its platform reaches `r`; and, read off the game's table of how it moves, the heights it stands at `stops`, the seconds its round takes `round`, the yards a second it goes between stops `speed` and the seconds it stands at one `still`), **flight masters and flight paths with their full 3D route points** (boat and zeppelin routes too; `pointMaps` says which map each point is on when a route crosses continents), `transports` (each boat / zeppelin line: its stops with map and position, seconds to the next stop, seconds for a full round), `portals` (doorways between maps, from `extractor/doorways.json`, or ShortestPathForever's `Data/Portals.lua` where that addon is installed), `inns` (every innkeeper: map, zone, position, reaction to each side; from QuestieDB), area triggers (dungeon entrances and other transitions), `entrances` (where each door into a dungeon puts you: map, position with height, the way you face; from the reference database) |
@@ -2486,13 +2544,14 @@ when you meet it. So no single player, and no single source, has all of it; put 
 copies of the map do.
 
 **What is in it.** One record per creature, object and quest, made from every source there is,
-each fact with a note of where it came from:
+each fact with a note of where it came from (and one per dungeon, of its insides: below):
 
 | Source | What it gives | Believed |
 | --- | --- | --- |
 | **The game's own cache** (`Cache/WDB` in the game folder: what the server told your game about what you have met) | A creature's name, kind, family and rank; a quest's level, what it asks for and how many, what it gives; an object's kind | first: it is the server's own answer. Every copy's cache is believed; where several have sent the same thing, a vote settles it (below) |
 | **Seen in game** | where an NPC really stands, noted when you talk to it; where an object is, noted when you take something out of it | next |
 | **What a fight shows, whom the addon met, and what the game's windows show** (the game's combat log, as each copy's map read it; what the game shows of a creature you target, have the mouse on or see a name plate of; a vendor's and a trainer's window, and the game's own quest pins) | where a creature was when a fight with it began (inside dungeons too, where nothing else says); its health at each level it has; how it stands towards each side; what a vendor sells and a trainer teaches; where the game's map puts a quest | next. Its health is believed before every other source's, being the game's own figure (this game's creatures have more health than the original's: a Defias Captive 2,538 at level 24, where the reference database has 1,815). Its levels only add to what is known, never narrow it: a fight shows the levels met, not all there are. Where copies differ on a figure, what most say |
+| **Which level a creature is on** (a fight of yours beside it that put it on your level, where the map had only guessed: see "Seen in game") | the height of the floor it was fought on, at a spot of the map's own for it | for that spot's height only, and only over the map's own guess. What most copies say; where two levels are said by as many, nothing |
 | **Wowhead** (its database for this game, which its own users' games feed; read by the database's maintainer and handed in as a file) | a creature's name, level, kind, rank and how it stands towards each side; a quest's level, experience, money and rewards; and, where its page was read, where a thing stands and what a quest asks for | next for what a thing is; after QuestieDB for where things stand and who gives which quest, so it fills in what QuestieDB lacks |
 | **QuestieDB** | everything it has for this game: names, levels, sides, where things stand, who gives and takes each quest, what comes before and after it; quest experience measured from players' sessions | next |
 | **cmangos classic-db** | the original game: heights, a creature's kind and health, how soon it is back, drop tables, how many of each thing a quest asks for | last: right for most of the old world, silent about everything new |
@@ -2582,17 +2641,34 @@ the two that you have switched off is switched on for the read and off again in 
 moment. None of the three has been tried in the game by the map's maker: they go by the game's
 own window code, read out of the installed game, and by what other addons do in this client.
 
+**The insides of the dungeons.** Besides the three kinds of thing there is one record per
+dungeon (`/truth/place`, made by `atlasdb/places.js`): the doors copies were found at having
+come in that the map's own data has no spot for, the ways they went that its floors do not
+have (a lift, a portal), and how far the minimap's place was from the combat log's, by the
+32-yard square. Each with how many copies say so and how often, so that a copy can tell what
+to go by: a door two copies found or one came in by twice, a way two copies went or one went
+three times, a square two copies have ten checks each in and agree on to a yard. A copy's
+word on a spot weighs by how often it found it, and never for more than five findings: one
+copy does not carry the rest. Nothing else says anything of this, so there is no source to
+believe first; the record is what the copies sent, put together. What it is for is under
+"Inside a dungeon: your place, read off the game's minimap".
+
 **What a copy sends.** While the map runs it reads the game's cache, its own sightings, what a
 fight showed and whom the addon met (above: "a creature of this kind was here", "at this level
-it has this much health", "it is hostile to this side"), what the game's windows showed ("this
-vendor sells this for so much", "this trainer teaches this spell at this skill", "the game's map
-puts this quest here"), and what
+it has this much health", "it is hostile to this side"), which level a creature is on where a
+fight of yours settled it ("a creature of this kind is on this level here"), what the game's
+windows showed ("this vendor sells this for so much", "this trainer teaches this spell at this
+skill", "the game's map puts this quest here"), what following you through a dungeon taught
+the map of the dungeon ("this door puts you here", "from here one gets to there", "in this
+part of it the minimap's place is this far off": not when you were in it, how the run went, or
+which way you took through it), and what
 the addon has seen of the boats (see "Boats, zeppelins and the tram, live": a boat sighting
 is a line, a stop and a moment, with no names; of a ride of your own, that does say this copy's
 player was aboard then), and
 sends what it has not sent before: a little after it starts, whenever the game has written its
 cache or the addon's saved settings again (it does when you log out, leave the game or
-`/reload`), after you have met an NPC, and every six hours besides. **Facts about the game
+`/reload`), after you have met an NPC or the map has learned something of a dungeon, and every
+six hours besides. **Facts about the game
 world and nothing else**: not your account, your characters, your realm or your computer's
 name. Of what you have seen of the world, not where you were or when: a sighting of an NPC goes
 as "this NPC stands here". A boat's moment is the one thing sent that has a time in it. The
@@ -2624,14 +2700,18 @@ line is only there in a version that names a database.
 | `collect` | send what this copy has learned, now (`--dry`: only say what would be sent) |
 | `pull` | fetch the database as published (only the parts that changed) into `<dataDir>/atlasdb` |
 | `questie` | fetch QuestieDB as the database has it, if this disk has another version (below) |
-| `show npc 263380` | one record (`quest`, `object` likewise; `--local`: as last fetched) |
+| `show npc 263380` | one record (`quest`, `object` likewise, and `show place 90` for a dungeon by its map's number; `--local`: as last fetched) |
+| `places` | the dungeons: the doors and ways the copies found in each, how many copies and how often, which of them are gone by, and how far off the minimap's place is there by the copies' checks (`--local`: as last fetched; `--sent`, for a maintainer: as what was sent comes to now, published or not) |
 | `publish` | make the database again from the sources on this disk and everything every copy has sent, and write what changed. For the copy that keeps the database: `"database": { "maintain": true }` has the map do this by itself. The database lets only a maintainer do it |
 | `whoami` | the made-up name this copy is signed in under |
 | `votes` | every fact on which the copies' game caches disagree, and how the vote went (`votes quest 95534`: one thing). For a maintainer: it reads what was sent |
 
 The pieces: `atlasdb/records.js` (a record, and how sources are merged into one), `collect.js`
 (what a copy gathers and sends), `boats.js` (the boats: a sighting as it is sent, and how a
-line is measured from everybody's), `publish.js` (making, publishing and fetching the database),
+line is measured from everybody's), `places.js` (the insides of the dungeons: a door, a way and
+a check as they are sent, everybody's put together, and what of that is gone by),
+`server/minimap-places.js` (what the map's server keeps of them and goes by),
+`publish.js` (making, publishing and fetching the database),
 `extractor/atlas.js` (laying the database over QuestieDB when the map is built), `server/combatlog.js`
 (reading the game's combat log), `rtdb.js` (talking to the database: plain web requests, nothing to install), `signin.js` (the
 anonymous account), `rules.json` (the database's rules, as pasted into the Firebase console),
@@ -2887,7 +2967,7 @@ out, and why):
 | `report.txt` | what you wrote, and a summary of all the rest |
 | `timeline.txt` | every note below as one list, in the order things happened: the server's, the page's and the addon's own, side by side |
 | `computer/` | the version of Windows, processor, memory, graphics card and its driver, drives and how full they are, the antivirus program, and the names of the programs running (an overlay or a capture program can be in the strip's way) |
-| `atlas/` | this copy of Azeroth Atlas: its version, a digest of each of its own files (a file gone wrong in an update shows), `config.json`, what the server knew at that moment (the game, the addon, your character as the game reported it, your quest log), its notes, what the page was showing (where you were, each route and how it was taken to go, what the game had been handed) with a picture of the map, the route mailboxes as they stood, and - where you were looked for on the game's minimap inside a dungeon - `atlas/minimap/`: the last small square of the game's picture that was looked at (`last.png`), where the minimap was taken to be in it (by its rim, and by the addon's word), the figures of the last look, and how it has agreed with the combat log (`state.json`), and what each of the last 1,500 pictures gave (`trail.json`: five minutes of them, a line of figures apiece - when, whether a place was found and how, where, how well it fitted, how far you had gone - and nothing of the pictures themselves) |
+| `atlas/` | this copy of Azeroth Atlas: its version, a digest of each of its own files (a file gone wrong in an update shows), `config.json`, what the server knew at that moment (the game, the addon, your character as the game reported it, your quest log), its notes, what the page was showing (where you were, each route and how it was taken to go, what the game had been handed) with a picture of the map, the route mailboxes as they stood, and - where you were looked for on the game's minimap inside a dungeon - `atlas/minimap/`: the last small square of the game's picture that was looked at (`last.png`), where the minimap was taken to be in it (by its rim, and by the addon's word), the figures of the last look, and how it has agreed with the combat log (`state.json`), and what each of the last 1,500 pictures gave (`trail.json`: five minutes of them, a line of figures apiece - when, whether a place was found and how, where, how well it fitted, how far you had gone - and nothing of the pictures themselves); and what following you has taught the map of the dungeons (`atlas/data/dungeon-doors.json`, `dungeon-ways.json`, `dungeon-checks.json`: places and counts) |
 | `game/` | the game's build and its settings, the addons installed and which are switched on, what the Azeroth Atlas addon has saved (its own notes among it), what the addons it works with have saved (Questie, Guidelime and guide packs, TomTom, ShortestPathForever, DockWatch and the like), the game's own logs about itself and its addons, the beginning of its last three crash reports, and its cache of what the server told it about creatures, objects and quests |
 
 **What never goes in:** account names (an account's folder is called `account-1` in the zip,

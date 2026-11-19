@@ -18,6 +18,12 @@
 // the trail begins. A door the map's data does not have is noted the first time you come in by
 // it (<dataDir>/user/dungeon-doors.json) and known from then on.
 //
+// What following you teaches of the dungeon itself is kept (minimap-places.js), and goes to the
+// Atlas database with the rest of what this copy learns, as every other copy's comes back from
+// it: the doors; the ways the map's floors do not have (a lift it does not know, a portal) - a
+// place you cannot have walked to that then held, noted with where you were last sure to be;
+// and how far the minimap's place was from the combat log's, by the part of the dungeon.
+//
 // Only the picture of the game's own window is read, the same picture the strip is read off;
 // nothing is sent into the game, and nothing of the picture is kept or leaves this computer
 // (the last square is held in memory, for a report of a problem you make yourself).
@@ -36,6 +42,7 @@ import { Worker } from 'node:worker_threads';
 import { note, changed } from './log.js';
 import { encodePng } from './png.js';
 import { squareFor, cornerFor } from './minimap-find.js';
+import { Places } from './minimap-places.js';
 
 const EVERY = 200;        // ms between two pictures of the minimap
 const FRESH = 2500;       // ms: a place this new is where you are, whatever the combat log says of a moment ago
@@ -50,17 +57,23 @@ const UNSEEN = 9;         // ...yards a second you may have gone then
 const CAME_WITHIN = 120000; // ms: seen outside this lately and now inside, you have come in by a door
 const DOOR_FOR = 60000;   // ms after coming in for which the door is handed over as where to begin
 const DOOR_STOOD = 3;     // yards: found having gone less than this since you came in, you are found at the door
-const DOOR_SAME = 15;     // yards: a door found this near one that is known is that one
 const TRAIL_KEPT = 1500;  // pictures whose outcome is kept, for a report of a problem (five minutes of them)
+const WAY_HOLD = 12;      // pictures that have to bear out the place a way took you to, before the way is noted...
+const WAY_WITHIN = 30000; // ...within this many ms
+const WAY_LEAST = 1.5;    // yards: a "way" shorter than this, and to the same height, is no way
+const LEVEL_WIDE = 4;     // yards: floors spanning more than this are not one height
 
 const round = (v, k = 100) => (Number.isFinite(v) ? Math.round(v * k) / k : v ?? null);
+/** The one height some floors are at ([lowest, highest]) - or null: not known, or more than one storey. */
+const levelOf = (span) => (Array.isArray(span) && span.every(Number.isFinite) && span[1] - span[0] <= LEVEL_WIDE ? (span[0] + span[1]) / 2 : null);
 
 export class Minimap {
   /**
    * @param tracker  the live link (tracker.js): asked for the pictures (look), told what was found (placed, minimapState)
    * @param Thread   (for tests) what the matcher's thread is made with
+   * @param onLearned  () => called when something of a dungeon was learned that is worth sending on
    */
-  constructor(cfg, { tracker, Thread = Worker } = {}) {
+  constructor(cfg, { tracker, Thread = Worker, onLearned = null } = {}) {
     this.dataDir = cfg.dataDir;
     this.tracker = tracker;
     this.Thread = Thread;
@@ -90,8 +103,8 @@ export class Minimap {
     this.was = null;          // where the reading before had you: { map, inside, at }
     this.came = null;         // you came in from outside: { map, at, odo, air, found }
     this.flying = null;       // the picture that is with the matcher: { at, odo }
-    this.doors = null;        // the doors of every dungeon, as the map's data has them: { at, stamp, by: Map }
-    this.learned = null;      // ...and those noted here
+    this.places = new Places(cfg.dataDir, { onNew: onLearned }); // the doors, the ways and the checks: this copy's and everybody's
+    this.proving = null;      // a way just gone, until the place it took you to has held: { map, way, n, at }
     this.trail = [];          // what the last pictures gave (see trailKept)
     this.count.how = {};
   }
@@ -99,6 +112,7 @@ export class Minimap {
   start() { /* (nothing runs until you are in a dungeon: see heard) */ }
 
   stop() {
+    this.places.save(true);
     this.#look(null);
     try { this.worker?.terminate(); } catch { /* gone */ }
     this.worker = null; this.busy = false; this.waiting = null;
@@ -203,6 +217,9 @@ export class Minimap {
       const spots = this.#doors(frame.map);
       if (spots.length) frame.door = { at: came.at, odo: came.odo, air: came.air, spots };
     }
+    // (the ways of this dungeon that its floors do not have: where to look when you are not where you can have walked to)
+    const ways = this.places.ways(frame.map);
+    if (ways.length) frame.ways = ways;
     // A look that finds nothing is a look through the whole plan, every time. Where they pile up -
     // a minimap with something over it, or made over by another addon - they are spaced out, so
     // that a core of the processor is not spent on looking for what is not there.
@@ -243,13 +260,19 @@ export class Minimap {
     const here = this.wanted && this.now?.map === r.map;
     if (here && r.ok) {
       const first = !this.fix || r.at - this.fix.at > FRESH;
-      this.fix = { map: r.map, x: r.x, y: r.y, facing: r.facing ?? null, at: r.at, band: r.band ?? null, score: r.score };
-      this.track.push({ at: r.at, x: r.x, y: r.y, rotation: r.rotation, scale: r.scale });
+      // (where the copies' checks agree that the minimap's place is off one way in this part of the dungeon, that is taken off it)
+      const off = this.places.shift(r.map, r.x, r.y);
+      const x = off ? r.x - off[0] : r.x, y = off ? r.y - off[1] : r.y;
+      this.fix = { map: r.map, x, y, facing: r.facing ?? null, at: r.at, band: r.band ?? null, score: r.score };
+      // (found: the place as the picture gave it, which the checks are made of; sure: not a guess, nor held while the picture showed nothing)
+      this.track.push({ at: r.at, x, y, found: [r.x, r.y], sure: r.how !== 'carried on' && !r.held, rotation: r.rotation, scale: r.scale });
       while (this.track.length && r.at - this.track[0].at > TRACK_FOR) this.track.shift();
       // (guess: something is over the minimap, and this is where you would have got to going on as you were)
-      this.tracker?.placed?.({ map: r.map, x: r.x, y: r.y, facing: r.facing ?? null, at: r.at, from: 'minimap', band: r.band ?? null, guess: r.how === 'carried on' });
+      this.tracker?.placed?.({ map: r.map, x, y, facing: r.facing ?? null, at: r.at, from: 'minimap', band: r.band ?? null, guess: r.how === 'carried on' });
       if (first) note('minimap', 'you are found on the minimap', { map: r.map, x: round(r.x, 10), y: round(r.y, 10), fit: round(r.score), ahead: round(r.margin), view: r.view, turned: round((r.rotation * 180) / Math.PI, 10), took: Math.round(r.ms), how: r.how ?? null, minimap: this.#geoNote(r.geo) });
       if (r.how === 'leap') note('minimap', 'a place you cannot have walked to has held for three pictures running: you are taken to be there', { map: r.map, x: round(r.x, 10), y: round(r.y, 10), from: this.track.length > 1 ? [round(this.track[this.track.length - 2].x, 10), round(this.track[this.track.length - 2].y, 10)] : null, yards: round(r.leapt, 10), fit: round(r.score) });
+      if (r.how === 'way') note('minimap', 'a way the map\'s floors do not have, known from those who went it before: you are taken to have gone it', { map: r.map, x: round(r.x, 10), y: round(r.y, 10), yards: round(r.leapt, 10), fit: round(r.score) });
+      this.#proved(r);
       this.#cameIn(r);
       this.#set('found', null);
     } else if (here) {
@@ -262,56 +285,47 @@ export class Minimap {
     if (next && this.wanted) this.#send(next);
   }
 
-  /**
-   * The doors of a dungeon: where you stand having come in - [{ x, y, z (or null), facing (or null) }].
-   * The game's own spots for them (world.json: entrances - looked at again when that file changes,
-   * once a minute at the most), and those noted here.
-   */
-  #doors(map) {
-    const t = Date.now();
-    if (!this.doors || t - this.doors.at > 60000) {
-      const file = path.join(this.dataDir, 'world.json');
-      let stamp = null;
-      try { const st = fs.statSync(file); stamp = `${st.size}:${st.mtimeMs}`; } catch { /* not there */ }
-      if (!this.doors || this.doors.stamp !== stamp) {
-        const by = new Map();
-        try {
-          for (const e of JSON.parse(fs.readFileSync(file, 'utf8')).entrances ?? []) {
-            if (!Number.isInteger(e.map) || !Array.isArray(e.pos) || !e.pos.slice(0, 2).every(Number.isFinite)) continue;
-            if (!by.has(e.map)) by.set(e.map, []);
-            by.get(e.map).push({ x: e.pos[0], y: e.pos[1], z: Number.isFinite(e.pos[2]) ? e.pos[2] : null, facing: Number.isFinite(e.facing) ? e.facing : null });
-          }
-        } catch { /* none known */ }
-        this.doors = { at: t, stamp, by };
-      } else this.doors.at = t;
-    }
-    if (!this.learned) {
-      this.learned = {};
-      try { const j = JSON.parse(fs.readFileSync(path.join(this.dataDir, 'user', 'dungeon-doors.json'), 'utf8')); if (j && typeof j === 'object' && j.doors) this.learned = j.doors; } catch { /* none noted */ }
-    }
-    const noted = (Array.isArray(this.learned[map]) ? this.learned[map] : []).filter((d) => Number.isFinite(d.x) && Number.isFinite(d.y)).map((d) => ({ x: d.x, y: d.y, z: null, facing: Number.isFinite(d.facing) ? d.facing : null }));
-    return [...(this.doors.by.get(map) ?? []), ...noted];
-  }
+  /** The doors of a dungeon: where you stand having come in - the game's own, those noted here, those other copies found (minimap-places.js). */
+  #doors(map) { return this.places.doors(map); }
 
   /**
    * A picture gave a place. The first since you came in, and you had hardly moved by then:
-   * that is where the door puts you. One the map's data does not have is noted, to begin at next time.
+   * that is where the door puts you. One the map's data does not have is noted, to begin at next
+   * time - and counted each time you come in by it again.
    */
   #cameIn(r) {
     const came = this.came;
     if (!came || came.found || came.map !== r.map) return;
     came.found = true;
     const went = this.flying && Number.isFinite(this.flying.odo) && this.flying.at === r.at ? this.flying.odo - came.odo : Infinity;
-    if (!(went < DOOR_STOOD) || this.#doors(r.map).some((d) => Math.hypot(d.x - r.x, d.y - r.y) <= DOOR_SAME)) return;
-    const list = (this.learned[r.map] ??= []);
-    list.push({ x: round(r.x, 10), y: round(r.y, 10), facing: Number.isFinite(r.facing) ? round(r.facing) : null, at: new Date(r.at).toISOString() });
-    while (list.length > 6) list.shift();
-    note('minimap', 'a door the map did not know: noted, to begin at when you next come in by it', { map: r.map, x: round(r.x, 10), y: round(r.y, 10) });
-    try {
-      const dir = path.join(this.dataDir, 'user');
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, 'dungeon-doors.json'), JSON.stringify({ v: 1, doors: this.learned }, null, 1));
-    } catch (err) { note('minimap', 'the door could not be written down', { error: err.message }); }
+    if (!(went < DOOR_STOOD)) return;
+    const what = this.places.cameIn(r.map, { x: r.x, y: r.y, z: levelOf(r.floors), facing: Number.isFinite(r.facing) ? r.facing : null });
+    if (what === 'new') note('minimap', 'a door the map did not know: noted, to begin at when you next come in by it', { map: r.map, x: round(r.x, 10), y: round(r.y, 10) });
+  }
+
+  /**
+   * A way gone: a place you cannot have walked to that held for three pictures (the result says
+   * from where - the last place the picture told for sure - to where it was first seen). That may
+   * as well be the trail having gone wrong and been put right. So it is noted only once the
+   * place it took you to has been borne out by a dozen pictures more; and one finding is not
+   * gone by (minimap-places.js). A way that was known, taken, and borne out the same is counted
+   * as gone once more: so each copy that goes a way other copies found adds its own word to theirs.
+   */
+  #proved(r) {
+    const p = this.proving;
+    if (p && (p.map !== r.map || r.at - p.at > WAY_WITHIN || ['leap', 'way', 'found', 'door'].includes(r.how))) this.proving = null;
+    else if (p && ['followed', 'stood', 'looked round'].includes(r.how) && ++p.n >= WAY_HOLD) {
+      this.proving = null;
+      const times = this.places.went(p.map, p.way.from, p.way.to);
+      note('minimap', p.way.known ? 'a way known from before, gone and borne out: counted' : times > 1 ? 'a way the map\'s floors do not have, gone again: counted' : 'a way the map\'s floors do not have: noted (gone by once it is seen again, here or by another copy)', { map: p.map, from: p.way.from.map((v) => round(v, 10)), to: p.way.to.map((v) => round(v, 10)), times });
+    }
+    // (a way known from before that was taken is to be borne out the same: then this copy has gone it too, and says so)
+    const w = r.how === 'leap' || r.how === 'way' ? r.way : null;
+    if (!w || !Array.isArray(w.from) || !Array.isArray(w.to)) return;
+    // (a step of a yard to the same height is the floors having a hole a cell wide: no way)
+    const across = Math.hypot(w.to[0] - w.from[0], w.to[1] - w.from[1]), up = Number.isFinite(w.from[2]) && Number.isFinite(w.to[2]) ? Math.abs(w.to[2] - w.from[2]) : null;
+    if (across < WAY_LEAST && !(up > LEVEL_WIDE)) return;
+    this.proving = { map: r.map, way: w, n: 0, at: r.at };
   }
 
   /**
@@ -366,6 +380,8 @@ export class Minimap {
       if (a && b && fix.at - a.at <= 700 && b.at - fix.at <= 700 && Math.hypot(a.x - b.x, a.y - b.y) <= STILL) {
         const k = (fix.at - a.at) / Math.max(1, b.at - a.at), x = a.x + (b.x - a.x) * k, y = a.y + (b.y - a.y) * k;
         const off = Math.hypot(x - fix.x, y - fix.y);
+        // (kept by the part of the dungeon, and sent on: the place as the picture gave it, where it was no guess)
+        if (a.sure && b.sure && a.found && b.found) this.places.checked(fix.map, fix.x, fix.y, a.found[0] + (b.found[0] - a.found[0]) * k - fix.x, a.found[1] + (b.found[1] - a.found[1]) * k - fix.y);
         const c = (this.check ??= { n: 0, sum: 0, worst: 0, last: null });
         c.n++; c.sum += off; c.worst = Math.max(c.worst, off);
         c.last = { at: fix.at, minimap: [round(x), round(y)], log: [round(fix.x), round(fix.y)], off: round(off) };
@@ -406,6 +422,8 @@ export class Minimap {
       spared: this.fruitless >= SPARE_AFTER, pictures: c.pictures, found: c.found, followed: c.followed, searched: c.searched, refused: c.refused, dropped: c.dropped, why_refused: c.why,
       // (with the trail: how each picture's place was come by; how far you have gone; whether you came in by a door)
       how: c.how, gone: round(this.odo, 10), speedSaid: this.moved?.said ?? null, cameIn: this.came ? { at: this.came.at, found: this.came.found, doors: this.#doors(this.came.map).length } : null,
+      // (what is known of this dungeon beyond the map's own data: doors, ways, checks - this copy's and the other copies')
+      places: Number.isInteger(this.now?.map) && this.wanted ? this.places.status(this.now.map) : null,
       fix: this.fix ? { ...this.fix, x: round(this.fix.x), y: round(this.fix.y), age: Date.now() - this.fix.at } : null,
       nudge: this.nudge.map((v) => round(v)), check: this.check ? { checks: this.check.n, mean: round(this.check.sum / this.check.n), worst: round(this.check.worst), last: this.check.last } : null,
       last: k ? {

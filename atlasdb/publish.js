@@ -4,8 +4,9 @@
 //
 //   /meta                      what is published: its number (rev), when, how many of each kind,
 //                              what it was made from, and a fingerprint of every shard
-//   /truth/<kind>/b<n>/i<id>   the records (records.js): kind is npc, object or quest; a shard
-//                              holds the ids n to n+499
+//   /truth/<kind>/b<n>/i<id>   the records (records.js): kind is npc, object or quest - or place,
+//                              a dungeon with what the copies learned of its insides (places.js);
+//                              a shard holds the ids n to n+499
 //   /inbox/<copy>/<key>        what each copy of the map has sent (collect.js): added to, never
 //                              changed. Everything published can be made again from these and
 //                              the sources on the maker's own disk. Where several copies have
@@ -26,7 +27,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { findQuestieDb, readQuestie } from '../extractor/questie.js';
 import { readReference } from '../extractor/reference.js';
-import { KINDS, SCHEMA, LAYERS, fromQuestie, fromReference, mergeAll, shards, canonical, tidy, cacheSays } from './records.js';
+import { KINDS, PLACE, PUBLISHED, SCHEMA, LAYERS, fromQuestie, fromReference, mergeAll, shards, canonical, tidy, cacheSays } from './records.js';
+import { foldPlaces } from './places.js';
 import { entries, SERVER_TIME } from './rtdb.js';
 
 const SAME = 30;            // yards: sightings of one NPC this close together are the same spot
@@ -35,6 +37,8 @@ const SOLD = 200;           // the most things kept of what one vendor sells
 const TAUGHT = 400;         // ...and of what one trainer teaches
 const PINS = 12;            // the most places kept of one kind of pin of a quest on one of the game's maps
 const PIN_SAME = 1.5;       // per cent of the map: pins of a quest this close together are one pin
+const LEVEL_SAME = 5;       // yards: two words on the level a creature was fought on this close together are of one spot
+const LEVEL_APART = 4;      // ...and this far apart in height, they are of two levels (what most say is kept; a tie, nothing)
 const REQUEST = 3 << 20;    // bytes of records to one request
 const WHOLE = 40;           // shards wanted of one kind beyond which the whole kind is fetched at once
 
@@ -139,9 +143,14 @@ function mostSaid(voices) {
  *   t,<id>,<spell>,<copper>,<skill>,<skill level>,<level>     what a trainer teaches, and what it asks
  *   q,<quest>,<s, o or e>,<the game's map>,<x>,<y>            where the game's own map puts a quest:
  *                                where it starts, an objective, where it is handed in (per cent of that map)
+ *   h,<id>,<map>,<x>,<y>,<z>     a spot of the map's own for a creature, and the height of the level
+ *                                a player fought it on there (where the map had only guessed)
+ *   d,... j,... c,...            of a dungeon: a door, a way its floors do not have, how far off the
+ *                                minimap's place is (places.js has the three, and puts them together)
  * A line of any other kind is left out: a later version's, which this one does not know.
  * @param inbox what GET /inbox returned
- * @returns { cache, seen, logged, obs, copies, deliveries, splits: [{ kind, id, field, said }] }
+ * @returns { cache, seen, logged, obs, copies, deliveries, splits: [{ kind, id, field, said }],
+ *            places: Map<map, a dungeon's record> }
  */
 export function fold(inbox) {
   const reports = { npc: new Map(), object: new Map(), quest: new Map() }; // id -> Map<copy, { copy, at, key, build, rec }>
@@ -152,6 +161,8 @@ export function fold(inbox) {
   const sells = new Map();  // id -> Map<item, Map<copy, [copper, how many, limited]>>
   const teaches = new Map(); // id -> Map<spell, Map<copy, [copper, skill, skill level, level]>>
   const pins = new Map();   // "quest:s|o|e:the game's map" -> [{ x, y, by: Map<copy, [x, y]> }]
+  const fought = new Map(); // "123:m0" -> [{ x, y, by: Map<copy, z> }]: the level a creature was fought on at a spot
+  const ofPlaces = new Map(); // copy -> [its lines of the dungeons, in the order sent]
   const whole = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
   let deliveries = 0;
   const copies = entries(inbox);
@@ -179,6 +190,24 @@ export function fold(inbox) {
         const p = String(line).split(',');
         const k = p[0], id = +p[1], map = +p[2], x = +p[3], y = +p[4], z = +p[5];
         if (!Number.isInteger(id) || id <= 0) continue;
+        if (k === 'd' || k === 'j' || k === 'c') {
+          // of a dungeon: put together by places.js, a copy's lines in the order it sent them
+          let mine = ofPlaces.get(copy);
+          if (!mine) ofPlaces.set(copy, (mine = []));
+          mine.push(String(line));
+          continue;
+        }
+        if (k === 'h') {
+          // the level a creature was fought on at a spot: a copy's later word on a spot stands for its earlier one
+          if (p.length !== 6 || !Number.isInteger(map) || map < 0 || ![x, y, z].every((v) => Number.isFinite(v) && Math.abs(v) < 40000)) continue;
+          const key = `${id}:m${map}`;
+          let list2 = fought.get(key);
+          if (!list2) fought.set(key, (list2 = []));
+          const near = list2.find((s) => Math.hypot(s.x - x, s.y - y) < LEVEL_SAME);
+          if (near) near.by.set(copy, z);
+          else if (list2.length < FLATS) list2.push({ x, y, by: new Map([[copy, z]]) });
+          continue;
+        }
         if (k === 'f') {
           // where a creature was when a fight began: the same spot from several copies is one spot, in the middle of what they say
           if (!Number.isInteger(map) || map < 0 || ![x, y].every((v) => Number.isFinite(v) && Math.abs(v) < 40000)) continue;
@@ -312,6 +341,24 @@ export function fold(inbox) {
     of(id).teaches = [...things].map(([spell, voices]) => [spell, Math.max(...[...voices.values()].map((v) => v[0])), column(voices, 1), column(voices, 2), column(voices, 3)]).sort((a, b) => a[0] - b[0]);
     for (const voices of things.values()) by(id, voices.keys());
   }
+  // The level a creature was fought on, spot by spot: what most copies say (their heights within a
+  // few yards of each other are one level, and its height the middle of theirs); where two levels
+  // are said by as many, nothing - the map goes on guessing there.
+  for (const [key, list] of fought) {
+    const m = /^(\d+):(m\d+)$/.exec(key), id = +m[1], spots2 = [];
+    for (const s of list) {
+      const levels = []; // [{ z, n }]
+      for (const z of [...s.by.values()].sort((a, b) => a - b)) {
+        const at = levels.find((l) => Math.abs(l.z - z) < LEVEL_APART);
+        if (at) { at.z = (at.z * at.n + z) / (at.n + 1); at.n++; } else levels.push({ z, n: 1 });
+      }
+      levels.sort((a, b) => b.n - a.n);
+      if (levels.length > 1 && levels[0].n === levels[1].n) continue;
+      spots2.push([r2(s.x), r2(s.y), r2(levels[0].z), levels[0].n].join(','));
+      by(id, s.by.keys());
+    }
+    if (spots2.length) (of(id).fz ??= {})[m[2]] = spots2.join(' ');
+  }
   // Where the game's own map puts a quest: { s: { u<the game's map>: "x,y x,y" }, o: ..., e: ... }
   for (const [key, list] of pins) {
     const [quest, what, ui] = key.split(':');
@@ -324,7 +371,7 @@ export function fold(inbox) {
     o.l = [names.size];
     obs.npc.set(id, o);
   }
-  return { cache, seen, logged, obs, copies: copies.length, deliveries, splits };
+  return { cache, seen, logged, obs, copies: copies.length, deliveries, splits, places: foldPlaces(ofPlaces) };
 }
 
 /**
@@ -382,6 +429,9 @@ export async function buildTruth(cfg, dataDir, inbox, log = () => {}) {
   if (got.splits.length) log(`the copies' caches disagree about ${got.splits.length.toLocaleString()} ${got.splits.length === 1 ? 'fact' : 'facts'}: settled by vote ("votes" lists them)`);
   const records = {};
   for (const kind of KINDS) records[kind] = mergeAll(kind, sources[kind], got.obs[kind]);
+  // the dungeons: what the copies learned of their insides, as it was folded (no other source says anything of that)
+  records[PLACE] = got.places;
+  if (got.places.size) { from.places = got.places.size; log(`the dungeons, as the copies went through them: ${got.places.size} with a door, a way or checks of the minimap's place`); }
   return { records, from, splits: got.splits };
 }
 
@@ -392,7 +442,8 @@ export async function publish(db, truth, { dry = false, log = () => {} } = {}) {
   const meta = (await db.get('meta')) ?? {};
   const next = { schema: SCHEMA, rev: (meta.rev ?? 0) + 1, at: SERVER_TIME, counts: {}, from: truth.from, shards: {} };
   let changed = 0, removed = 0, bytes = 0;
-  for (const kind of KINDS) {
+  for (const kind of PUBLISHED) {
+    if (!truth.records[kind]) continue; // (made by something that does not know the kind: what is published of it stays)
     const { shards: parts, hashes } = shards(truth.records[kind]);
     next.counts[kind] = truth.records[kind].size;
     next.shards[kind] = {};
@@ -415,6 +466,8 @@ export async function publish(db, truth, { dry = false, log = () => {} } = {}) {
     await flush();
     log(`${kind}: ${truth.records[kind].size.toLocaleString()} records in ${parts.size} shards`);
   }
+  // (a kind this run did not make keeps what is published of it)
+  for (const kind of PUBLISHED) if (!truth.records[kind] && meta.shards?.[kind]) { next.shards[kind] = Object.fromEntries(entries(meta.shards[kind])); if (meta.counts?.[kind] !== undefined) next.counts[kind] = meta.counts[kind]; }
   const same = !changed && !removed && meta.schema === SCHEMA;
   if (!dry && !same) await db.put('meta', next);
   return { rev: same ? meta.rev ?? 0 : next.rev, changed, removed, bytes, same, dry };
@@ -430,7 +483,7 @@ export async function pull(db, store, log = () => {}) {
   const mine = store.read('truth-meta.json', {});
   let fetched = 0;
   const counts = {};
-  for (const kind of KINDS) {
+  for (const kind of PUBLISHED) {
     const want = Object.fromEntries(entries(meta.shards[kind]));
     const have = mine.schema === meta.schema ? mine.shards?.[kind] ?? {} : {};
     const local = store.read(`truth-${kind}.json`, {});
@@ -450,7 +503,7 @@ export async function pull(db, store, log = () => {}) {
     counts[kind] = Object.values(local).reduce((a, p) => a + Object.keys(p).length, 0);
     store.write(`truth-${kind}.json`, local);
   }
-  store.write('truth-meta.json', { schema: meta.schema, rev: meta.rev, at: meta.at, counts: meta.counts, from: meta.from, shards: Object.fromEntries(KINDS.map((k) => [k, Object.fromEntries(entries(meta.shards[k]))])) });
+  store.write('truth-meta.json', { schema: meta.schema, rev: meta.rev, at: meta.at, counts: meta.counts, from: meta.from, shards: Object.fromEntries(PUBLISHED.map((k) => [k, Object.fromEntries(entries(meta.shards[k]))])) });
   log(`database ${meta.rev}: ${fetched} shards fetched`);
   return { rev: meta.rev, fetched, counts };
 }
