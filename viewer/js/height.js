@@ -998,8 +998,11 @@ export class HeightTracker {
     if (d > (L.lift.r ?? 7) + LIFT_WATCH) { this.lift = null; return; }
     if (!L.stood || d <= (L.lift.r ?? 7) - 2) return;
     const can = [...standable(sf.all), ...this.#props(sf)];
-    const end = Math.abs(L.from - L.lift.lo) <= Math.abs(L.from - L.lift.hi) ? L.lift.hi : L.lift.lo; // the end you did not get on at
-    const there = can.reduce((b, v) => (Math.abs(v - end) <= LIFT_NEAR && (b === null || Math.abs(v - end) < Math.abs(b - end)) ? v : b), null);
+    // the stops you did not get on at (two ends - or more: the scaffold cars of the Searing Gorge call at four heights)
+    const stops = Array.isArray(L.lift.stops) && L.lift.stops.length >= 2 ? L.lift.stops : [L.lift.lo, L.lift.hi];
+    const on = stops.reduce((b, v) => (Math.abs(v - L.from) < Math.abs(b - L.from) ? v : b));
+    const off = (v) => stops.reduce((b, s) => (s === on ? b : Math.min(b, Math.abs(v - s))), Infinity);
+    const there = can.reduce((b, v) => (off(v) <= LIFT_NEAR && (b === null || off(v) < off(b)) ? v : b), null);
     if (there === null || Math.abs(there - this.z) < ALT_APART) return;
     const here = can.some((v) => v >= this.z - SAME_DOWN && v <= this.z + SAME_UP);
     const was = this.z;

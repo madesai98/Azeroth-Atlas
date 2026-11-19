@@ -131,6 +131,7 @@ const FIGHT_SLOPE = 0.15; // ...and this much more for each yard further off (th
 const FIGHT_CLEAR = 3;   // yards nearer your height the floor on your level has to be than any other at that spot
 const KEY = 'wfmap.npcs';
 const STRIDE = 6;        // floats per marker: position (from the layer's origin), sign, shown at any distance, size
+const DOOR_SAME = 600;   // yards: QuestieDB's pin for a dungeon this near the spot the game itself names for its door is that door, less exactly
 const SIZE = [1, 1.25, 1.3, 1.6, 1.1]; // how big a figure is, by rank: ordinary, elite, rare elite, boss, rare
 const TALL = 1.9;        // yards: a figure's height at size 1 (see npcfigures.js)
 const SIGN_FAR = 2.4;    // yards above the feet a sign floats on its own...
@@ -498,8 +499,14 @@ export class NpcLayer {
 
   /**
    * The way in to the dungeon a quest is done in, where the map knows of one (world.json:
-   * dungeons, from QuestieDB - a quest is filed under its dungeon's area): the nearest door on
-   * this map, else one on another. { x, y, z: null, name, done: false, map (where not this one) } or null.
+   * dungeons - a quest is filed under its dungeon's area): the nearest door on this map, else
+   * one on another. { x, y, z: null, name, done: false, map (where not this one) } or null.
+   *
+   * A door is where QuestieDB pins the dungeon on its zone's map - or, better, the spot the
+   * game's own tables name for it (where a ghost goes back in: the door itself). QuestieDB's
+   * pin for Gnomeregan is by the top of the lift, three hundred yards and a lift's ride short
+   * of the door; from the door, the way to "the way in" led back up and out. So the game's
+   * spot stands in for every pin near it.
    */
   #door(q, from) {
     const list = this.app.world?.dungeons;
@@ -507,8 +514,10 @@ export class NpcLayer {
     const dungeon = list.find((x) => x.area === q.z || x.also?.includes(q.z));
     if (!dungeon) return null;
     const here = this.data?.map ?? this.app.scene?.map.id;
+    const own = dungeon.ghost ?? null;
+    const doors = own ? [own, ...dungeon.doors.filter((d) => !(d.map === own.map && Math.hypot(d.pos[0] - own.pos[0], d.pos[1] - own.pos[1]) <= DOOR_SAME))] : dungeon.doors;
     let best = null, bestD = Infinity;
-    for (const door of dungeon.doors) {
+    for (const door of doors) {
       // (one on the map you are on comes before any that is not)
       const dist = door.map === here ? Math.hypot(door.pos[0] - from[0], door.pos[1] - from[1]) : 1e9;
       if (dist < bestD) { bestD = dist; best = door; }

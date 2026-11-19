@@ -3,12 +3,13 @@
 import { note, changed } from './log.js';
 import { GLOBALS_WGSL, targets, depthState, ALPHA_BLEND } from './gpu.js';
 import { wayOf, nearestOn } from './transit.js';
-import { FELL, FALL_SPEED, fallsOf } from './falls.js';
+import { FELL, LIFTED, FALL_SPEED, fallsOf } from './falls.js';
 import { navTiles } from './navgrid.js';
 
 const REPLAN_OFF = 10;      // yards off the route before a new one is worked out
 const REPLAN_EVERY = 20000; // ms: refresh while travelling even if nothing seems to have changed
 const REPLAN_GAP = 2500;    // ms: never search more often than this
+const REPLAN_RISE = 3;      // yards up or down from where the route was asked from that count as having moved, though you stand on the same spot of the map (a lift)
 const SETTLE_FOR = 20000;   // ms: a journey being worked out is given this long before a question from where you are by then takes its place
 const LEVEL_WEIGH = 4;      // a yard above or below the route counts as this many beside it: a floor up or down is off it
 const LIFT = 0.7;           // yards the line floats above the ground
@@ -32,6 +33,7 @@ const REMEMBER = 300;       // walks already worked out that are kept (the far l
 const FAIL_CELL = 32;       // yards: a long search that found no way is not repeated from within this far of where it began...
 const FAIL_FOR = 60000;     // ms: ...for this long
 const FAIL_COST = 200000;   // floors a failed search looked at before it counts as a long one
+const LIFT_SECONDS = 25;    // a lift's wait and ride, where the search that took it did not say
 const SPEED_KEY = 'wfmap.flightSpeed';
 const whole = (v) => (Number.isFinite(v) ? Math.round(v) : null);
 
@@ -99,11 +101,13 @@ export class RoutePlanner {
   #said() {
     const r = this.route, a = this.asked;
     const legs = (r?.legs ?? []).map((l) => `${l.mode}${l.from && l.mode !== 'walk' ? ` ${l.from} >` : ''}${l.to ? ` ${l.to}` : ''}${l.name ? ` ${l.name}` : ''}`);
+    // (the lifts it takes: said with the way, and a way that takes one is another way than one that does not)
+    const lifts = r?.rides?.length ? r.rides.map((x) => `${x.name || 'lift'} ${whole(x.from)} > ${whole(x.to)}`) : undefined;
     // (someone in your party is somewhere new with every look: the way to them is noted when its kind changes)
     const to = a && !/^ally/.test(this.label) ? [a.toMap, whole(a.to[0]), whole(a.to[1]), whole(a.to[2])] : null;
-    if (!changed(`way.${this.label}`, { to, way: r ? legs : null, none: r ? null : this.status || '-', first: !!r?.provisional })) return;
+    if (!changed(`way.${this.label}`, { to, way: r ? legs : null, lifts, none: r ? null : this.status || '-', first: !!r?.provisional })) return;
     const more = { to, from: a ? a.from.map(whole) : null, onMap: a?.map, hearthstoneLeadsNobodyKnowsWhere: this.noBind || undefined };
-    if (r) note('route', `${this.label}: ${r.provisional ? 'a first answer, on foot (quicker ways are still looked for)' : legs.length > 1 ? legs.join(', then ') : 'on foot'}`, { ...more, seconds: whole(r.seconds), yards: whole(r.length), onFootAllTheWay: whole(r.walking) ?? undefined, detached: r.detached || undefined, tookMs: a ? whole(performance.now() - a.time) : null });
+    if (r) note('route', `${this.label}: ${r.provisional ? 'a first answer, on foot (quicker ways are still looked for)' : legs.length > 1 ? legs.join(', then ') : 'on foot'}`, { ...more, seconds: whole(r.seconds), yards: whole(r.length), lifts, onFootAllTheWay: whole(r.walking) ?? undefined, detached: r.detached || undefined, tookMs: a ? whole(performance.now() - a.time) : null });
     else note('route', `${this.label}: ${a ? `no way${this.status ? ` (${this.status})` : ''}` : `heading nowhere${this.status ? ` (${this.status})` : ''}`}`, more);
   }
 
@@ -112,8 +116,19 @@ export class RoutePlanner {
     return new Promise((resolve) => {
       const id = ++this.hub.seq;
       this.hub.waiters.set(id, resolve);
-      this.hub.worker.postMessage({ type: 'route', id, from, to, run: opts.run, swim: opts.swim, nav: opts.nav ?? this.info, landFrom: !!opts.landFrom, landTo: !!opts.landTo, levels: !!opts.levels });
+      // (with the lifts of that map: a walk takes them like any other step - navworker.js)
+      const nav = opts.nav ?? this.info;
+      this.hub.worker.postMessage({ type: 'route', id, from, to, run: opts.run, swim: opts.swim, nav: nav ? { ...nav, lifts: this.#liftsOn(nav.map) } : nav, landFrom: !!opts.landFrom, landTo: !!opts.landTo, levels: !!opts.levels });
     });
+  }
+
+  /** The lifts of a map, as the route worker is told them (world.json: lifts). */
+  #liftsOn(map) {
+    const all = this.app.world?.lifts;
+    if (!all) return [];
+    const kept = (this.hub.lifts ??= new Map());
+    if (!kept.has(map)) kept.set(map, all.filter((l) => l.map === map).map((l) => ({ name: l.name, x: l.x, y: l.y, lo: l.lo, hi: l.hi, r: l.r, stops: l.stops, round: l.round, speed: l.speed, still: l.still })));
+    return kept.get(map);
   }
 
   /**
@@ -163,9 +178,11 @@ export class RoutePlanner {
     if (!m.ok) { if (!planned) this.route = null; this.status = elsewhere ? '' : m.reason; }
     else {
       const n = m.points.length / 3, cum = new Float32Array(n);
-      for (let i = 1; i < n; i++) cum[i] = cum[i - 1] + Math.hypot(m.points[i * 3] - m.points[i * 3 - 3], m.points[i * 3 + 1] - m.points[i * 3 - 2], m.points[i * 3 + 2] - m.points[i * 3 - 1]);
+      // (a lift's ride is no yards of the way: it is time - #times)
+      for (let i = 1; i < n; i++) cum[i] = cum[i - 1] + (m.kinds[i] & LIFTED ? 0 : Math.hypot(m.points[i * 3] - m.points[i * 3 - 3], m.points[i * 3 + 1] - m.points[i * 3 - 2], m.points[i * 3 + 2] - m.points[i * 3 - 1]));
       direct = {
-        points: m.points, kinds: m.kinds, length: m.length, seconds: m.seconds, cum, time: this.#times(m.points, m.kinds), target: asked.to, at: 0, ms: m.ms, expanded: m.expanded,
+        points: m.points, kinds: m.kinds, length: m.length, seconds: m.seconds, cum, time: this.#times(m.points, m.kinds, m.rides), target: asked.to, at: 0, ms: m.ms, expanded: m.expanded,
+        rides: m.rides ?? [], // (the lifts it takes: [{ at (the point come to on one), seconds, from, to, name }])
         // (end: the last point of the line that belongs to this part; lastWalk: where the walk to the waypoint itself begins)
         legs: [{ mode: 'walk', yards: m.length, seconds: m.seconds, end: n - 1 }], lastWalk: { map: asked.map, from: asked.from, land: false },
       };
@@ -246,11 +263,13 @@ export class RoutePlanner {
     }).then(() => { if (this.asked === asked) this.#said(); });
   }
 
-  /** Seconds from the start to each point of a route (walking, swimming and flying at their speeds; a fall, at the speed you come down). */
-  #times(points, kinds) {
+  /** Seconds from the start to each point of a route (walking, swimming and flying at their speeds; a fall, at the speed you come down; a lift, its wait and its ride). */
+  #times(points, kinds, rides = null) {
     const run = this.speeds?.run || 7, swim = this.speeds?.swim || run * 0.67;
     const t = new Float32Array(points.length / 3);
+    const ride = new Map((rides ?? []).map((x) => [x.at, x.seconds]));
     for (let i = 1; i < t.length; i++) {
+      if (kinds[i] & LIFTED) { t[i] = t[i - 1] + (ride.get(i) ?? LIFT_SECONDS); continue; }
       const dx = points[i * 3] - points[i * 3 - 3], dy = points[i * 3 + 1] - points[i * 3 - 2], dz = points[i * 3 + 2] - points[i * 3 - 1];
       if (kinds[i] & FELL && !(kinds[i] & 4)) { t[i] = t[i - 1] + Math.hypot(dx, dy) / run + Math.max(0, -dz) / FALL_SPEED; continue; }
       t[i] = t[i - 1] + Math.hypot(dx, dy, dz) / (kinds[i] & 4 ? this.flightSpeed : kinds[i] & 1 ? swim : run);
@@ -262,6 +281,12 @@ export class RoutePlanner {
   fallsAhead() {
     const r = this.route;
     return r ? fallsOf(r.points, r.kinds, r.at) : [];
+  }
+
+  /** The lifts still ahead on the route shown: [{ at, seconds, from, to, name }] (navworker.js: rides). */
+  liftsAhead() {
+    const r = this.route;
+    return (r?.rides ?? []).filter((x) => x.at > r.at);
   }
 
   /** What the route worker needs to search a map: { map, rev, tiles } (null if it has no walking data). */
@@ -620,16 +645,19 @@ export class RoutePlanner {
     // (also: the lines of the journey that are shown but not followed - its parts on other maps,
     // and its crossings by boat and zeppelin: { map, points, kinds (one for each point, or one
     // for all), joins (it goes on from the line before, over the sea between two maps) })
-    const legs = [], points = [], kinds = [], time = [], also = [];
+    const legs = [], points = [], kinds = [], time = [], also = [], lifts = [];
     const shown = (map, pts, k, joins = false) => { if (pts && pts.length >= 6) also.push({ map, points: pts, kinds: k, joins }); };
     let clock = 0, lastWalk = null;
-    const draw = (p, k, seconds) => {
-      // times along a drawn piece, spread by distance
+    const draw = (p, k, seconds, rides = null) => {
+      // times along a drawn piece, spread by distance (a lift's wait and ride counting as the yards run in that time)
       let total = 0;
       const n = p.length / 3, d = new Float32Array(n);
-      for (let i = 1; i < n; i++) { total += Math.hypot(p[i * 3] - p[i * 3 - 3], p[i * 3 + 1] - p[i * 3 - 2], p[i * 3 + 2] - p[i * 3 - 1]); d[i] = total; }
+      const ride = new Map((rides ?? []).map((x) => [x.at, x.seconds]));
+      for (let i = 1; i < n; i++) { total += typeof k !== 'number' && k[i] & LIFTED ? (ride.get(i) ?? LIFT_SECONDS) * run : Math.hypot(p[i * 3] - p[i * 3 - 3], p[i * 3 + 1] - p[i * 3 - 2], p[i * 3 + 2] - p[i * 3 - 1]); d[i] = total; }
       // a stretch that starts somewhere else than the last one ended (the far end of the tram) is not joined to it
       const m = points.length;
+      // (the lifts of this piece, by their place on the whole line)
+      for (const x of rides ?? []) lifts.push({ ...x, at: m / 3 + x.at });
       const apart = m > 0 && Math.hypot(p[0] - points[m - 3], p[1] - points[m - 2]) > GAP;
       for (let i = 0; i < n; i++) { points.push(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]); kinds.push((typeof k === 'number' ? k : k[i]) | (apart && i === 0 ? BREAK : 0)); time.push(clock + (total > 0 ? (seconds * d[i]) / total : 0)); }
     };
@@ -642,7 +670,7 @@ export class RoutePlanner {
         const before = legs[legs.length - 1];
         if (before?.mode === 'walk' && before.map === e.map) { before.yards += r.length; before.seconds += r.seconds; before.rough = before.rough || !!r.rough; before.to = to; }
         else legs.push({ mode: 'walk', yards: r.length, seconds: r.seconds, rough: !!r.rough, map: e.map, to });
-        if (e.map === this.mapId && r.points) { draw(r.points, r.kinds, r.seconds); legs[legs.length - 1].end = kinds.length - 1; }
+        if (e.map === this.mapId && r.points) { draw(r.points, r.kinds, r.seconds, r.rides); legs[legs.length - 1].end = kinds.length - 1; }
         else shown(e.map, r.points, r.kinds);
         if (b === G) lastWalk = { map: e.map, from: a.pos, land: !!a.land };
       } else if (e.mode === 'flight') {
@@ -686,10 +714,10 @@ export class RoutePlanner {
       clock += e.seconds;
     }
     const p = new Float32Array(points), cum = new Float32Array(kinds.length);
-    for (let i = 1; i < cum.length; i++) cum[i] = cum[i - 1] + (kinds[i] & BREAK ? 0 : Math.hypot(p[i * 3] - p[i * 3 - 3], p[i * 3 + 1] - p[i * 3 - 2], p[i * 3 + 2] - p[i * 3 - 1]));
+    for (let i = 1; i < cum.length; i++) cum[i] = cum[i - 1] + (kinds[i] & (BREAK | LIFTED) ? 0 : Math.hypot(p[i * 3] - p[i * 3 - 3], p[i * 3 + 1] - p[i * 3 - 2], p[i * 3 + 2] - p[i * 3 - 1]));
     const first = plan.chain[0];
     this.route = {
-      points: p, kinds: new Uint8Array(kinds), cum, time: new Float32Array(time), length: cum.length ? cum[cum.length - 1] : 0,
+      points: p, kinds: new Uint8Array(kinds), cum, time: new Float32Array(time), length: cum.length ? cum[cum.length - 1] : 0, rides: lifts,
       seconds: plan.seconds, target: asked.to, at: 0, legs, lastWalk, walking: direct.ok ? direct.seconds : null, also,
       // a journey that does not begin with a walk from where you stand (or with one too long to
       // draw), nor with the flight you are on: being far from its line is expected
@@ -736,13 +764,20 @@ export class RoutePlanner {
    * under a bridge it crosses, you are not on that part of it, however near it looks from above.
    * (Not along water, where you may be well below the surface the route runs on; nor down a
    * fall, where you are somewhere between its top and its foot for as long as it lasts.)
+   *
+   * A lift has two points of the line, one over the other: the stop you get on at, and the stop
+   * it takes you to. You are at the one your height is nearer - which, the game saying nothing
+   * of your height while a lift carries you, is the first until you are known to be at the
+   * other: walking up to a lift, and riding it, the ride is still ahead of you.
    */
   #progress(x, y, z) {
     const r = this.route, p = r.points, kinds = r.kinds;
     const tall = Number.isFinite(z);
     let best = r.at, bestD = Infinity;
     for (let i = Math.max(0, r.at - 4); i < Math.min(p.length / 3, r.at + 60); i++) {
-      const dz = tall && !(kinds[i] & (1 | FELL)) ? (p[i * 3 + 2] - z) * LEVEL_WEIGH : 0;
+      let dz = tall && !(kinds[i] & (1 | FELL | LIFTED)) ? (p[i * 3 + 2] - z) * LEVEL_WEIGH : 0;
+      // (the stop a lift takes you to: yours once your height is nearer it than the stop you got on at)
+      if (tall && kinds[i] & LIFTED && i > 0 && Math.abs(z - p[i * 3 - 1]) < Math.abs(z - p[i * 3 + 2])) dz = (p[i * 3 + 2] - z) * LEVEL_WEIGH;
       const d = Math.hypot(p[i * 3] - x, p[i * 3 + 1] - y, dz);
       if (d < bestD) { bestD = d; best = i; }
     }
@@ -821,6 +856,11 @@ export class RoutePlanner {
     // anew (what is left of the flight is timed by it) - not every few yards, and not as a walk
     // from the ground under you.
     const flight = this.#flight(ride);
+    // How far you are from where the route in hand was asked from: across the map - or up and
+    // down. (A lift carries you a hundred yards and not one across the map: the way on from its
+    // foot was not asked for until you had walked off it, and the way shown was the one from
+    // its top.)
+    const gone = (far) => !!a && (Math.hypot(a.from[0] - me[0], a.from[1] - me[1]) > far || (Number.isFinite(a.from[2]) && Number.isFinite(me[2]) && Math.abs(a.from[2] - me[2]) > REPLAN_RISE));
     if (flight) {
       const same = !!a?.flight && a.flight.dest === flight.dest && a.flight.paths.includes(flight.path) && Math.abs(a.flight.speed - flight.speed) <= 1;
       if (!need) need = !same || (a.done && a.settled && !this.route && now - a.time > 5000);
@@ -834,10 +874,10 @@ export class RoutePlanner {
       if (!need) return;
     } else if (!need && a.flight) need = true; // landed: from where you stand now
     else if (!need && a.done && this.route) {
-      if ((this.off > REPLAN_OFF && !this.route.detached) || now - a.time > REPLAN_EVERY) need = Math.hypot(a.from[0] - me[0], a.from[1] - me[1]) > 3;
+      if ((this.off > REPLAN_OFF && !this.route.detached) || now - a.time > REPLAN_EVERY) need = gone(3);
     } else if (!need && a.done && !this.route) {
       // nothing found last time: try again once you have moved a bit
-      need = Math.hypot(a.from[0] - me[0], a.from[1] - me[1]) > 15;
+      need = gone(15);
     }
     // (A journey still being worked out is left to finish: it takes a few seconds - the walks to
     // flight masters, a search or two that finds no way - and while you run, every few yards

@@ -6,7 +6,7 @@ import { loadTable } from './tables.js';
 import { readCache } from './hotfix.js';
 import { transportLines, findPortalData, readPortals } from './transit.js';
 
-export const WORLD_VERSION = 8; // raise when the contents of world.json change (6: lifts; 7: bosses, and what the server sent since the game's files were made; 8: locks and what professions work at)
+export const WORLD_VERSION = 9; // raise when the contents of world.json change (6: lifts; 7: bosses, and what the server sent since the game's files were made; 8: locks and what professions work at; 9: where each lift stops and how long its round takes)
 /** The ways into a lock that are a skill of a player's own, by the game's number for each (its table LockType). */
 const LOCK_SKILLS = { 1: 'Lockpicking', 2: 'Herbalism', 3: 'Mining', 19: 'Fishing' };
 /** Which of an object's numbers names its lock, by the object's kind (0 a door, 1 a button, 2 a quest giver, 3 a chest - herbs and veins are chests -, 6 a trap, 10 a thing you use, 25 a school of fish, 50 a node). */
@@ -63,6 +63,37 @@ const LIFT_TRAVEL = 10; // yards up and down that make a lift (the doors beside 
 const LIFT_ACROSS = 6;  // ...and no further than this across (the tram's cars are objects of the same kind)
 const LIFT_REACH = 7;   // yards from its middle within which you may be standing on it
 const LIFT_SAME = 5;    // two such objects this close are parts of one lift: the one that travels furthest is it
+const LIFT_STILL = 0.5; // yards a platform may move between two moments of its round and count as standing
+const LIFT_STOP = 1;    // seconds it has to stand at a height, in a round, for that height to be a stop
+const LIFT_APART = 2.5; // yards between two heights it stands at for them to be two stops
+
+/**
+ * A lift's round, read off the moments the game's table gives of it: at which heights it stands
+ * (counted from where the object stands), how long the round takes, how fast it goes between
+ * its stops and how long it stands at one. Null where the moments do not say (one moment only).
+ * @param moments  [[milliseconds into the round, height], ...]
+ * @returns {{ stops: number[] (lowest first), round: seconds, speed: yards a second, still: seconds }}
+ */
+export function liftRound(moments) {
+  const m = [...moments].sort((a, b) => a[0] - b[0]);
+  const round = m.length ? m[m.length - 1][0] / 1000 : 0;
+  if (m.length < 2 || !(round > 0)) return null;
+  const stood = []; // { z, s }: a height it stands at, and for how long in a round
+  let travel = 0, moving = 0;
+  for (let i = 0; i + 1 < m.length; i++) {
+    const s = (m[i + 1][0] - m[i][0]) / 1000, dz = m[i + 1][1] - m[i][1];
+    if (!(s > 0)) continue;
+    if (Math.abs(dz) > LIFT_STILL) { travel += Math.abs(dz); moving += s; continue; }
+    const z = (m[i][1] + m[i + 1][1]) / 2;
+    const at = stood.find((b) => Math.abs(b.z - z) <= LIFT_APART);
+    if (at) { at.z = (at.z * at.s + z * s) / (at.s + s); at.s += s; } else stood.push({ z, s });
+  }
+  const stops = stood.filter((b) => b.s >= LIFT_STOP).sort((a, b) => a.z - b.z);
+  if (stops.length < 2 || !(moving > 0)) return null;
+  // (it calls at each stop between its two ends twice in a round, at each end once)
+  const calls = 2 * (stops.length - 1);
+  return { stops: stops.map((b) => b.z), round, speed: travel / moving, still: stops.reduce((sum, b) => sum + b.s, 0) / calls };
+}
 
 /**
  * The lifts: objects that carry whoever stands on them up and down (Thunder Bluff, the
@@ -71,23 +102,40 @@ const LIFT_SAME = 5;    // two such objects this close are parts of one lift: th
  * are. Where each stands is the reference database's word (the game's files do not place
  * objects, its server does), how far it travels the game's own: its table TransportAnimation
  * says where such an object is at each moment of its round, counted from where it stands.
+ * The same table says where it stops and how long its round takes: a route that takes a lift
+ * (viewer/js/navworker.js) counts half a round of waiting and the ride.
  * @param ref   what readReference() gave: objects (where each object stands) and movers (the objects of this kind)
  * @param rows  TransportAnimation
- * @returns [{ id, name, map, x, y, lo, hi, r }]  lo, hi: how low and how high its platform gets; r: how far from its middle you may be on it
+ * @returns [{ id, name, map, x, y, lo, hi, r, stops, round, speed, still }]  lo, hi: how low and how high its
+ *          platform gets; r: how far from its middle you may be on it; stops: the heights it stands at,
+ *          lowest first; round: seconds its round takes; speed: yards a second between stops; still:
+ *          seconds it stands at one (the last four only where the table says: see liftRound)
  */
 export function liftsOf(ref, rows) {
   const travel = new Map();
   for (const r of rows) {
     if (!Array.isArray(r.Pos)) continue;
     let t = travel.get(r.TransportID);
-    if (!t) travel.set(r.TransportID, (t = { lo: [Infinity, Infinity, Infinity], hi: [-Infinity, -Infinity, -Infinity] }));
+    if (!t) travel.set(r.TransportID, (t = { lo: [Infinity, Infinity, Infinity], hi: [-Infinity, -Infinity, -Infinity], moments: [] }));
     for (let i = 0; i < 3; i++) { t.lo[i] = Math.min(t.lo[i], r.Pos[i]); t.hi[i] = Math.max(t.hi[i], r.Pos[i]); }
+    if (Number.isFinite(r.TimeIndex)) t.moments.push([r.TimeIndex, r.Pos[2]]);
   }
   const all = [];
   for (const [id, name] of ref?.movers ?? []) {
     const t = travel.get(id), at = ref.objects?.get(id);
     if (!t || !at || t.hi[2] - t.lo[2] < LIFT_TRAVEL || Math.max(t.hi[0] - t.lo[0], t.hi[1] - t.lo[1]) > LIFT_ACROSS) continue;
-    for (let i = 0; i + 3 < at.length; i += 4) all.push({ id, name, map: at[i], x: r3([at[i + 1]])[0], y: r3([at[i + 2]])[0], lo: r3([at[i + 3] + t.lo[2]])[0], hi: r3([at[i + 3] + t.hi[2]])[0], r: LIFT_REACH });
+    // (its stops: only where the lowest and the highest of them are its two ends - else the ends alone, as before)
+    const how = liftRound(t.moments);
+    const sound = !!how && Math.abs(how.stops[0] - t.lo[2]) <= LIFT_APART && Math.abs(how.stops[how.stops.length - 1] - t.hi[2]) <= LIFT_APART;
+    for (let i = 0; i + 3 < at.length; i += 4) {
+      const lift = { id, name, map: at[i], x: r3([at[i + 1]])[0], y: r3([at[i + 2]])[0], lo: r3([at[i + 3] + t.lo[2]])[0], hi: r3([at[i + 3] + t.hi[2]])[0], r: LIFT_REACH };
+      if (sound) {
+        const z = at[i + 3];
+        lift.stops = r3(how.stops.map((s, k) => (k === 0 ? t.lo[2] : k === how.stops.length - 1 ? t.hi[2] : s) + z));
+        lift.round = Math.round(how.round * 10) / 10; lift.speed = Math.round(how.speed * 100) / 100; lift.still = Math.round(how.still * 10) / 10;
+      }
+      all.push(lift);
+    }
   }
   all.sort((a, b) => (b.hi - b.lo) - (a.hi - a.lo) || a.id - b.id || a.x - b.x || a.y - b.y);
   const out = [];

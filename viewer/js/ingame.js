@@ -6,7 +6,7 @@
 // (server/mail.js explains how something gets into a running game at all).
 
 import { note, changed } from './log.js';
-import { fallsOf, fallsSaid } from './falls.js';
+import { fallsOf, fallsSaid, liftsSaid } from './falls.js';
 
 const TOLERANCE = 0.6;   // yards a point may lie off the line through its neighbours and be left out
 const POINT_BUDGET = 1800; // points in one delivery; past that the track is thinned further
@@ -145,7 +145,10 @@ export function stepsOf(route, ends, goal) {
     // (a walk with a fall in it that costs health says so: the line is red where you come down)
     const before = legs.slice(0, i).map((o) => o.end).filter((v) => v !== undefined).pop() ?? 0;
     const falls = l.mode === 'walk' && l.end !== undefined ? fallsSaid(fallsOf(route.points, route.kinds, before, l.end)) : null;
-    const text = l.mode === 'walk' ? `Walk to ${l.to ?? goal}${falls ? ` (${falls[0]} on the way)` : ''}`
+    // (and one that takes a lift: nothing in the game says a lift is the way, and the line only stops at it)
+    const lifts = l.mode === 'walk' && l.end !== undefined ? liftsSaid((route.rides ?? []).filter((x) => x.at > before && x.at <= l.end)) : null;
+    const onTheWay = [lifts, falls?.[0]].filter(Boolean).join(' and ');
+    const text = l.mode === 'walk' ? `Walk to ${l.to ?? goal}${onTheWay ? ` (${onTheWay} on the way)` : ''}`
       : l.mode === 'fly' ? (l.learn ? `Learn the flight point, then fly to ${l.to}` : `Fly to ${l.to}`)
       : l.mode === 'boat' ? `Boat to ${l.to}`
       : l.mode === 'zeppelin' ? `Zeppelin to ${l.to}`

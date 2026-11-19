@@ -11,7 +11,12 @@
 // stand on. The data has those too - what lies under each edge, and the steep ground itself,
 // which leads only downhill - and a route takes them where the fall is one you walk away from
 // (see FALL_MOST): you land where you land, and a long way round is not the only way down.
-import { FELL, FALL_SPEED, fallCost as hurt } from './falls.js';
+//
+// And it has lifts (world.json: lifts, handed over with each question): from the floor a lift
+// stops at to the floor at any other of its stops is a move like any other, that costs the wait
+// for the lift and the ride. Up Thunder Bluff, down into the Undercity and into Gnomeregan
+// there is no other way.
+import { FELL, LIFTED, FALL_SPEED, fallCost as hurt } from './falls.js';
 
 const TILE = 1600 / 3, N = 512, CELL = TILE / N;
 const UP = 1.375;        // yards you can step up from one cell to the next (a 50 degree slope, a kerb): as extractor/jobs/nav.js has it
@@ -77,10 +82,32 @@ const STACK_GAP = 2.5;   // yards above or below that make another level
 const STACK_ISLAND = 600; // floors: a surface with fewer than this to walk about on is not a level (a roof, an awning, a tree top)
 const STACK_ROUND = 8;   // yards (and 2.5 times as far as they are apart) of route between two places for one to be over the other, not up a stair from it
 const STACK_MS = 250;    // no longer than this is spent on it
+// Lifts. The floor a lift stops at is the building's (or the ground's): the nearest floors to the
+// lift's middle at the height it stops at, and a few yards on from those - round a shaft, the
+// rim of its opening.
+const LIFT_LAND = 14;    // yards from a lift's middle within which the floor it stops at is looked for
+const LIFT_BAND = 4;     // ...and how much further out than the nearest such floor its landing goes on
+const LIFT_NEAR = 3.5;   // yards from the height a lift stops at within which a floor is its landing (as height.js has it)
+const LIFT_STEP = 2;     // seconds to step on to a lift and off it
+const LIFT_SPEED = 12;   // yards a second a lift goes, and...
+const LIFT_STILL = 5;    // ...seconds it stands at a stop, where the map's data does not say (built before it did)
 const DX = [1, -1, 0, 0, 1, 1, -1, -1], DY = [0, 0, 1, -1, 1, -1, 1, -1];
 
-let ctx = { map: -1, rev: '', have: new Set() }; // the map the search in hand is on
-const maps = new Map();  // map id -> { map, rev, have } as last described by the page
+let ctx = { map: -1, rev: '', have: new Set(), lifts: [] }; // the map the search in hand is on
+const maps = new Map();  // map id -> { map, rev, have, lifts } as last described by the page
+
+/** The heights a lift stops at, lowest first. */
+const stopsOf = (L) => (Array.isArray(L.stops) && L.stops.length >= 2 ? L.stops : [L.lo, L.hi]);
+/**
+ * Seconds a lift takes you from one of its stops to another: the wait for it - half its round,
+ * arriving at any moment of it -, the ride, and getting on and off.
+ */
+function liftSeconds(L, a, b) {
+  const stops = stopsOf(L), far = Math.abs(stops[b] - stops[a]);
+  const speed = L.speed > 0 ? L.speed : LIFT_SPEED, still = L.still > 0 ? L.still : LIFT_STILL;
+  const round = L.round > 0 ? L.round : 2 * (stops.length - 1) * ((stops[stops.length - 1] - stops[0]) / (stops.length - 1) / speed + still);
+  return round / 2 + far / speed + (Math.abs(b - a) - 1) * still + LIFT_STEP;
+}
 const tiles = new Map(); // "map/rev/col_row" -> tile | null, most recently used last
 
 async function inflate(bytes) {
@@ -167,13 +194,17 @@ class Heap {
 /**
  * @param req { from: [x, y, z|null], to: [x, y, z|null], run, swim }
  * @returns { ok, reason?, points: Float32Array (x, y, z per point), kinds: Uint8Array (per point:
- *            1 swim, 2 come to by a fall (FELL), 16 another level lies over or under it),
- *            length (yards), seconds, expanded, fall (yards: the furthest fall on the way), hurt (the part of your full health the falls on the way cost) }
+ *            1 swim, 2 come to by a fall (FELL), 16 another level lies over or under it, 64 come to on a lift (LIFTED)),
+ *            length (yards: what there is to walk and swim - a lift's ride is not in it), seconds, expanded,
+ *            fall (yards: the furthest fall on the way), hurt (the part of your full health the falls on the way cost),
+ *            rides: [{ at (the number of the point come to on a lift), seconds (the wait and the ride), from, to (heights), name }] }
  */
 async function findRoute(req) {
   const began = performance.now();
   const run = req.run > 0 ? req.run : 7, swim = req.swim > 0 ? req.swim : run * 0.67;
   const slots = [], slotOf = new Map(), state = [];
+  // (the lifts that may have a landing on each tile in hand, or null: most tiles have none, and no floor of theirs is asked about)
+  const lifts = req.noLifts ? [] : ctx.lifts ?? [], slotLifts = [];
   const getSlot = async (col, row) => {
     const key = col * 128 + row;
     let s = slotOf.get(key);
@@ -184,6 +215,9 @@ async function findRoute(req) {
     slots.push(t);
     // (closed: 1 once a surface has been looked at; the rest of the byte, the health the falls of the way there have cost, in hundredths of a full bar)
     state.push({ g: new Float32Array(t.nodes).fill(Infinity), parent: new Int32Array(t.nodes).fill(-1), closed: new Uint8Array(t.nodes) });
+    let near = null;
+    for (const L of lifts) if (L.x >= t.xN - TILE - LIFT_LAND && L.x <= t.xN + LIFT_LAND && L.y >= t.yW - TILE - LIFT_LAND && L.y <= t.yW + LIFT_LAND) (near ??= []).push(L);
+    slotLifts.push(near);
     slotOf.set(key, s);
     return s;
   };
@@ -303,6 +337,8 @@ async function findRoute(req) {
       if (queue.length > 2500) return false;
       const [s, cell, n] = queue[q];
       if (s === other.slot && n === other.node) return false;
+      const lifts = slotLifts[s] ? liftsBy(s, cell, n) : null;
+      if (lifts && (await liftAt(lifts, s * PACK + n))) return false; // (a lift stops here: it leads on)
       for (let d = 0; d < 4; d++) {
         let k = hop(s, cell, n, d);
         if (k === -2) { await getSlot(hopCol, hopRow); k = hop(s, cell, n, d); }
@@ -337,6 +373,63 @@ async function findRoute(req) {
     return sides >= 3;
   };
   const pos = (s, cell) => { const t = slots[s]; return [t.xN - (Math.floor(cell / N) + 0.5) * CELL, t.yW - ((cell % N) + 0.5) * CELL]; };
+  // ---- lifts ----
+  // Where a lift lets you on and off: for each of its stops, the floors at that height nearest
+  // its middle - [{ floors: [{ slot, cell, node, d (yards from the middle) }], ids }], a stop
+  // with no floor by it having none. (Looked for once in a search, when the search first comes by.)
+  const landings = new Map();
+  const landingsOf = async (L) => {
+    let out = landings.get(L);
+    if (out) return out;
+    const stops = stopsOf(L), reach = Math.ceil(LIFT_LAND / CELL);
+    out = stops.map(() => ({ floors: [], ids: new Set() }));
+    for (let dj = -reach; dj <= reach; dj++) for (let di = -reach; di <= reach; di++) {
+      const d = Math.hypot(di * CELL, dj * CELL);
+      if (d > LIFT_LAND) continue;
+      const x = L.x - dj * CELL, y = L.y - di * CELL;
+      const s = await getSlot(Math.floor(32 - y / TILE), Math.floor(32 - x / TILE));
+      if (s < 0) continue;
+      const t = slots[s];
+      const cell = Math.min(N - 1, Math.max(0, Math.floor((t.xN - x) / CELL))) * N + Math.min(N - 1, Math.max(0, Math.floor((t.yW - y) / CELL)));
+      for (let k = t.offs[cell]; k < t.offs[cell + 1]; k++) {
+        if (t.flags[k] & (F_STEEP | F_SWIM | F_LAVA)) continue;
+        const q = stops.findIndex((z) => Math.abs(t.z[k] - z) <= LIFT_NEAR);
+        if (q >= 0) out[q].floors.push({ slot: s, cell, node: k, d });
+      }
+    }
+    for (const stop of out) {
+      const nearest = stop.floors.reduce((m, f) => Math.min(m, f.d), Infinity);
+      stop.floors = stop.floors.filter((f) => f.d <= nearest + LIFT_BAND);
+      for (const f of stop.floors) stop.ids.add(f.slot * PACK + f.node);
+    }
+    landings.set(L, out);
+    return out;
+  };
+  // The lifts a floor is within reach of, at a height they pass: [[lift, yards from its middle], ...]
+  // or null. (Asked of every floor looked at on a tile with a lift: nothing here waits.)
+  const liftsBy = (s, cell, n) => {
+    const near = slotLifts[s];
+    if (!near) return null;
+    const t = slots[s], z = t.z[n], x = t.xN - (((cell / N) | 0) + 0.5) * CELL, y = t.yW - ((cell % N) + 0.5) * CELL;
+    let out = null;
+    for (const L of near) {
+      if (z < L.lo - LIFT_NEAR || z > L.hi + LIFT_NEAR) continue;
+      const d = Math.hypot(x - L.x, y - L.y);
+      if (d <= LIFT_LAND) (out ??= []).push([L, d]);
+    }
+    return out;
+  };
+  // The lift a floor is a landing of, where that lift has another stop to take you to:
+  // { L, land (landingsOf), q (which of its stops this is), d (yards from its middle) } or null.
+  // @param by  what liftsBy said of the floor
+  const liftAt = async (by, id) => {
+    for (const [L, d] of by) {
+      const land = await landingsOf(L);
+      const q = land.findIndex((stop) => stop.ids.has(id));
+      if (q >= 0 && land.some((stop, r) => r !== q && stop.floors.length)) return { L, land, q, d };
+    }
+    return null;
+  };
   // True for ground lying in a pit of built floors: the earth under a town, which the game leaves
   // in place below the streets. (covered() above asks for a floor right over the spot; this also
   // knows the ground under a roof or inside a wall, where nothing walkable is overhead.)
@@ -443,6 +536,17 @@ async function findRoute(req) {
     if (slots[c.slot].z[c.node] > over) continue;
     if (!(await enclosed(c, goals[0] ?? spare[0] ?? { slot: -1, node: -1 }, true))) seeds.push(c);
   }
+  // On a lift, between its stops: no floor is under you, and the lift puts you down at one of
+  // them - whichever, as far as the map can tell. The way begins at each, the time to it counted.
+  if (!seeds.length) {
+    const z0 = req.from[2] === null || req.from[2] === undefined ? null : req.from[2];
+    for (const L of lifts) {
+      if (Math.hypot(req.from[0] - L.x, req.from[1] - L.y) > (L.r ?? 7) + 1 || (z0 !== null && (z0 < L.lo - 6 || z0 > L.hi + 6))) continue;
+      const land = await landingsOf(L), stops = stopsOf(L), speed = L.speed > 0 ? L.speed : LIFT_SPEED;
+      land.forEach((stop, q) => { for (const f of stop.floors) seeds.push({ ...f, g0: (z0 === null ? (stops[stops.length - 1] - stops[0]) / 2 : Math.abs(z0 - stops[q])) / speed + f.d / run }); });
+      if (seeds.length) break;
+    }
+  }
   if (!seeds.length) return { ok: false, reason: 'no way out of where you are on foot' };
   // Buried ground counts as that much further away, at either end: the floor built over it is
   // the one meant unless only the ground can be reached. (So do the spare floors at the spot.)
@@ -456,7 +560,8 @@ async function findRoute(req) {
   const WEIGHT = weightFor(Math.hypot(req.to[0] - req.from[0], req.to[1] - req.from[1]));
   const heap = new Heap();
   for (const c of seeds) {
-    const g0 = seeds.length > 1 && covered(c) ? COVERED : 0;
+    const g0 = c.g0 ?? (seeds.length > 1 && covered(c) ? COVERED : 0);
+    if (g0 >= state[c.slot].g[c.node]) continue;
     state[c.slot].g[c.node] = g0;
     heap.push(g0, c.slot * PACK + c.node, c.cell);
   }
@@ -477,6 +582,8 @@ async function findRoute(req) {
   // fall costs is its whole height, from the floor you left to the floor you land on, however
   // far you slide between the two.)
   const fellFrom = new Map();
+  // A floor reached on a lift -> { from (the floor the lift was got on at), L, q, r (from which of its stops to which), seconds }
+  const rode = new Map();
 
   while (heap.n > 0) {
     // an end has been reached (buried ground): stop once nothing left could beat it. (The search
@@ -571,6 +678,27 @@ async function findRoute(req) {
         heap.push(ng + (Math.hypot(x - gx, y - gy) / vmax) * lean, ts * PACK + k, nbCell[d]);
       }
     }
+    // a lift that stops at this floor: on to the floors at each of its other stops
+    const reach = slotLifts[s] ? liftsBy(s, cell, n) : null;
+    const by = reach ? await liftAt(reach, id) : null;
+    if (by) {
+      for (let r = 0; r < by.land.length; r++) {
+        if (r === by.q) continue;
+        const ride = liftSeconds(by.L, by.q, r);
+        for (const fl of by.land[r].floors) {
+          const sn = state[fl.slot];
+          if (sn.closed[fl.node] & 1) continue;
+          const ng = g + by.d / run + ride + fl.d / run;
+          if (ng >= sn.g[fl.node]) continue;
+          sn.g[fl.node] = ng;
+          sn.parent[fl.node] = id;
+          sn.closed[fl.node] = lost << 1;
+          rode.set(fl.slot * PACK + fl.node, { from: id, L: by.L, q: by.q, r, seconds: ride });
+          const [x, y] = pos(fl.slot, fl.cell);
+          heap.push(ng + (Math.hypot(x - gx, y - gy) / vmax) * lean, fl.slot * PACK + fl.node, fl.cell);
+        }
+      }
+    }
   }
   if (levels) {
     // the levels that can be walked to, highest first: how high, how long it takes to get there,
@@ -600,7 +728,9 @@ async function findRoute(req) {
   for (let id = goalId; id >= 0; id = state[id >>> PACK_BITS].parent[id & PACK_MASK]) {
     const s = id >>> PACK_BITS, n = id & PACK_MASK, t = slots[s], c = cellOf(t, n);
     const [x, y] = pos(s, c);
-    raw.push({ x, y, z: t.z[n], kind: (t.flags[n] & F_SWIM ? 1 : 0), steep: !!(t.flags[n] & F_STEEP), slot: s, cell: c, node: n });
+    // (lift: come to on a lift, from the place before it - unless a step led here sooner after all)
+    const by = rode.get(id);
+    raw.push({ x, y, z: t.z[n], kind: (t.flags[n] & F_SWIM ? 1 : 0), steep: !!(t.flags[n] & F_STEEP), slot: s, cell: c, node: n, lift: by && by.from === state[s].parent[n] ? by : null });
   }
   raw.reverse();
   // Which of its places are come to by a fall (off an edge, or down steep ground), not by a
@@ -611,7 +741,7 @@ async function findRoute(req) {
   let furthest = 0, costs = 0;
   for (let i = 1, from = 0, first = 0; i < raw.length; i++) {
     const a = raw[i - 1], b = raw[i];
-    b.fell = a.steep || b.steep || a.z - b.z > DOWN;
+    b.fell = !b.lift && (a.steep || b.steep || a.z - b.z > DOWN); // (a lift down is no fall)
     if (!b.fell) continue;
     if (!a.steep) { from = a.z; first = i; }
     if (b.steep && i < raw.length - 1) continue;
@@ -662,9 +792,19 @@ async function findRoute(req) {
   const pts = [raw[0]];
   let anchor = 0;
   while (anchor < raw.length - 1) {
-    // the farthest point of the path a straight line from here reaches
-    let far = anchor + 1, seg = null, step = 64;
-    for (let probe = Math.min(raw.length - 1, anchor + step); probe > anchor + 1; ) {
+    // On to a lift and off it at another of its stops: two places at its middle, one over the
+    // other, and the second is come to on the lift.
+    const by = raw[anchor + 1].lift;
+    if (by) {
+      const stops = stopsOf(by.L);
+      pts.push({ x: by.L.x, y: by.L.y, z: stops[by.q], kind: 0, stack: true }, { x: by.L.x, y: by.L.y, z: stops[by.r], kind: 0, stack: true, lifted: by }, raw[anchor + 1]);
+      anchor++;
+      continue;
+    }
+    // the farthest point of the path a straight line from here reaches (none goes across a lift)
+    let far = anchor + 1, seg = null, step = 64, most = raw.length - 1;
+    for (let k = anchor + 2; k <= Math.min(raw.length - 1, anchor + step); k++) if (raw[k].lift) { most = k - 1; break; }
+    for (let probe = Math.min(most, anchor + step); probe > anchor + 1; ) {
       const l = line(raw[anchor], raw[probe]);
       if (l) { far = probe; seg = l; break; }
       step = Math.max(1, step >> 1);
@@ -784,17 +924,19 @@ async function findRoute(req) {
   }
 
   let length = 0, seconds = 0;
-  const points = new Float32Array(pts.length * 3), kinds = new Uint8Array(pts.length);
+  const points = new Float32Array(pts.length * 3), kinds = new Uint8Array(pts.length), rides = [];
   pts.forEach((p, i) => {
-    points[i * 3] = p.x; points[i * 3 + 1] = p.y; points[i * 3 + 2] = p.z; kinds[i] = p.kind | (p.fell ? FELL : 0) | (p.stack ? STACKED : 0);
+    points[i * 3] = p.x; points[i * 3 + 1] = p.y; points[i * 3 + 2] = p.z; kinds[i] = p.kind | (p.fell ? FELL : 0) | (p.stack ? STACKED : 0) | (p.lifted ? LIFTED : 0);
     if (i > 0) {
       const q = pts[i - 1], d = Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z);
+      // (a lift's ride is time, and no yards of anybody's walking)
+      if (p.lifted) { seconds += p.lifted.seconds; rides.push({ at: i, seconds: p.lifted.seconds, from: q.z, to: p.z, name: p.lifted.L.name ?? '' }); return; }
       length += d;
       seconds += p.fell ? Math.hypot(p.x - q.x, p.y - q.y) / run + Math.max(0, q.z - p.z) / FALL_SPEED : d / (p.kind & 1 ? swim : run);
     }
   });
   // (fall: the furthest you fall on the way, in yards, and hurt: the part of your full health its falls cost between them - 0 where none hurts)
-  return { ok: true, points, kinds, length, seconds, expanded, tiles: slots.length, fall: furthest, hurt: Math.min(1, costs) };
+  return { ok: true, points, kinds, length, seconds, expanded, tiles: slots.length, fall: furthest, hurt: Math.min(1, costs), rides };
 }
 
 let chain = Promise.resolve();
@@ -810,7 +952,9 @@ self.onmessage = (e) => {
       if (!nav) out = { ok: false, reason: 'no walking data for this map' };
       else {
         let c = maps.get(nav.map);
-        if (!c || c.rev !== nav.rev) { c = { map: nav.map, rev: nav.rev, have: new Set(nav.tiles) }; maps.set(nav.map, c); }
+        if (!c || c.rev !== nav.rev) { c = { map: nav.map, rev: nav.rev, have: new Set(nav.tiles), lifts: [] }; maps.set(nav.map, c); }
+        // (the lifts of this map, as the page has them now: a list of a few)
+        c.lifts = Array.isArray(nav.lifts) ? nav.lifts : [];
         ctx = c;
       }
       try { if (!out) out = await findRoute(m); } catch (err) { out = { ok: false, reason: String(err?.message ?? err) }; }

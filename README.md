@@ -819,7 +819,11 @@ section, where each also says how long it is:
   (`world.json`: `dungeons`), and the route goes to the nearest: "Old Ironforge Incursion: The
   Hall of Thanes, the way in". A door is a spot on a zone's map, with no height: where there are
   several levels there, the route ends on the one the walk reaches. Inside the dungeon the game
-  hides where you are, and there is no route.
+  hides where you are, and there is no route. QuestieDB's door is a pin on a zone's map, and can
+  be a good way short of the door itself: Gnomeregan's is by the top of the lift, three hundred
+  yards and the lift's ride from the door, and from the door "the way in" led back up and out.
+  So where the game's own tables name the spot (the one a ghost goes back in at, below), that
+  spot stands in for every pin within 600 yards of it.
 - **Dead in a dungeon, the run back leads to the dungeon's door.** Released, you are a ghost at
   a graveyard outside and your body is inside. For a dungeon of the original game the game says
   where a ghost goes back in (its own table of maps: 27 dungeons), and names that spot as your
@@ -992,6 +996,26 @@ ledge is drawn like the walking either side of it), and one that costs health is
 game's step too: "Walk to Grund Drokda (a fall of 31 yd on the way)". Which levels a waypoint
 has is still worked out by walking alone (see "Which level"): a place you can only drop into
 is not somewhere to send you.
+
+**A lift is a way.** Up Thunder Bluff, down into the Undercity and into the halls outside
+Gnomeregan there is no walking: a lift carries you, and a walk that had none to take ended at
+its shaft ("no way out of where you are on foot" at the foot of Gnomeregan's; and a guide's
+step in the halls under the mountain was led to on top of the mountain, the only level of that
+spot anyone could walk to). The search now takes a lift like any other step: from the floor it
+stops at - the nearest to its middle at that height, the rim of its shaft - to the floor at any
+other of its stops, for what it costs in time: half its round of waiting, counted from any
+moment you might come to it, and the ride. The game's own table of how each lift moves says
+both (`world.json`: each lift's `stops`, `round`, `speed`, `still`): 20 seconds for the hundred
+yards down to Gnomeregan, 27 up Thunder Bluff, 14 into the Undercity. Its ride is time and
+no yards: "165 yd, about 37 s. It takes the lift down", and in the game's step "Walk to your
+guide's step (the lift down on the way)". The line stops at the lift and goes on from its other
+stop, a straight stretch up or down the shaft between the two; on the lift you are on the
+route, whatever height you are taken to be at, and once it has carried you the way on is
+worked out from where it put you down, though you have not moved a yard across the map. A
+level that only a lift leads to is a level of its spot like any other (see "Which level"), and
+the quickest for a guide's step if it is. A lift the reference database places where this game
+has no floor for it (the Great Lift's two cars are listed in two dungeons as well) has no
+landing and takes nobody anywhere.
 
 Two things a fall never does:
 
@@ -2144,8 +2168,10 @@ reports says so. But the map now knows where the lifts are and how far each goes
 Thousand Needles, the one down to Gnomeregan, the scaffold cars of the Searing Gorge; from the
 reference database's list of what moves, and the game's own table of how far). Having stood
 still on one for two and a half seconds, where you
-step off decides which end you are at: the end that has a floor there. If the level you got on
-at carries on there as well, that one is followed alongside (next paragraph).
+step off decides which end you are at: the end that has a floor there (or, of a lift that
+calls at more heights than two - the scaffold cars - the stop that has). If the level you got on
+at carries on there as well, that one is followed alongside (next paragraph). A route takes
+the same lifts (see "A lift is a way").
 
 **More than one answer.** Sometimes the height is a guess: arriving somewhere with several
 floors, stepping off a lift, a fall that fits two surfaces, ground that was not there for
@@ -2253,7 +2279,7 @@ The extractor keeps what a pathfinder needs, in `dataDir`:
 | `sources/classic-db/` | The reference database as downloaded, with a note of where it came from |
 | `sources/questiedb/` | QuestieDB as fetched from the Atlas database (see "Where QuestieDB comes from"): `source.json` says which version is in use, and the files are in a folder of that version's own, laid out as in the addon, with QuestieDB's licence. The version before it is kept until the next one comes |
 | `rooms.json` | What the game calls the rooms of its buildings: `names`, and per building (`wmo`: by the building's number in the game's files) runs of three numbers - which set of names the placed building uses, the room's number in it (-1: the whole building), and the name's place in `names`. For telling floors apart by the name the game shows (see "How your height is known") |
-| `world.json` | Area names/hierarchy, zones with world rectangles, points of interest, liquid types (water / ocean / magma / slime), `lifts` (each lift: map, where it stands, the heights of its two ends `lo` and `hi`, how far from its middle its platform reaches `r`), **flight masters and flight paths with their full 3D route points** (boat and zeppelin routes too; `pointMaps` says which map each point is on when a route crosses continents), `transports` (each boat / zeppelin line: its stops with map and position, seconds to the next stop, seconds for a full round), `portals` (doorways between maps, from `extractor/doorways.json`, or ShortestPathForever's `Data/Portals.lua` where that addon is installed), `inns` (every innkeeper: map, zone, position, reaction to each side; from QuestieDB), area triggers (dungeon entrances and other transitions) |
+| `world.json` | Area names/hierarchy, zones with world rectangles, points of interest, liquid types (water / ocean / magma / slime), `lifts` (each lift: map, where it stands, the heights of its two ends `lo` and `hi`, how far from its middle its platform reaches `r`; and, read off the game's table of how it moves, the heights it stands at `stops`, the seconds its round takes `round`, the yards a second it goes between stops `speed` and the seconds it stands at one `still`), **flight masters and flight paths with their full 3D route points** (boat and zeppelin routes too; `pointMaps` says which map each point is on when a route crosses continents), `transports` (each boat / zeppelin line: its stops with map and position, seconds to the next stop, seconds for a full round), `portals` (doorways between maps, from `extractor/doorways.json`, or ShortestPathForever's `Data/Portals.lua` where that addon is installed), `inns` (every innkeeper: map, zone, position, reaction to each side; from QuestieDB), area triggers (dungeon entrances and other transitions) |
 
 World coordinates are the game's: +X north, +Y west, +Z up, in yards. A tile is 533.33 yd and
 `col`/`row` map to world space as `X = (32 − row) × 533.33`, `Y = (32 − col) × 533.33` at the

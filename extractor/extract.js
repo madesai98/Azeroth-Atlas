@@ -556,7 +556,7 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
     if (!reference) { reference = await fetchReference(cfg, dataDir, log); if (reference) ref = readReference(reference.file); }
     const anim = await loadTable(casc, 'TransportAnimation', log);
     world.data.lifts = ref && anim ? liftsOf(ref, anim.rows) : [];
-    liftsSig = sig('lifts1', reference?.sha ?? null, anim?.hash ?? null);
+    liftsSig = sig('lifts2', reference?.sha ?? null, anim?.hash ?? null);
     if (world.data.lifts.length) log(`${world.data.lifts.length} lifts, from the reference database and the game's own table of how each moves`);
   } catch (err) {
     world.data.lifts = [];
