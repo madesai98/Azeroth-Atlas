@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Casc } from './casc/casc.js';
 import { loadConfig } from './config.js';
-import { buildWorld, loadSentTable, roomNames, liftsOf, ROOMS_VERSION } from './world.js';
+import { buildWorld, loadSentTable, roomNames, liftsOf, entrancesOf, ROOMS_VERSION } from './world.js';
 import { readCache } from './hotfix.js';
 import { parseWDT } from './formats/wdt.js';
 import { Pool } from './pool.js';
@@ -556,10 +556,13 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
     if (!reference) { reference = await fetchReference(cfg, dataDir, log); if (reference) ref = readReference(reference.file); }
     const anim = await loadTable(casc, 'TransportAnimation', log);
     world.data.lifts = ref && anim ? liftsOf(ref, anim.rows) : [];
-    liftsSig = sig('lifts2', reference?.sha ?? null, anim?.hash ?? null);
+    // (and where you stand having come in at a dungeon's door: where the trail of your way through it begins - server/minimap.js)
+    world.data.entrances = entrancesOf(ref);
+    liftsSig = sig('lifts3', reference?.sha ?? null, anim?.hash ?? null);
     if (world.data.lifts.length) log(`${world.data.lifts.length} lifts, from the reference database and the game's own table of how each moves`);
+    if (world.data.entrances.length) log(`${world.data.entrances.length} doors into dungeons: where each puts you, from the reference database`);
   } catch (err) {
-    world.data.lifts = [];
+    world.data.lifts = []; world.data.entrances = [];
     log(`lifts unavailable: ${err.message}`);
   }
   try {

@@ -132,7 +132,8 @@ export class PlayerTracker {
    */
   placed(fix) {
     // (band: from the minimap - the heights the rooms you may be in span, lowest and highest, where it can tell)
-    this.#set({ placed: fix ? { map: fix.map, x: fix.x, y: fix.y, facing: fix.facing ?? null, t: fix.at, from: fix.from ?? 'log', ...(fix.band ? { band: fix.band } : {}) } : null });
+    // (guess: the minimap had something over it - where you would have got to going on as you were)
+    this.#set({ placed: fix ? { map: fix.map, x: fix.x, y: fix.y, facing: fix.facing ?? null, t: fix.at, from: fix.from ?? 'log', ...(fix.band ? { band: fix.band } : {}), ...(fix.guess ? { guess: true } : {}) } : null });
   }
 
   /** How finding you on the minimap is going (minimap.js), for the page to say. */

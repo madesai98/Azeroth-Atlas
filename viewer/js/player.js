@@ -30,6 +30,8 @@ const PLACED_FOR = 15000;             // ms: how long where the combat log or th
 const PLACED_STALE = 3000;            // ...and after this long with no new place from the minimap, the figure is drawn as one last seen there
 const STEP_MOST = 700;                // ms: from one place read off the minimap to the next, at most (longer: no gliding between them)
 const STEP_FAR = 14;                  // yards: ...and no further apart than this
+const CATCH_FOR = 6000;               // ms: a place that comes this long after the one before is caught up with, not jumped to...
+const CATCH_MS = 350;                 // ...in this long (where it is no further off than you can have run meanwhile)
 const INSIDE_FOR = 3 * 3600 * 1000;    // ...for this long: a ghost does not wait longer than that
 
 export class PlayerLink {
@@ -109,6 +111,8 @@ export class PlayerLink {
         placedFacing = Number.isFinite(at.facing) ? at.facing : null;
         // (from the minimap: the heights the rooms you may be in span - which floor, where two lie over each other)
         if (Array.isArray(at.band) && at.band.length === 2 && at.band.every(Number.isFinite)) this.me.band = at.band;
+        // (something was over the minimap: this is where you would have got to, going on as you were - drawn as a place not seen)
+        if (at.guess) this.me.guess = true;
         if (this.me.placed === 'minimap') this.#stepped(at);
       } else if (!p.inInstance) this.walk = null;
       if (this.me) {
@@ -193,9 +197,12 @@ export class PlayerLink {
     const now = performance.now();
     const to = [at.x, at.y];
     const span = w ? at.t - w.t : Infinity;
-    const near = w && span > 0 && span <= STEP_MOST && Math.hypot(to[0] - w.to[0], to[1] - w.to[1]) <= STEP_FAR;
+    const far = w ? Math.hypot(to[0] - w.to[0], to[1] - w.to[1]) : Infinity;
+    const near = w && span > 0 && span <= STEP_MOST && far <= STEP_FAR;
+    // (after a pause - a look that took long, something over the minimap for a moment - a quick catching up instead of a jump)
+    const late = w && !near && span > 0 && span <= CATCH_FOR && far <= STEP_FAR + (9 * span) / 1000;
     // (from where the glide had got to, so that a place that comes early does not jerk it back)
-    this.walk = { from: near ? this.#glide(now) ?? w.to : to, to, at: now, span: near ? span : 0, t: at.t };
+    this.walk = { from: near || late ? this.#glide(now) ?? w.to : to, to, at: now, span: near ? span : late ? CATCH_MS : 0, t: at.t };
   }
 
   /** Where the glide from the last place read off the minimap to the newest has got to: [x, y] - or null: no such places. */
@@ -206,10 +213,10 @@ export class PlayerLink {
     return [w.from[0] + (w.to[0] - w.from[0]) * u, w.from[1] + (w.to[1] - w.from[1]) * u];
   }
 
-  /** True while the place shown is one the minimap gave a while ago and nothing has come since (drawn as last seen there). */
+  /** True while the place shown is one the minimap gave a while ago and nothing has come since (drawn as last seen there) - or one it could only guess at. */
   get waning() {
     const me = this.me;
-    return !!me && me.placed === 'minimap' && Date.now() - me.placedAt > PLACED_STALE;
+    return !!me && me.placed === 'minimap' && (Date.now() - me.placedAt > PLACED_STALE || !!me.guess);
   }
 
   async #switchMap(id) {

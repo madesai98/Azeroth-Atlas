@@ -6,7 +6,7 @@ import { loadTable } from './tables.js';
 import { readCache } from './hotfix.js';
 import { transportLines, findPortalData, readPortals } from './transit.js';
 
-export const WORLD_VERSION = 9; // raise when the contents of world.json change (6: lifts; 7: bosses, and what the server sent since the game's files were made; 8: locks and what professions work at; 9: where each lift stops and how long its round takes)
+export const WORLD_VERSION = 10; // raise when the contents of world.json change (6: lifts; 7: bosses, and what the server sent since the game's files were made; 8: locks and what professions work at; 9: where each lift stops and how long its round takes; 10: where you stand having come in at a dungeon's door)
 /** The ways into a lock that are a skill of a player's own, by the game's number for each (its table LockType). */
 const LOCK_SKILLS = { 1: 'Lockpicking', 2: 'Herbalism', 3: 'Mining', 19: 'Fishing' };
 /** Which of an object's numbers names its lock, by the object's kind (0 a door, 1 a button, 2 a quest giver, 3 a chest - herbs and veins are chests -, 6 a trap, 10 a thing you use, 25 a school of fish, 50 a node). */
@@ -57,6 +57,21 @@ export function roomNames(rows, areas) {
     (wmo[r.WMOID] ??= []).push(r.NameSetID | 0, Number.isInteger(r.WMOGroupID) ? r.WMOGroupID : -1, i);
   }
   return { names, wmo };
+}
+
+/**
+ * Where you stand having come in at a door: the reference database's spot for every doorway of
+ * the game that takes you into a map that is not the open world (a dungeon, a raid) - the place
+ * the trail of your way through it begins at (server/minimap.js). [{ map, pos: [x, y, z],
+ * facing (radians, 0 north, counter-clockwise), name }]
+ */
+export function entrancesOf(ref, open = [0, 1]) {
+  const out = [];
+  for (const e of ref?.entrances ?? []) {
+    if (!Number.isInteger(e.map) || open.includes(e.map) || !e.pos.every(Number.isFinite) || (!e.pos[0] && !e.pos[1])) continue;
+    out.push({ map: e.map, pos: r3(e.pos), facing: Math.round(e.facing * 1000) / 1000, name: e.name });
+  }
+  return out.sort((a, b) => a.map - b.map || a.pos[0] - b.pos[0]);
 }
 
 const LIFT_TRAVEL = 10; // yards up and down that make a lift (the doors beside one move less)

@@ -200,15 +200,25 @@ function scoreAt(mmLv, lv, u, v, rot, bilinear = false) {
   return den > 1e-9 ? dot / den : 0;
 }
 
-/** Climb to the best place nearby at one level: a step either way across, down and in the turn, the steps halved when none of them is better. */
-function climb(mmLv, lv, start, stepP, stepR, minP, minR, bilinear) {
-  let best = { ...start, score: scoreAt(mmLv, lv, start.u, start.v, start.rot, bilinear) };
+/**
+ * Climb to the best place nearby at one level: a step either way across, down and in the turn, the steps halved when none of them is better.
+ * pen: (u, v) => what is taken off a place's fit for where it is (Infinity: you cannot be there) - see Locator.follow.
+ * Then `score` is still how the place fits, and `worth` what was climbed by: the fit less that.
+ */
+function climb(mmLv, lv, start, stepP, stepR, minP, minR, bilinear, pen = null) {
+  const at = (u, v, rot) => {
+    const off = pen ? pen(u, v) : 0;
+    if (off === Infinity) return { u, v, rot, score: 0, worth: -Infinity };
+    const score = scoreAt(mmLv, lv, u, v, rot, bilinear);
+    return { u, v, rot, score, worth: score - off };
+  };
+  let best = at(start.u, start.v, start.rot);
   for (let it = 0; it < 60 && (stepP > minP || stepR > minR); it++) {
     let moved = false;
     for (const [du, dv, dr] of [[stepP, 0, 0], [-stepP, 0, 0], [0, stepP, 0], [0, -stepP, 0], [0, 0, stepR], [0, 0, -stepR]]) {
       if (!du && !dv && !dr) continue;
-      const sc = scoreAt(mmLv, lv, best.u + du, best.v + dv, best.rot + dr, bilinear);
-      if (sc > best.score + 1e-6) { best = { u: best.u + du, v: best.v + dv, rot: best.rot + dr, score: sc }; moved = true; }
+      const c = at(best.u + du, best.v + dv, best.rot + dr);
+      if (c.worth > best.worth + 1e-6) { best = c; moved = true; }
     }
     if (!moved) { stepP /= 2; stepR /= 2; }
   }
@@ -219,7 +229,8 @@ function climb(mmLv, lv, start, stepP, stepR, minP, minR, bilinear) {
  * Look through the whole plan (or round a place) for the minimap.
  * opts: rotation (radians, where the turn is known: 0 for a minimap that keeps north up), rotationWindow (this far
  *       either side of it is tried too), near { x, y, radius } (world yards), coarseStepDeg (6), keep (12), finalists (4),
- *       cells (a byte for each cell of the coarsest level, row by row: only cells marked 1 are tried)
+ *       cells (a byte for each cell of the coarsest level, row by row: only cells marked 1 are tried),
+ *       rough (true: none of them is settled to the pixel - they come as they stood a level up, each marked coarse)
  * @returns the places it could be, the best first: [{ x, y, rotation, score }]
  */
 function search(mm, pyr, opts = {}) {
@@ -313,7 +324,7 @@ function search(mm, pyr, opts = {}) {
   // ---- the best of them, to a fraction of a pixel at the finest level
   const lv = pyr.levels[0], mmLv = mm.levels[0], ratio = lvPrev.k / lv.k;
   const out = [];
-  const nFinal = Math.max(1, keep.slice(0, opts.finalists ?? 4).filter((c) => c.score >= keep[0].score - 0.12).length);
+  const nFinal = opts.rough ? 0 : Math.max(1, keep.slice(0, opts.finalists ?? 4).filter((c) => c.score >= keep[0].score - 0.12).length);
   for (const cur of keep.slice(0, nFinal)) {
     const start = { u: (cur.u + 0.5) * ratio - 0.5, v: (cur.v + 0.5) * ratio - 0.5, rot: cur.rot };
     const b = climb(mmLv, lv, start, ratio / 2, fixedRot ? 0 : rotStep / 2, 0.06, 0.06 * D2R, true);
@@ -352,6 +363,7 @@ export function levelsFor(screenPxPerYard) {
 // ------------------------------------------------------------------ putting it together
 
 const SPARSE = 0.1, SPARSE_FIT = 0.8; // a minimap less than a tenth lit is only believed, at a fresh look, of a fit this good
+const ROOM_SLACK = 3;    // yards over and under a room's box at which you may still be in it (the box is its walls': a floor at its edge may lie a little outside)
 const KEEP_BYTES = 96e6; // of the sets of rooms kept at the screen's scale (a big dungeon's take megabytes each, and it has twenty)
 
 export class Locator {
@@ -409,6 +421,23 @@ export class Locator {
     return sets.filter((st) => { for (let j = v0; j <= v1; j++) for (let i = u0; i <= u1; i++) if (st.cells[j * cw + i]) return true; return false; });
   }
 
+  /**
+   * Can you be in one of a set's own rooms at these heights ([lowest, highest]; null: nothing is known of them)?
+   * (minimap-find.js knows the storeys you can have got to. Where rooms lie one over the other - a
+   * temple of six floors - most sets of rooms near a spot are of storeys you cannot be on.)
+   */
+  setAt(st, heights) {
+    if (!heights) return true;
+    for (const gi of st.rooms) { const w = this.ref.groups[gi].world; if (w.zMin - ROOM_SLACK <= heights[1] && w.zMax + ROOM_SLACK >= heights[0]) return true; }
+    return false;
+  }
+
+  /** The same, of a set of rooms named by its key (true where there is no such set: nothing is ruled out). */
+  setAtKey(key, heights) {
+    const st = this.roomSets().find((s) => s.key === key);
+    return !st || this.setAt(st, heights);
+  }
+
   /** The rooms whose picture (or, for want of one, whose box) holds a spot, to within a yard. */
   roomsAt(x, y) {
     const ref = this.ref, col = (ref.originY - y) * ref.pxPerYard, row = (ref.originX - x) * ref.pxPerYard, out = [];
@@ -462,6 +491,167 @@ export class Locator {
       out.push({ index: g.index, inView: tot, share: tot ? lit / tot : null });
     }
     return out;
+  }
+
+  /**
+   * Follow a place you can only have moved so far from (minimap-find.js knows how far: the game
+   * says how fast you go). The best place by how it fits AND by where you would be had you gone
+   * on as you were: what is climbed by is the fit less `weight` x (yards from `expect` / sigma)^2
+   * (never more than `most`: a place that fits better by that much is the place, wherever it is),
+   * and nowhere further than `reach` yards from where you were. Where the picture says where you
+   * are, that takes off next to nothing and the picture decides; where it does not - down a long
+   * straight corridor, in a hall so wide that all of the minimap is floor - you are where you
+   * would have got to, instead of wherever the climb happens to wander.
+   * opts: from { x, y, rotation, set }, expect { x, y } (from's, where left out), sigma (yards), reach (yards),
+   *       weight (0.01), most (0.04), fixedRotation, still (the place is not to be climbed from at all: only the turn),
+   *       within ({ x, y, radius }: nowhere outside that either - the last place known for sure, and how far you have gone since),
+   *       heights ([lowest, highest] you can be at: other sets of rooms are tried only where a room of theirs is at those;
+   *       'own': the heights of the rooms of the place's own set that hold it - a place found with its set, of which only
+   *       the storeys next to it are worth a try)
+   * @returns { x, y, rotation, score, set (the set of rooms: its key), sharp: how much worse the
+   *            fit is three yards off, the least of the four ways (near nothing: the picture does not say where you are) }
+   */
+  follow(mm, opts) {
+    const sets = this.roomSets(), from = opts.from, expect = opts.expect ?? from;
+    const sigma = Math.max(0.5, opts.sigma ?? 1), reach = opts.reach ?? 12, weight = opts.weight ?? 0.01, most = opts.most ?? 0.04;
+    const within = opts.within ?? null;
+    const one = (st) => {
+      const pyr = this.pyramid(st.hidden);
+      let cur = { x: expect.x, y: expect.y, rotation: from.rotation, score: 0 };
+      // (a level up first where there is room to go wrong by more than its cells; then the finest)
+      const top = reach * this.s > 5 && pyr.levels.length > 1 ? 1 : 0;
+      for (let li = top; li >= 0; li--) {
+        const lv = pyr.levels[li], mmLv = mm.levels[li], last = li === 0;
+        const pen = (u, v) => {
+          const w = cellToWorld(pyr, lv, u, v);
+          if (Math.hypot(w.x - from.x, w.y - from.y) > reach) return Infinity;
+          if (within && Math.hypot(w.x - within.x, w.y - within.y) > within.radius) return Infinity;
+          const d = Math.hypot(w.x - expect.x, w.y - expect.y) / sigma;
+          return Math.min(most, weight * d * d);
+        };
+        const c = worldToCell(pyr, lv, cur.x, cur.y);
+        const b = climb(mmLv, lv, { u: c.u, v: c.v, rot: cur.rotation }, opts.still ? 0 : last ? 0.5 : 1, opts.fixedRotation ? 0 : (last ? 0.75 : 3) * D2R, last ? 0.06 : 0.4, (last ? 0.06 : 0.7) * D2R, true, pen);
+        const w = cellToWorld(pyr, lv, b.u, b.v);
+        cur = { x: w.x, y: w.y, rotation: norm(b.rot), score: b.score, worth: b.worth };
+      }
+      return { ...cur, set: st };
+    };
+    const first = sets.find((st) => st.key === from.set) ?? sets[0];
+    let r = one(first);
+    let heights = opts.heights ?? null;
+    if (heights === 'own') {
+      heights = null;
+      for (const gi of this.roomsAt(from.x, from.y)) if (first.rooms.includes(gi)) { const w = this.ref.groups[gi].world; heights = heights ? [Math.min(heights[0], w.zMin), Math.max(heights[1], w.zMax)] : [w.zMin, w.zMax]; }
+    }
+    // (the other sets of rooms, where the spot is in a room of theirs: you have gone up a stair, or down one)
+    if (r.score < 0.9) for (const st of this.setsNear(from.x, from.y, reach + 2)) {
+      if (st === first || !this.setAt(st, heights)) continue;
+      const r2 = one(st);
+      if (r2.score > r.score + 0.02 && this.roomsAt(r2.x, r2.y).some((gi) => st.rooms.includes(gi))) r = r2;
+    }
+    return { x: r.x, y: r.y, rotation: r.rotation, score: r.score, set: r.set.key, sharp: this.sharp(mm, r.set, r) };
+  }
+
+  /** How much worse a place fits `yards` off it, the least of the four ways: next to nothing where the picture does not say where you are. */
+  sharp(mm, set, pose, yards = 3) {
+    if (typeof set === 'string') set = this.roomSets().find((st) => st.key === set) ?? this.roomSets()[0];
+    const pyr = this.pyramid(set.hidden), lv = pyr.levels[0], mmLv = mm.levels[0];
+    const c = worldToCell(pyr, lv, pose.x, pose.y), d = yards * this.s / lv.k;
+    const s0 = scoreAt(mmLv, lv, c.u, c.v, pose.rotation, true);
+    let least = Infinity;
+    for (const [du, dv] of [[d, 0], [-d, 0], [0, d], [0, -d]]) least = Math.min(least, s0 - scoreAt(mmLv, lv, c.u + du, c.v + dv, pose.rotation, true));
+    return least;
+  }
+
+  /**
+   * The places round a spot the minimap could be showing, the best first: every set of rooms you
+   * could be in there, looked through within `radius` yards (see search for the turn). near.heights
+   * ([lowest, highest]): only the sets of rooms that have a room at those heights.
+   * @returns [{ x, y, rotation, score, set (its key), coarse (not settled to the pixel: a runner-up) }]
+   */
+  around(mm, near, opts = {}) {
+    const pool = [];
+    for (const st of this.setsNear(near.x, near.y, near.radius)) {
+      if (!this.setAt(st, near.heights)) continue;
+      for (const c of search(mm, this.pyramid(st.hidden), { ...opts, near, cells: st.cells })) {
+        if (Math.hypot(c.x - near.x, c.y - near.y) > near.radius + 1 / this.s) continue; // (the look goes by whole cells: a little further than asked)
+        if (!this.roomsAt(c.x, c.y).some((gi) => st.rooms.includes(gi))) continue;      // (this set of rooms is only drawn while you are in one of its rooms)
+        pool.push({ ...c, set: st.key });
+      }
+    }
+    return pool.sort((a, b) => b.score - a.score);
+  }
+
+  /**
+   * A look through the whole plan that can be put down and taken up again. All of it takes
+   * seconds - every set of rooms, at every turn the minimap may have -, and whoever follows you
+   * meanwhile is not to be kept waiting for it (minimap-find.js). wholeBegin(mm, opts): opts as
+   * search's (the turn, where it is known). wholeStep(look, ms): sets of rooms looked through for
+   * about so long, one at the least; true once all are. wholeEnd(look, opts): what was found.
+   */
+  wholeBegin(mm, opts = {}) { return { mm, opts, left: [...this.roomSets()], pool: [], ms: 0 }; }
+
+  wholeStep(look, ms = 150) {
+    const t0 = performance.now();
+    while (look.left.length) {
+      const st = look.left.shift();
+      for (const c of search(look.mm, this.pyramid(st.hidden), { ...look.opts, rough: true, keep: 4, cells: st.cells })) {
+        if (this.roomsAt(c.x, c.y).some((gi) => st.rooms.includes(gi))) look.pool.push({ ...c, set: st.key }); // (a set of rooms is only drawn while you are in one of its rooms)
+      }
+      if (performance.now() - t0 >= ms) break;
+    }
+    look.ms += performance.now() - t0;
+    return !look.left.length;
+  }
+
+  /**
+   * What a look through the whole plan found: the place that fits best, settled to the pixel -
+   * { ok: true, x, y, rotation, score, set (its key), margin } - or { ok: false, reason }: a
+   * poor fit (minScore, 0.6), too little of the minimap lit to go by, or two places that fit
+   * about as well (minMargin, 0.05), as a look in one go has it (locate).
+   * opts: fixedRotation, minScore, minMargin
+   */
+  wholeEnd(look, opts = {}) {
+    const mm = look.mm, pool = look.pool.sort((a, b) => b.score - a.score);
+    if (!pool.length) return { ok: false, reason: 'nothing on the plan resembles the minimap' };
+    const apart = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) > 5 || Math.abs(angDiff(a.rotation, b.rotation)) > 10 * D2R;
+    // the best few that are places of their own, each settled to the pixel
+    const tops = [];
+    for (const p of pool) {
+      if (p.score < pool[0].score - 0.15 || tops.length >= 4) break;
+      if (tops.every((q) => apart(q, p))) tops.push(p);
+    }
+    const done = tops.map((p) => this.follow(mm, { from: p, reach: 3, sigma: 1, weight: 0, fixedRotation: opts.fixedRotation, heights: 'own' })).sort((a, b) => b.score - a.score);
+    const top = done[0], other = done.find((r) => r !== top && apart(r, top)) ?? null;
+    const margin = other ? top.score - other.score : top.score;
+    const minScore = opts.minScore ?? this.opts.minScore ?? 0.6, minMargin = opts.minMargin ?? this.opts.minMargin ?? 0.05;
+    if (top.score < minScore) return { ok: false, score: top.score, reason: `a poor fit (${top.score.toFixed(2)}, and ${minScore} is asked)` };
+    if (mm.floorFraction < SPARSE && top.score < SPARSE_FIT) return { ok: false, score: top.score, reason: 'too little of the minimap is lit to go by' };
+    if (margin < minMargin) return { ok: false, score: top.score, reason: 'two places fit about as well' };
+    return { ok: true, x: top.x, y: top.y, rotation: top.rotation, score: top.score, set: top.set, margin };
+  }
+
+  /**
+   * What a place found says besides where: the rooms you may be in there, the heights they span,
+   * and what of the picture does not go with the set of rooms it was found by.
+   * top: { x, y, rotation, set (the set of rooms, or its key) }
+   * @returns { set (key), hidden, rooms, band, odd }
+   */
+  describe(mm, top) {
+    const sets = this.roomSets(), own = typeof top.set === 'string' ? sets.find((st) => st.key === top.set) ?? sets[0] : top.set;
+    const seen = this.presence(mm, top), odd = [];
+    for (const p of seen) {
+      if (p.inView < 40) continue;
+      if (own.hidden.has(p.index) ? p.share > 0.6 : p.share < 0.25) odd.push(p.index);
+    }
+    const at = this.roomsAt(top.x, top.y), rooms = [];
+    for (const st of sets) {
+      const out = st !== own && seen.some((p) => p.inView >= 40 && (st.hidden.has(p.index) ? p.share > 0.6 : p.share < 0.25));
+      if (!out) for (const gi of at) if (st.rooms.includes(gi) && !rooms.includes(gi)) rooms.push(gi);
+    }
+    let band = null;
+    for (const gi of rooms) { const b = this.ref.groups[gi].world; band = band ? [Math.min(band[0], b.zMin), Math.max(band[1], b.zMax)] : [b.zMin, b.zMax]; }
+    return { set: own.key, hidden: [...own.hidden].sort((a, b) => a - b), rooms, band, odd };
   }
 
   /**

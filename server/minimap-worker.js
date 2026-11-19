@@ -6,9 +6,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parentPort, workerData } from 'node:worker_threads';
 import { Finder } from './minimap-find.js';
+import { groundOf } from './minimap-ground.js';
+
+/** The lifts of a map (world.json: lifts): what there is to walk on has them for ways with nothing walked. */
+function liftsOn(map) {
+  try { return (JSON.parse(fs.readFileSync(path.join(workerData.dataDir, 'world.json'), 'utf8')).lifts ?? []).filter((l) => l.map === map && Number.isFinite(l.x) && Number.isFinite(l.y)); } catch { return []; }
+}
 
 const finder = new Finder({
   read: (map) => { const file = path.join(workerData.dataDir, 'maps', String(map), 'minimap.bin'); return fs.existsSync(file) ? fs.readFileSync(file) : null; },
+  // (the dungeon's floors, where the map has them: the places found are held against what you can have walked to)
+  ground: (map) => (fs.existsSync(path.join(workerData.dataDir, 'maps', String(map), 'nav')) ? groundOf(fs, path, workerData.dataDir, map, liftsOn(map)) : null),
 });
 
 parentPort.on('message', (m) => {

@@ -572,7 +572,8 @@ found. They come with no height; the map takes it from the dungeon's own ground,
 dungeon now has (see "Data for route planning").
 
 **Where you are, inside.** In a dungeon that is one building the map finds you on the game's
-own minimap, several times a second (see "Inside a dungeon: your place, read off the game's
+own minimap, several times a second, and holds each place against how far you can have walked
+since the one before (see "Inside a dungeon: your place, read off the game's
 minimap"). With every blow of yours the combat log also says where you stood: that is what
 there is to go by in the dungeons the minimap cannot be read in (those that stand on open
 ground: the Deadmines, Scarlet Monastery, Stratholme and the like), where the map shows you
@@ -1817,9 +1818,14 @@ was looked at). `"minimap": false` in `config.json` switches all of it off.
   a yard and a half off, at the widest view - and its size to a hundredth. The addon says where
   the game has it (the minimap frame's middle and size in pixels, its zoom, how many yards it
   shows from its middle to its edge, whether it turns with you, whether it is round; read
-  outside fights, and kept through them). That could not be tried in the game before it was
-  sent out, so it is not taken on trust: the gold rim the game draws round its minimap is looked
-  for on the picture, and where it is found the picture has the last word. With an older addon
+  outside fights, and kept through them). The gold rim the game draws round its minimap is
+  looked for on the picture as well. Where north stays up, the rim stands still and is measured
+  to half a pixel: there the picture has the last word. Where the minimap turns with you, the
+  rim turns with it, and what is read off it wanders - on an evening in Gnomeregan by six pixels
+  and three hundredths of its size, and the place found with it by as many yards, swinging round
+  you as you turned - while the addon's word stood still and put you on the game's own spot for
+  the door to within a yard. So there the addon's word is gone by, as long as the rim is
+  anywhere near it (a twentieth of the minimap's width). With an older addon
   that says nothing, the rim is looked for in the top right corner of the game's picture,
   where the game puts its minimap, and the six steps of the minimap's zoom (300, 240, 180, 120,
   80 and 50 yards across, indoors) are tried in turn until one fits.
@@ -1832,6 +1838,58 @@ was looked at). `"minimap": false` in `config.json` switches all of it off.
   few tenths of a second in a small dungeon (the Stockade, Ragefire Chasm) and several seconds
   in the biggest with many floors (Dire Maul, Blackrock Spire: four with north up, up to ten
   where every turn has to be tried).
+- *Held against how you can have moved.* A picture can be read wrong: two corridors that look
+  alike, something over half the minimap, a hall so wide that all of it is floor. But you get
+  from one place to the next on your feet, and the game says how fast you are going (the
+  strip). The map server sums that up to the yards you have gone, and the map has every
+  dungeon's floors, the same ones a route is found over. So a picture is not asked "where on
+  the plan is this", but "where, of the places you can have got to" (`server/minimap-find.js`:
+  the trail; `server/minimap-ground.js`: the floors):
+  - **no further than you have gone** since the place before - and that near, every turn is
+    tried each time it is needed, which a look through a whole plan cannot afford. Losing you
+    used to mean such a look: one to ten seconds of a figure standing still, then a jump. Now it
+    is a look round a few yards, in a few hundredths of a second;
+  - **never further from the last place the picture told for sure** than the game says you
+    have gone since. The trail's own place can become unsure - a corridor that looks the same
+    all along, something over the minimap - and you are looked for the wider for it; but how
+    far you can be is not a matter of how unsure the trail is;
+  - **on a floor, and one you can have walked to** from the floor you were on: not through a
+    wall into the next corridor, and not up to the storey above with no stair between. Which
+    floor you are on is followed the same way, a step at a time - the page is told the height
+    of that floor (to a yard or two) instead of every height the rooms in sight span (forty
+    yards and more, in Gnomeregan), down a drop and up a lift included;
+  - **on a storey you can have got to.** Which rooms the game draws depends on the storey you
+    are on, so a place is tried once for every set of rooms near it - and of those, only the
+    ones with a room at a height you can have reached: by the floors (a drop and a lift take
+    you far in no yards at all), or because nobody climbs further than they have walked. The
+    Sunken Temple has six floors one over the other in its middle, and eighteen sets of rooms;
+    before this, a picture that fitted nowhere well had every set near tried, and took one to
+    three seconds there;
+  - **standing, you are where you stood.** While the game says you are not moving, every
+    picture is one more reading of the same place: the place given is their middle, and does
+    not stir. With something over the minimap you are still there - shown as found, not as
+    lost;
+  - **where the picture does not say where you are** - down a long straight corridor, in a hall
+    wider than the minimap shows - you are where you would have got to going on as you were,
+    instead of wherever the best fit happens to be; and with something over part of the minimap
+    while you run, the same, for a few seconds: drawn greyed, as a place not seen, until the
+    picture bears it out again;
+  - **a place that fits well where you cannot have walked to** is not thrown away - the floors
+    may have a gap the map does not know of, a spell may have moved you - but it has to hold
+    for three pictures running, moving as you move, before you are taken to be there. One
+    picture that looks like somewhere else moves nothing;
+  - **the whole plan is looked through a little with each picture**, when the trail's place
+    has not fitted for some seconds (you were moved far all at once, or the trail has gone
+    wrong). All of it takes seconds; done in one go, the trail saw nothing for as long, and a
+    few seconds of something over the minimap while you ran cost eight more. What such a look
+    finds is where you were when it began: you are then looked for as far from there as you
+    have gone since.
+- *The door.* Coming in from outside you are at the door. The map build takes the spot each
+  door puts you at from the reference database (`world.json`: `entrances`, 47 doors into 30
+  dungeons of the original game), and that is where you are looked for first: found with the
+  first picture, where a look through all of Gnomeregan at every turn took ten seconds. A door
+  the database does not have is noted the first time you are found standing just inside it
+  (`<dataDir>/user/dungeon-doors.json`) and known from then on.
 - *Which way you face.* Where the minimap turns with you, its turn is the way you face; where
   it keeps north up, your arrow in its middle says.
 - *Which floor.* The game leaves off its minimap every room that lies wholly above the ceiling
@@ -1839,7 +1897,9 @@ was looked at). `"minimap": false` in `config.json` switches all of it off.
   showing, and which set fits says which rooms you can be in - and between which heights. The
   page takes your height from the dungeon's own walkable ground, as it does everywhere
   (following the floor you walk on), and where the rooms on the minimap rule that floor out, you
-  are put on the one they allow.
+  are put on the one they allow. With the trail in hand the heights handed over are those of
+  the floors you can be standing on (see above), and the rooms' only where the map has no
+  floors to go by.
 
 **Checked against the game's own figures.** Where the game keeps its combat log (`/combatlog`
 in the game, or the addon's own switch for it), that log says exactly where you stood at each
@@ -1860,6 +1920,86 @@ tenths covered in black six in ten. A place far from where you were a moment ago
 believed of a fit as good as an uncovered minimap gives, and a minimap with next to nothing lit
 on it only of a good one.
 
+**Measured again, moving.** One evening in Gnomeregan (19 November 2026: 21,365 pictures) said
+what was wrong with taking each picture on its own: the place was found for 96 in 100 of them,
+but 523 times it was lost and had to be looked for afresh - a figure that stood still for
+seconds and then jumped -, and the minimap's place on the screen, read off its turning rim,
+wandered so that the figure swung round you by yards. There is no screenshot of that evening
+to hold anything against, so walks were made: a figure taken through all of Gnomeregan over
+the map's own floors (2,557 yards in eight minutes, standing and turning at fourteen places, a
+scuffle here and there, down the lift), the minimap drawn for every fifth of a second as the
+game draws it - the rooms above yours left out, turned with you, the rim wandering as it did
+that evening - and handed to the finder as the game's picture is, with where the figure really
+was known. Five such walks, each through the finder as it was and as it is:
+
+| The walk | The finder | Pictures that gave a place | That place off by, mean / worst | Leaps of more than four yards | Shown off by, mean / worst | No place, or one over a second and a half old | Lost and looked for afresh |
+|---|---|---|---|---|---|---|---|
+| the rim wandering | as it was | 2,447 of 2,495 | 3.8 / 7.8 yd | 10 | 4.0 / 36 yd | 7.1 s | 9 times |
+| | as it is | 2,493 of 2,495 | 0.1 / 1.6 yd | none | 0.8 / 3.9 yd | 0.3 s | never |
+| the same, other stops | as it was | 2,420 of 2,458 | 3.9 / 7.5 yd | 15 | 4.0 / 36 yd | 7.0 s | 4 times |
+| | as it is | 2,457 of 2,458 | 0.1 / 1.6 yd | none | 0.9 / 3.6 yd | 0.3 s | never |
+| the rim steady | as it was | 2,502 of 2,540 | 0.1 / 0.4 yd | none | 0.8 / 31 yd | 6.7 s | 6 times |
+| | as it is | 2,533 of 2,540 | 0.1 / 1.6 yd | none | 0.8 / 3.8 yd | 0.5 s | never (at a gap in the floors, four pictures gave no place) |
+| the rim wandering, and a quarter to a half of the minimap covered for a few seconds every half minute | as it was | 2,025 of 2,495 | 4.1 / 8.3 yd | 10 | 7.0 / 60 yd | 79 s | 50 times |
+| | as it is | 2,375 of 2,495 | 0.2 / 23.6 yd | 3 | 1.4 / 27 yd | 5.5 s | never |
+| the same, other stops | as it was | 2,045 of 2,458 | 3.9 / 7.7 yd | 17 | 6.8 / 52 yd | 67 s | 56 times |
+| | as it is | 2,304 of 2,458 | 0.1 / 1.7 yd | none | 1.3 / 22 yd | 5.2 s | never |
+
+While the figure stood, the place given moved 0.6 yards from one picture to the next on average
+with the rim wandering (up to 5.7): now 0.01 or less. The heights handed to the page spanned 43
+yards and held yours; now they span 3 and hold yours, down the lift's shaft as well (in the
+first covered walk 21 of 2,375 places were at the height of the storey beside yours, carried on
+there under a cover). A picture takes under 40 thousandths of a second on average, as before;
+the longest look, six to eight seconds before, is under one. The 23.6 yards are three pictures
+running at the end of a cover of the floor's own colour over half the minimap: a place a
+dozen yards off fitted those better than the right one, by more than going on as you were
+counts for. (Which pictures are looked at depends on how long each look takes, so that figure
+differs from run to run. With every picture looked at, the same walk's worst is 14 yards, and
+four such walks' worst 14, 9, 4 and 3.)
+
+("Shown" is what the page has to go by: at every tenth of a second, the newest place that had
+come by then against where the figure was at that moment - a look that takes seconds counts
+there, a wrong place counts there, and so does no place at all.) A walk drawn from the plan is
+kinder than the game: the game's own pictures fitted 0.93 to 0.98 that evening, these fit 0.99.
+What it shows is what the trail does with the same pictures, not how good the pictures are.
+
+**The other dungeons.** What was tuned on Gnomeregan was then walked through every dungeon
+that has a plan: in by its door (the reference database's spot), five minutes round seven
+stops far apart on floors you can walk to from it, on other storeys where there are any, the
+rim wandering:
+
+| Dungeon | Walked | Pictures that gave a place | Off by, mean / worst | No place, or a stale one | The longest look |
+|---|---|---|---|---|---|
+| The Stockade | 925 yd | 1,019 of 1,019 | 0.1 / 1.2 yd | 0.2 s | 0.5 s |
+| Ragefire Chasm | 1,631 yd | 1,472 of 1,472 | 0.1 / 1.6 yd | 0.3 s | 0.3 s |
+| Wailing Caverns | 1,776 yd | 1,499 of 1,499 | 0.1 / 0.5 yd | 0.3 s | 0.4 s |
+| Blackfathom Deeps | 1,702 yd | 1,499 of 1,499 | 0.1 / 2.3 yd | 0.3 s | 0.4 s |
+| Gnomeregan | 1,808 yd | 1,500 of 1,500 | 0.1 / 3.6 yd | 0.3 s | 0.4 s |
+| Uldaman | 1,637 yd | 1,500 of 1,500 | 0.1 / 1.5 yd | 0.4 s | 0.3 s |
+| Maraudon | 1,780 yd | 1,499 of 1,499 | 0.1 / 0.9 yd | 0.3 s | 0.3 s |
+| The Sunken Temple | 1,743 yd | 1,475 of 1,475 | 0.1 / 1.0 yd | 0.7 s | 1.3 s |
+| Blackrock Depths | 1,749 yd | 1,500 of 1,500 | 0.1 / 1.5 yd | 0.4 s | 0.4 s |
+| Blackrock Spire | 1,775 yd | 1,490 of 1,490 | 0.1 / 1.8 yd | 1.1 s | 1.0 s |
+| Dire Maul | 1,758 yd | 1,498 of 1,498 | 0.1 / 1.3 yd | 0.6 s | 0.5 s |
+| Molten Core | 1,753 yd | 1,498 of 1,500 | 0.2 / 1.9 yd | 0.3 s | 0.2 s |
+| Onyxia's Lair | 1,160 yd | 1,210 of 1,210 | 0.2 / 2.9 yd | 0.2 s | 0.2 s |
+
+No leap in any of them, and your height right throughout but for nine pictures in three of
+them. It was this that found the Sunken Temple's seconds (see "on a storey you can have got
+to" above: the worst place there was 9.2 yards off before, and ten seconds had no place or a
+stale one). These are walks drawn from each dungeon's own plan, like Gnomeregan's.
+
+Cases a walk does not have, tried in Gnomeregan:
+
+| What | What came of it |
+|---|---|
+| Up the lift, the map knowing it | your place and your height right all the way (141 of 141 pictures) |
+| Up the lift, the map not knowing it | your place right all the way; your height the storey you came from until you walked on from the top, right a second after that |
+| Twelve seconds on the run with seven tenths of the minimap covered by something dark | no look over a second; nothing said for most of it (the picture fits nowhere), a place carried on to up to 13 yards off; right again within a second of its showing |
+| The same, six tenths covered by something of the floor's colour | carried on throughout, greyed, never more than 5 yards off; right again within a second |
+| Moved across the dungeon all at once (670 yards), and standing there | found after 9 seconds, the old place shown until then |
+| The same, running on | found after 8 seconds, and followed from there |
+
 **What it cannot do.**
 
 - A dungeon that stands on ground of its own - the Deadmines, Shadowfang Keep, Scarlet
@@ -1875,11 +2015,34 @@ on it only of a good one.
 - A minimap that is hidden, covered by another program's overlay, or reskinned by an addon so
   that it has no gold rim and the addon's word is all there is: it works by that word alone
   where it can, and says so on the page ("looking for you on its minimap") where it cannot.
-- Only the Stockade could be tried against the real game. For every other dungeon the plan is
-  made the same way and a minimap drawn from it is found on it, but no screenshot was there to
-  hold it against.
-- The first place found after the minimap has been lost can take a few seconds in a dungeon
-  with many floors, and the figure waits where it was, greyed, meanwhile.
+- Only the Stockade could be tried against pictures of the real game, and Gnomeregan against an
+  evening's notes of it. For every other dungeon the plan is made the same way and a minimap
+  drawn from it is found on it, but no screenshot was there to hold it against. The trail was
+  measured on walks drawn from the plans, every dungeon's (see above), not in the game.
+- With something over the minimap while you run, the place shown is where you would have got
+  to going on as you were - round a corner it is wrong, by as far as you have gone since - and
+  it is drawn greyed for that reason: for eight seconds, or forty yards. After that nothing
+  more is said until the picture shows again, and then you are found within a second. What
+  "fits worse than usual" means is learned from the pictures themselves. A fit a little under
+  the usual that stays (up to a quarter under) is how the pictures now fit, within three or
+  four seconds: a part of a dungeon whose pictures fit the plan less well must not leave you
+  greyed all the way through it. A fit far under it is something over the minimap, for as long
+  as it lasts (after half a minute of it, that is the usual). Under something of the floor's
+  own colour over half the minimap, a place a dozen or two yards off can still fit better than
+  the right one for a moment, and is then shown as found: once in five covered walks, for
+  under a second.
+- A lift the map does not know, or a way between two storeys that its floors lack. The map
+  has the one lift in Gnomeregan, from the reference database, which lists none in any other
+  dungeon that has a plan; a lift this game has added is not in it. Your place stays right;
+  your height is the storey you came from until you walk on to where that storey has no floor
+  under you, and is put right a second or two after (a place you cannot have walked to, borne
+  out by three pictures).
+- Moved all at once by a spell (a mage's Blink, a warlock's summons) you are shown where you
+  were for a second or two more: the new place has to hold for three pictures. Summoned
+  across the whole dungeon, finding it takes a look through the whole plan: eight or nine
+  seconds, standing there or running on, with the figure waiting where it was.
+- An addon older than version 6 of the strip does not say how fast you move: then every picture
+  is taken on its own, as before.
 
 ### The camera that follows you
 
@@ -2276,10 +2439,11 @@ The extractor keeps what a pathfinder needs, in `dataDir`:
 | `maps/<id>/npcs.bin` (`WFP1`) | Every creature and quest object with somewhere to be: section 1 JSON (`entries`: `id`, name `n`, title `s`, levels `l`, rank `r`, reaction to Alliance `a` and Horde `h`, `u` = side not recorded, job flags `f`, `ct` what kind of thing a creature is (the reference database's number: 1 beast to 9 mechanical), quests started `qs` and ended `qe`; `k: 1` = an object), 2 spawn points (float32 x, y, z; z is NaN where not known), 3 entry index per spawn point, 4 how each height is known (0 not known, 1 likeliest of several, 2 only place to stand, 3 reference database, 4 reference and ground agree). `unplaced` in the JSON names who QuestieDB lists on the map that neither source could place |
 | `quests.json` | Every quest: name `n`, level `l`, from level `m`, side (1 Alliance, 2 Horde, 3 either), who starts (`s` NPCs, `so` objects, `si` items) and ends it (`e`, `eo`), its text `t`, what it asks for (`oc` creatures, `ok` kill credit, `oo` objects, `oi` items), what comes before and after; from the reference database, where it has the quest: `nd` how many of each (`[kind n / o / i, id, count]`), `ty` its type (elite, dungeon, raid...), `tl` its time limit. Plus `items`: those quests ask for, with what drops them (`d` creatures, `o` objects, `v` vendors) and how often (`dc`, `oc`: per source `[per cent, how many at a time]`); `mobs`: every creature a quest has you kill or that drops something wanted (`sp` spawn points, `lv` levels, `rk` rank, `hp` health, `ct` kind, `rs` seconds to come back); and the name and first position of every NPC and object mentioned. `source` and `reference` name the two databases |
 | `user/npcs-seen.json` | Where you have seen NPCs stand for yourself (see "Seen in game"). Never touched by a map update |
+| `user/dungeon-doors.json` | Where you were found standing just inside a dungeon's door that the map's data has no spot for (see "Inside a dungeon: your place, read off the game's minimap"): map, place, the way you faced. Never touched by a map update |
 | `sources/classic-db/` | The reference database as downloaded, with a note of where it came from |
 | `sources/questiedb/` | QuestieDB as fetched from the Atlas database (see "Where QuestieDB comes from"): `source.json` says which version is in use, and the files are in a folder of that version's own, laid out as in the addon, with QuestieDB's licence. The version before it is kept until the next one comes |
 | `rooms.json` | What the game calls the rooms of its buildings: `names`, and per building (`wmo`: by the building's number in the game's files) runs of three numbers - which set of names the placed building uses, the room's number in it (-1: the whole building), and the name's place in `names`. For telling floors apart by the name the game shows (see "How your height is known") |
-| `world.json` | Area names/hierarchy, zones with world rectangles, points of interest, liquid types (water / ocean / magma / slime), `lifts` (each lift: map, where it stands, the heights of its two ends `lo` and `hi`, how far from its middle its platform reaches `r`; and, read off the game's table of how it moves, the heights it stands at `stops`, the seconds its round takes `round`, the yards a second it goes between stops `speed` and the seconds it stands at one `still`), **flight masters and flight paths with their full 3D route points** (boat and zeppelin routes too; `pointMaps` says which map each point is on when a route crosses continents), `transports` (each boat / zeppelin line: its stops with map and position, seconds to the next stop, seconds for a full round), `portals` (doorways between maps, from `extractor/doorways.json`, or ShortestPathForever's `Data/Portals.lua` where that addon is installed), `inns` (every innkeeper: map, zone, position, reaction to each side; from QuestieDB), area triggers (dungeon entrances and other transitions) |
+| `world.json` | Area names/hierarchy, zones with world rectangles, points of interest, liquid types (water / ocean / magma / slime), `lifts` (each lift: map, where it stands, the heights of its two ends `lo` and `hi`, how far from its middle its platform reaches `r`; and, read off the game's table of how it moves, the heights it stands at `stops`, the seconds its round takes `round`, the yards a second it goes between stops `speed` and the seconds it stands at one `still`), **flight masters and flight paths with their full 3D route points** (boat and zeppelin routes too; `pointMaps` says which map each point is on when a route crosses continents), `transports` (each boat / zeppelin line: its stops with map and position, seconds to the next stop, seconds for a full round), `portals` (doorways between maps, from `extractor/doorways.json`, or ShortestPathForever's `Data/Portals.lua` where that addon is installed), `inns` (every innkeeper: map, zone, position, reaction to each side; from QuestieDB), area triggers (dungeon entrances and other transitions), `entrances` (where each door into a dungeon puts you: map, position with height, the way you face; from the reference database) |
 
 World coordinates are the game's: +X north, +Y west, +Z up, in yards. A tile is 533.33 yd and
 `col`/`row` map to world space as `X = (32 − row) × 533.33`, `Y = (32 − col) × 533.33` at the
@@ -2723,7 +2887,7 @@ out, and why):
 | `report.txt` | what you wrote, and a summary of all the rest |
 | `timeline.txt` | every note below as one list, in the order things happened: the server's, the page's and the addon's own, side by side |
 | `computer/` | the version of Windows, processor, memory, graphics card and its driver, drives and how full they are, the antivirus program, and the names of the programs running (an overlay or a capture program can be in the strip's way) |
-| `atlas/` | this copy of Azeroth Atlas: its version, a digest of each of its own files (a file gone wrong in an update shows), `config.json`, what the server knew at that moment (the game, the addon, your character as the game reported it, your quest log), its notes, what the page was showing (where you were, each route and how it was taken to go, what the game had been handed) with a picture of the map, the route mailboxes as they stood, and - where you were looked for on the game's minimap inside a dungeon - `atlas/minimap/`: the last small square of the game's picture that was looked at (`last.png`), where the minimap was taken to be in it (by its rim, and by the addon's word), the figures of the last look, and how it has agreed with the combat log (`state.json`) |
+| `atlas/` | this copy of Azeroth Atlas: its version, a digest of each of its own files (a file gone wrong in an update shows), `config.json`, what the server knew at that moment (the game, the addon, your character as the game reported it, your quest log), its notes, what the page was showing (where you were, each route and how it was taken to go, what the game had been handed) with a picture of the map, the route mailboxes as they stood, and - where you were looked for on the game's minimap inside a dungeon - `atlas/minimap/`: the last small square of the game's picture that was looked at (`last.png`), where the minimap was taken to be in it (by its rim, and by the addon's word), the figures of the last look, and how it has agreed with the combat log (`state.json`), and what each of the last 1,500 pictures gave (`trail.json`: five minutes of them, a line of figures apiece - when, whether a place was found and how, where, how well it fitted, how far you had gone - and nothing of the pictures themselves) |
 | `game/` | the game's build and its settings, the addons installed and which are switched on, what the Azeroth Atlas addon has saved (its own notes among it), what the addons it works with have saved (Questie, Guidelime and guide packs, TomTom, ShortestPathForever, DockWatch and the like), the game's own logs about itself and its addons, the beginning of its last three crash reports, and its cache of what the server told it about creatures, objects and quests |
 
 **What never goes in:** account names (an account's folder is called `account-1` in the zip,

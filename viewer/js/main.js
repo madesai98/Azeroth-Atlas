@@ -1185,7 +1185,8 @@ function showPlayer() {
       const d = describe([link.me.x, link.me.y, z]);
       msg = `You: ${d.coords || d.place || app.scene.map.name}`;
       // (inside a dungeon: what says where you are - the game's minimap, or its combat log at your last blow)
-      if (link.me.placed === 'minimap') msg += link.waning ? ' · where the minimap last showed you' : ' · by the minimap';
+      // (a guess: something is over the minimap, and the place is where you would have got to going on as you were - server/minimap-find.js)
+      if (link.me.placed === 'minimap') msg += link.me.guess ? ' · about here: something is over the minimap' : link.waning ? ' · where the minimap last showed you' : ' · by the minimap';
       else if (link.me.placed) msg += ' · where you last struck a blow';
     } else {
       const name = app.manifest.maps.find((m) => m.id === p.map)?.name ?? `map ${p.map}`;

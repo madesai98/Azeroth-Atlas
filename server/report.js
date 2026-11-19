@@ -333,6 +333,9 @@ export async function buildReport(ctx, ask = {}) {
     if (!mm) return;
     const s = mm.status();
     add('atlas/minimap/state.json', s);
+    // (what each of the last pictures gave, five minutes of them: figures only)
+    const kept = mm.trailKept?.();
+    if (kept?.rows?.length) add('atlas/minimap/trail.json', JSON.stringify(kept));
     const pic = include.shot ? mm.picture() : null;
     if (pic) add('atlas/minimap/last.png', pic.png, { text: false, at: new Date(pic.at), note: `the square of the game's picture last looked at: ${pic.w} x ${pic.h} pixels${pic.origin ? `, ${pic.origin[0]} across and ${pic.origin[1]} down` : ''}` });
     if (s.wanted || s.pictures) summary.push(`The minimap: ${s.state}${s.why ? ` (${s.why})` : ''}; ${s.found} of ${s.pictures} pictures of it gave a place`);

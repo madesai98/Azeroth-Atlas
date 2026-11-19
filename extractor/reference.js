@@ -131,6 +131,9 @@ function columns(sql, name) {
  *              "transport" kind). Where each stands is among the object spawns; how far it
  *              travels is the game's own to say (world.js, liftsOf)
  *   quests     Map<quest id, { title, type, limit (seconds), needs: [['n' | 'o' | 'i', id, how many], ...] }>
+ *   entrances  [{ id, name, map, pos: [x, y, z], facing }]: where the server puts you when you walk into
+ *              one of the game's doorways (its "area triggers": id is the game's own number for the doorway) -
+ *              the spot inside a dungeon's door among them (world.js, entrancesOf)
  */
 function readFacts(sql) {
   const num = (v) => { const n = +v; return Number.isFinite(n) ? n : 0; };
@@ -186,7 +189,13 @@ function readFacts(sql) {
       quests.set(num(r[iId]), { title: iTitle >= 0 ? r[iTitle] : '', type: iType >= 0 ? num(r[iType]) : 0, limit: iLimit >= 0 ? num(r[iLimit]) : 0, needs });
     }
   }
-  return { templates, respawn, loot, chests, movers, objectKinds, quests };
+  const entrances = [];
+  {
+    const t = reader('areatrigger_teleport');
+    const c = ['id', 'name', 'target_map', 'target_position_x', 'target_position_y', 'target_position_z', 'target_orientation'].map(t.at);
+    if (t.ok && c.every((i) => i >= 0)) for (const r of t.rows()) entrances.push({ id: num(r[c[0]]), name: String(r[c[1]] ?? ''), map: num(r[c[2]]), pos: [num(r[c[3]]), num(r[c[4]]), num(r[c[5]])], facing: num(r[c[6]]) });
+  }
+  return { templates, respawn, loot, chests, movers, objectKinds, quests, entrances };
 }
 
 /**
@@ -223,7 +232,7 @@ export function readReference(file) {
     }
     return out;
   };
-  let facts = { templates: new Map(), respawn: new Map(), loot: { creature: new Map(), reference: new Map(), object: new Map() }, chests: new Map(), movers: new Map(), objectKinds: new Map(), quests: new Map() };
+  let facts = { templates: new Map(), respawn: new Map(), loot: { creature: new Map(), reference: new Map(), object: new Map() }, chests: new Map(), movers: new Map(), objectKinds: new Map(), quests: new Map(), entrances: [] };
   try { facts = readFacts(sql); } catch { /* the spawn tables alone, as before */ }
   return { hash, creatures: table('creature'), objects: table('gameobject'), ...facts };
 }
