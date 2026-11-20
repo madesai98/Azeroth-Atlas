@@ -260,7 +260,7 @@ export class Minimap {
     const here = this.wanted && this.now?.map === r.map;
     if (here && r.ok) {
       const first = !this.fix || r.at - this.fix.at > FRESH;
-      // (where the copies' checks agree that the minimap's place is off one way in this part of the dungeon, that is taken off it)
+      // (where a copy's checks say that the minimap's place is off one way in this part of the dungeon, that is taken off it)
       const off = this.places.shift(r.map, r.x, r.y);
       const x = off ? r.x - off[0] : r.x, y = off ? r.y - off[1] : r.y;
       this.fix = { map: r.map, x, y, facing: r.facing ?? null, at: r.at, band: r.band ?? null, score: r.score };

@@ -11,7 +11,7 @@
 //               be the map having lost you and found you again), and those other copies went.
 //   the checks  how far the minimap's place was from where the game's combat log had you, while
 //               you stood still, by the part of the dungeon (<dataDir>/user/dungeon-checks.json:
-//               sums, a square of 32 yards a line). Where the copies agree that the minimap's
+//               sums, a square of 32 yards a line). Where a copy's checks say that the minimap's
 //               place is off one way in a part of a dungeon, the place given there is put right.
 //
 // The three files hold facts of the dungeons and nothing of you but that you were once there:
@@ -126,7 +126,7 @@ export class Places {
 
   /**
    * How far north and west of the truth the minimap's place is taken to be at a spot, by what
-   * the copies' checks agree on: [north, west] to take off it - or null: nothing is known to be off there.
+   * the copies' checks say: [north, west] to take off it - or null: nothing is known to be off there.
    * (Between the middles of the squares it is passed from one's figure to the next's, so that a
    * place does not jump at an edge.)
    */

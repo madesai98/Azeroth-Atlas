@@ -130,7 +130,7 @@ try {
         for (const d of p.doors) console.log(`  door at ${at([d.x, d.y, d.z])}: ${d.copies} ${d.copies === 1 ? 'copy' : 'copies'}, ${d.times} ${d.times === 1 ? 'time' : 'times'}${believed.door(d) ? '' : ' (not gone by yet)'}`);
         for (const w of p.ways) console.log(`  way from ${at(w.a)} to ${at(w.b)}: ${w.copies} ${w.copies === 1 ? 'copy' : 'copies'}, ${w.times} ${w.times === 1 ? 'time' : 'times'}${believed.way(w) ? '' : ' (not gone by yet)'}`);
         const moved = p.cells.filter((c) => believed.shift(c));
-        if (moved.length) console.log(`  ${moved.length} ${moved.length === 1 ? 'part' : 'parts'} where the copies agree the minimap's place is off, and it is put right: ${moved.slice(0, 6).map((c) => `${believed.shift(c).map((v) => v.toFixed(1)).join(' north, ')} west round ${(c.cx + 0.5) * 32}, ${(c.cy + 0.5) * 32}`).join('; ')}`);
+        if (moved.length) console.log(`  ${moved.length} ${moved.length === 1 ? 'part' : 'parts'} where the checks say the minimap's place is off one way, and it is put right: ${moved.slice(0, 6).map((c) => `${believed.shift(c).map((v) => v.toFixed(1)).join(' north, ')} west round ${(c.cx + 0.5) * 32}, ${(c.cy + 0.5) * 32}`).join('; ')}`);
       }
     }
   } else if (command === 'status') {

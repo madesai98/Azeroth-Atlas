@@ -17,8 +17,9 @@
 //   a check    where the game's combat log said you stood (exact, and late) against where the
 //              minimap had put you at that moment, while you stood still: how far off the
 //              minimap's place is, in each part of each dungeon. That is the measure of how well
-//              all of this works in the game itself - and where copies agree that a part of a
-//              plan sits a yard or two off, every copy's place there is put right by it.
+//              all of this works in the game itself - and where a copy's checks all say that a
+//              part of a plan sits a yard or two off one way, every copy's place there is put
+//              right by it.
 //
 // The lines they are sent as (collect.js sends them with the rest; publish.js, fold, takes
 // them in), a fact a line, with nothing of a player in them - no name, no time, not which run:
@@ -32,10 +33,14 @@
 // (its number: the place over 32, rounded down); its figures are the mean of that many checks:
 // how far north and west of the game's place the minimap's was, and how far off in all.
 //
-// What is believed (believed, below): a door that two copies have, or one copy came in by
-// twice; a way that two copies went, or one copy three times - a single such finding may be the
-// map having lost you and found you again, which looks the same; a part of a plan is moved only
-// where two copies have ten checks each there and agree to within a yard.
+// What is gone by (believed, below). One copy's word is enough: the copies are few, and each
+// has been where the others have not. So: a door any copy found. A way gone twice - by one
+// copy, or by two once each: one finding may be the map having lost you and found you again,
+// which looks the same, and the copy that found it does not go by it either until it has seen it
+// again. A part of a plan is moved where one copy has ten checks there that point one way (how
+// far off they are together is most of how far off each is: checks that point every way are
+// the minimap's place wandering, not a plan sitting off) - and, where several copies have as
+// many, where they say the same to within a yard.
 //
 // Published as one record per dungeon, /truth/place/b<n>/i<map> (records.js has the shape).
 import fs from 'node:fs';
@@ -48,6 +53,7 @@ export const CHECK_CELL = 32;   // yards: the square a dungeon's checks are kept
 export const CHECK_FIRST = 5;   // checks in a cell before anything is said of it
 export const CHECK_SURE = 10;   // ...and before a copy's word on it counts towards moving anything
 const CHECK_AGREE = 1;          // yards the copies' words on a cell may differ by
+const CHECK_STEADY = 0.7;       // of how far off a copy's checks in a cell are on average, the share that has to be one way
 const CHECK_LEAST = 1, CHECK_MOST = 6; // yards: less is not worth moving anything by, more is not a plan sitting a little off
 const MOST = { d: 12, j: 60, c: 600 }; // of each, the most kept of one dungeon
 const MAP_MOST = 99999;
@@ -176,8 +182,8 @@ export function foldPlaces(byCopy) {
     const cells = [...m.cells].map(([key, voices]) => {
       const n = voices.reduce((s, v) => s + v.n, 0);
       const dx = voices.reduce((s, v) => s + v.dx * v.n, 0) / n, dy = voices.reduce((s, v) => s + v.dy * v.n, 0) / n, off = voices.reduce((s, v) => s + v.off * v.n, 0) / n;
-      // how many copies have checks enough there to count, and how far the furthest of those is from what they say together
-      const sure = voices.filter((v) => v.n >= CHECK_SURE);
+      // how many copies have checks enough there to count - and checks that point one way -, and how far the furthest of those is from what they say together
+      const sure = voices.filter((v) => v.n >= CHECK_SURE && Math.hypot(v.dx, v.dy) >= CHECK_STEADY * v.off);
       const sx = sure.reduce((s, v) => s + v.dx, 0) / (sure.length || 1), sy = sure.reduce((s, v) => s + v.dy, 0) / (sure.length || 1);
       const spread = sure.reduce((s, v) => Math.max(s, Math.hypot(v.dx - sx, v.dy - sy)), 0);
       checks += n; offSum += off * n;
@@ -211,10 +217,10 @@ export function readPlace(rec) {
 
 /** What of a dungeon's record is gone by: see the head of this file. */
 export const believed = {
-  door: (d) => d.copies >= 2 || d.times >= 2,
-  way: (w) => w.copies >= 2 || w.times >= 3,
-  /** How far north and west of the truth the minimap's place is in a cell, where the copies agree on it: [north, west] - or null. */
-  shift: (c) => { const far = Math.hypot(c.sx, c.sy); return c.sure >= 2 && c.spread <= CHECK_AGREE && far >= CHECK_LEAST && far <= CHECK_MOST ? [c.sx, c.sy] : null; },
+  door: (d) => d.times >= 1,
+  way: (w) => w.times >= 2,
+  /** How far north and west of the truth the minimap's place is in a cell, where a copy's checks say so (and no other copy's say otherwise): [north, west] - or null. */
+  shift: (c) => { const far = Math.hypot(c.sx, c.sy); return c.sure >= 1 && c.spread <= CHECK_AGREE && far >= CHECK_LEAST && far <= CHECK_MOST ? [c.sx, c.sy] : null; },
 };
 
 /**

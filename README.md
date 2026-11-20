@@ -1888,7 +1888,7 @@ was looked at). `"minimap": false` in `config.json` switches all of it off.
     may have a gap the map does not know of, a spell may have moved you - but it has to hold
     for three pictures running, moving as you move, before you are taken to be there. One
     picture that looks like somewhere else moves nothing;
-  - **a way the floors do not have, gone before** - by you twice, or by other copies of the
+  - **a way the floors do not have, gone twice before** - by you, or by any other copy of the
     map (see "What following you teaches the map" below) - is looked at before that: where the
     trail's own place does not fit, or is on no floor you can have walked to, and you were
     near the one end of such a way, a place at its other end that fits as well as one of the
@@ -1906,7 +1906,7 @@ was looked at). `"minimap": false` in `config.json` switches all of it off.
   the database does not have is noted the first time you are found standing just inside it
   (`<dataDir>/user/dungeon-doors.json`), known from then on, and counted each time you come in
   by it again. The doors other copies of the map have found come with the Atlas database: one
-  that somebody else came in by twice is where you are looked for the first time you use it
+  that anybody else has come in by is where you are looked for the first time you use it
   (see "What following you teaches the map" below).
 - *Which way you face.* Where the minimap turns with you, its turn is the way you face; where
   it keeps north up, your arrow in its middle says.
@@ -1935,13 +1935,15 @@ fetched back by all of them (`server/minimap-places.js`, `atlasdb/places.js`):
 
 | What | How it is learned | What it is good for | Gone by once |
 |---|---|---|---|
-| **A door** the map's data has no spot for (a dungeon new to this game, a back way in) | you are found standing just inside, having come in from outside | the trail begins there with the first picture, with no look through the plan | two copies have found it, or one has come in by it twice (your own: at once, on your own map) |
-| **A way** the map's floors do not have: a lift the reference database lacks, a doorway the floors are shut at, a portal | a place you cannot have walked to holds for three pictures, no more than a dozen yards on from the last place the picture told for sure, and is then borne out by a dozen pictures more | where you are not found where you can have walked to, the far end of a known way is looked at first: you are found with the next picture, where a portal across the dungeon cost a look through the whole plan (eight or nine seconds) | two copies have gone it, or one copy three times (your own: twice, on your own map) |
-| **A check**: how far the minimap's place was from the combat log's while you stood, summed by the 32-yard square of the dungeon | every blow while you stand still, where the game keeps its combat log (above) | the measure of how well all this works in the game itself, dungeon by dungeon (`npm run db -- places` lists it). And where copies agree that a part of a plan sits off one way, every copy's place there is put right by that much, fading out towards the squares nothing is known of | two copies have ten checks each in the square and agree to within a yard, on something between one yard and six |
+| **A door** the map's data has no spot for (a dungeon new to this game, a back way in) | you are found standing just inside, having come in from outside | the trail begins there with the first picture, with no look through the plan | any copy has found it: once is enough |
+| **A way** the map's floors do not have: a lift the reference database lacks, a doorway the floors are shut at, a portal | a place you cannot have walked to holds for three pictures, no more than a dozen yards on from the last place the picture told for sure, and is then borne out by a dozen pictures more | where you are not found where you can have walked to, the far end of a known way is looked at first: you are found with the next picture, where a portal across the dungeon cost a look through the whole plan (eight or nine seconds) | it has been gone twice: by one copy, or by two once each. So it is the third time anybody goes it that it saves anything |
+| **A check**: how far the minimap's place was from the combat log's while you stood, summed by the 32-yard square of the dungeon | every blow while you stand still, where the game keeps its combat log (above) | the measure of how well all this works in the game itself, dungeon by dungeon (`npm run db -- places` lists it). And where a copy's checks say that a part of a plan sits off one way, every copy's place there is put right by that much, fading out towards the squares nothing is known of | one copy has ten checks in the square that point one way (taken together they are off by seven tenths of what each is off by: checks that point every way are the place wandering, not a plan sitting off), on something between one yard and six. Where several copies have as many, they must say the same to within a yard |
 
-One finding of a way proves little: the map having lost you and found you again looks the
-same. So a way waits for a second finding, yours or another copy's, and the place it took you
-to must have held. A copy that takes a way other copies found, and is borne out the same,
+One copy's word is enough for all of these: the copies are few, and each has been where the
+others have not. What a way waits for is not a second copy but a second finding, whoever's.
+One finding proves little: the map having lost you and found you again looks the same, and
+the copy that found it does not go by it either until it has seen it again. (Each time, the
+place it took you to must have held.) A copy that takes a way other copies found, and is borne out the same,
 adds its own word to theirs. A way leads one way: up a lift is not down it (down is a drop, which the
 floors have anyway). A step of a yard on one storey is a hole in the floors and no way.
 
@@ -2088,10 +2090,9 @@ Cases a walk does not have, tried in Gnomeregan:
   dungeon that has a plan; a lift this game has added is not in it. Your place stays right;
   your height is the storey you came from until you walk on to where that storey has no floor
   under you, and is put right a second or two after (a place you cannot have walked to, borne
-  out by three pictures). That is then noted as a way, and from the second time you go it -
-  or the first, where other copies have - it is put right with one picture (see "What
-  following you teaches the map"); your height on the lift itself stays the storey you came
-  from all the same.
+  out by three pictures). That is then noted as a way, and once it has been gone twice - by
+  you, or by anybody - it is put right with one picture (see "What following you teaches the
+  map"); your height on the lift itself stays the storey you came from all the same.
 - Moved all at once by a spell (a mage's Blink, a warlock's summons) you are shown where you
   were for a second or two more: the new place has to hold for three pictures. Summoned
   across the whole dungeon, finding it takes a look through the whole plan: eight or nine
@@ -2645,11 +2646,11 @@ own window code, read out of the installed game, and by what other addons do in 
 dungeon (`/truth/place`, made by `atlasdb/places.js`): the doors copies were found at having
 come in that the map's own data has no spot for, the ways they went that its floors do not
 have (a lift, a portal), and how far the minimap's place was from the combat log's, by the
-32-yard square. Each with how many copies say so and how often, so that a copy can tell what
-to go by: a door two copies found or one came in by twice, a way two copies went or one went
-three times, a square two copies have ten checks each in and agree on to a yard. A copy's
-word on a spot weighs by how often it found it, and never for more than five findings: one
-copy does not carry the rest. Nothing else says anything of this, so there is no source to
+32-yard square. Each with how many copies say so and how often. One copy's word is enough to
+go by: a door any copy found, a way gone twice (by one copy, or by two once each), a square
+one copy has ten checks in that point one way - and on which the copies that have as many say
+the same to a yard. Where several copies say where a thing is, a copy's word weighs by how
+often it found it, and never for more than five findings: one copy does not carry the rest. Nothing else says anything of this, so there is no source to
 believe first; the record is what the copies sent, put together. What it is for is under
 "Inside a dungeon: your place, read off the game's minimap".
 

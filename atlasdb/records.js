@@ -80,7 +80,7 @@
 //   place   d "x,y,z,facing,copies,times ..." the doors copies found themselves at having come in,
 //           that the map's own data does not have; w "x,y,z,x,y,z,copies,times ..." the ways its
 //           floors do not have, from a place to a place; c "cell north,cell west,copies,checks,
-//           off north,off west,off,copies with checks enough,their off north,their off west,how
+//           off north,off west,off,copies with checks enough that point one way,their off north,their off west,how
 //           far they differ ..." how far the minimap's place is from the combat log's, by the
 //           32-yard square; a [copies, checks, yards]: the same over the whole dungeon.
 //           (A height or a facing that is not known is left empty.)
