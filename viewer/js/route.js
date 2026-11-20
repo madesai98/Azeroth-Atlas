@@ -29,6 +29,11 @@ const ROUGH = 3;            // a walk too long to work out is counted at this ma
 const GAP = 60;             // yards: drawn stretches further apart than this are not joined by a line
 const BREAK = 8;            // kind bit: this point starts a new stretch (no line from the one before)
 const RIDE = 32;            // kind bit: this piece is a crossing by boat or zeppelin (you are carried along it)
+const HEARTH = 128;         // kind bit: this piece is where your hearthstone takes you - straight from where you stand to the inn (shown, not followed)
+const HEARTH_NEAR = 40;     // yards from the inn within which that is not worth a line
+const HEARTH_RISE = 0.12;   // how high that line arches, as a share of how far it goes (a straight one runs through the hills between)...
+const HEARTH_RISE_MOST = 600; // ...and yards, at the most
+const HEARTH_PIECES = 24;   // pieces the arch is drawn in
 const REMEMBER = 300;       // walks already worked out that are kept (the far legs of a journey do not change as you move)
 const FAIL_CELL = 32;       // yards: a long search that found no way is not repeated from within this far of where it began...
 const FAIL_FOR = 60000;     // ms: ...for this long
@@ -646,6 +651,7 @@ export class RoutePlanner {
     // and its crossings by boat and zeppelin: { map, points, kinds (one for each point, or one
     // for all), joins (it goes on from the line before, over the sea between two maps) })
     const legs = [], points = [], kinds = [], time = [], also = [], lifts = [];
+    let stone = null; // (the hearthstone's part of the journey, where it has one: see below)
     const shown = (map, pts, k, joins = false) => { if (pts && pts.length >= 6) also.push({ map, points: pts, kinds: k, joins }); };
     let clock = 0, lastWalk = null;
     const draw = (p, k, seconds, rides = null) => {
@@ -710,15 +716,49 @@ export class RoutePlanner {
       }
       else if (e.mode === 'door') legs.push({ mode: 'door', name: e.name, seconds: e.seconds });
       else if (e.mode === 'tram') legs.push({ mode: 'tram', seconds: e.seconds, wait: e.wait, line: e.line, stop: e.stop, ride: e.ride, known: !!e.known, leaves: e.leaves });
-      else if (e.mode === 'hearth') legs.push({ mode: 'hearth', wait: e.wait, seconds: e.seconds });
+      else if (e.mode === 'hearth') {
+        legs.push({ mode: 'hearth', wait: e.wait, seconds: e.seconds });
+        // (from where to where; and how much was drawn and shown before it, to find what the journey does next at the inn)
+        stone = { from: a, to: b, drawn: points.length / 3, shown: also.length };
+      }
       clock += e.seconds;
+    }
+    // Your hearthstone's line. The stone puts you down at the inn and the journey's line begins
+    // there: with nothing leading away from where you stand, a route that began with it looked
+    // as if no route had come at all (reported on 19 November 2026: "wasting time tryna make the
+    // route work then realizing its working"). So a line of a kind of its own goes straight from
+    // you to the inn, where the inn is on the map you are on: shown, not followed, and drawn
+    // broken in a colour of its own (RouteRenderer), so that nobody takes it for a way to walk.
+    // It arches over the land between: straight from a hillside to an inn a mile off and three
+    // hundred yards lower, it was under the ground after its first few yards.
+    // (inn: where the stone takes you, for the game, which draws that line itself from where you
+    // are at the moment: ingame.js. The inn's height here is that of what the journey does next there.)
+    let inn = null;
+    if (stone) {
+      const from = stone.from.pos, to = stone.to.pos;
+      inn = { map: stone.to.map, x: to[0], y: to[1] };
+      if (stone.from.map === stone.to.map && Math.hypot(to[0] - from[0], to[1] - from[1]) > HEARTH_NEAR) {
+        const d = stone.drawn, after = also.slice(stone.shown).find((q) => q.map === stone.to.map)?.points;
+        const next = points.length / 3 > d && Math.hypot(points[d * 3] - to[0], points[d * 3 + 1] - to[1]) <= GAP ? points[d * 3 + 2]
+          : after && Math.hypot(after[0] - to[0], after[1] - to[1]) <= GAP ? after[2] : NaN;
+        const z0 = Number.isFinite(from[2]) ? from[2] : Number.isFinite(next) ? next : 0;
+        const z1 = Number.isFinite(to[2]) ? to[2] : Number.isFinite(next) ? next : z0;
+        const rise = Math.min(HEARTH_RISE_MOST, HEARTH_RISE * Math.hypot(to[0] - from[0], to[1] - from[1]));
+        const arch = new Float32Array((HEARTH_PIECES + 1) * 3);
+        for (let i = 0; i <= HEARTH_PIECES; i++) {
+          const t = i / HEARTH_PIECES;
+          arch[i * 3] = from[0] + (to[0] - from[0]) * t; arch[i * 3 + 1] = from[1] + (to[1] - from[1]) * t;
+          arch[i * 3 + 2] = z0 + (z1 - z0) * t + Math.sin(Math.PI * t) * rise;
+        }
+        also.push({ map: stone.from.map, points: arch, kinds: HEARTH, joins: false, hearth: true });
+      }
     }
     const p = new Float32Array(points), cum = new Float32Array(kinds.length);
     for (let i = 1; i < cum.length; i++) cum[i] = cum[i - 1] + (kinds[i] & (BREAK | LIFTED) ? 0 : Math.hypot(p[i * 3] - p[i * 3 - 3], p[i * 3 + 1] - p[i * 3 - 2], p[i * 3 + 2] - p[i * 3 - 1]));
     const first = plan.chain[0];
     this.route = {
       points: p, kinds: new Uint8Array(kinds), cum, time: new Float32Array(time), length: cum.length ? cum[cum.length - 1] : 0, rides: lifts,
-      seconds: plan.seconds, target: asked.to, at: 0, legs, lastWalk, walking: direct.ok ? direct.seconds : null, also,
+      seconds: plan.seconds, target: asked.to, at: 0, legs, lastWalk, walking: direct.ok ? direct.seconds : null, also, inn,
       // a journey that does not begin with a walk from where you stand (or with one too long to
       // draw), nor with the flight you are on: being far from its line is expected
       detached: !((first.mode === 'walk' && first.map === this.mapId && !!exact.get(`${first.from}>${first.to}`)?.points) || (first.mode === 'flight' && legs[0].end !== undefined)),
@@ -913,12 +953,13 @@ ${GLOBALS_WGSL}
 struct Route {
   origin: vec4f,   // the route's first point, camera-relative
   size: vec4f,     // x, y: half the line width in clip units; z: lift above the ground
-  walk: vec4f, swim: vec4f, danger: vec4f, fly: vec4f, ride: vec4f,
+  walk: vec4f, swim: vec4f, danger: vec4f, fly: vec4f, ride: vec4f, hearth: vec4f,
 };
 @group(1) @binding(0) var<uniform> R: Route;
 override GHOST: f32 = 0.0;
 
-struct VSOut { @builtin(position) clip: vec4f, @location(0) color: vec3f, @location(1) across: f32 };
+// (dash: how far along its piece of line a spot is, in line widths, where the line is a broken one - the hearthstone's; less than nothing where it is whole)
+struct VSOut { @builtin(position) clip: vec4f, @location(0) color: vec3f, @location(1) across: f32, @location(2) @interpolate(linear) dash: f32 };
 @vertex fn vs(@location(0) a: vec3f, @location(1) b: vec3f, @location(2) corner: vec2f, @location(3) kind: f32) -> VSOut {
   var out: VSOut;
   let up = vec3f(0.0, 0.0, R.size.z);
@@ -942,10 +983,14 @@ struct VSOut { @builtin(position) clip: vec4f, @location(0) color: vec3f, @locat
   c = vec4f(c.xy + offset * c.w, c.z, c.w);
   out.clip = c;
   out.color = select(select(select(select(R.walk.rgb, R.swim.rgb, kind > 0.5 && kind < 1.5), R.danger.rgb, kind > 1.5 && kind < 2.5), R.fly.rgb, kind > 2.5), R.ride.rgb, kind > 3.5);
+  out.color = select(out.color, R.hearth.rgb, kind > 4.5);
+  out.dash = select(-1.0, corner.x * len, kind > 4.5);
   out.across = corner.y;
   return out;
 }
 @fragment fn fs(in: VSOut) -> @location(0) vec4f {
+  // (the hearthstone's line is a broken one: it is no way to walk)
+  if (in.dash >= 0.0 && fract(in.dash / 9.0) > 0.58) { discard; }
   // a dark edge so the line reads on any ground
   let edge = smoothstep(0.55, 0.85, abs(in.across));
   let color = mix(in.color, in.color * 0.25, edge);
@@ -954,6 +999,7 @@ struct VSOut { @builtin(position) clip: vec4f, @location(0) color: vec3f, @locat
 }
 `;
 
+const HEARTH_HEX = '#ff6ad5'; // the pink of the hearthstone's line: no route's own colour (as the addon draws it in the game: Route.lua)
 const lin = (c) => { const s = c / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
 const rgb = (hex) => { const n = parseInt(hex.slice(1), 16); return [lin((n >> 16) & 255), lin((n >> 8) & 255), lin(n & 255), 1]; };
 
@@ -962,10 +1008,11 @@ export class RouteRenderer {
   constructor(gpu) {
     this.gpu = gpu;
     const { device } = gpu;
-    this.uniform = device.createBuffer({ label: 'route-uniform', size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.data = new Float32Array(28);
+    this.uniform = device.createBuffer({ label: 'route-uniform', size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.data = new Float32Array(32);
     this.data.set(rgb('#e8f6ff'), 20);
     this.data.set(rgb('#c39bff'), 24); // a crossing by boat or zeppelin
+    this.data.set(rgb(HEARTH_HEX), 28); // where your hearthstone takes you
     this.hex = null;
     this.data.set(rgb('#ffd23a'), 8); this.data.set(rgb('#5cc8ff'), 12); this.data.set(rgb('#ff5a3c'), 16);
     const layout = device.createBindGroupLayout({ label: 'route', entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }] });
@@ -982,7 +1029,7 @@ export class RouteRenderer {
     this.count = 0;
     this.rev = -1;
     this.origin = [0, 0, 0];
-    this.uniformRest = device.createBuffer({ label: 'route-rest-uniform', size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.uniformRest = device.createBuffer({ label: 'route-rest-uniform', size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.groupRest = device.createBindGroup({ layout, entries: [{ binding: 0, resource: { buffer: this.uniformRest } }] });
     this.rest = null;
     this.more = 0;
@@ -1006,6 +1053,7 @@ export class RouteRenderer {
     this.data.set(mix(rgb('#ff4a2e'), 0.65), 16);
     this.data.set(mix(rgb('#ffffff'), 0.62), 20);
     this.data.set(mix(rgb('#c39bff'), 0.5), 24);
+    this.data.set(mix(rgb(HEARTH_HEX), 0.85), 28); // (hardly tinted: it is to be told from every route's own colour)
   }
 
   /** Pieces of line (from, to, kind: seven numbers each) as vertices in a buffer, counted from the first of them: { buffer, count, origin }. */
@@ -1028,7 +1076,7 @@ export class RouteRenderer {
 
   /** One piece of line, from point i of a row of points to the next (BREAK: there is none - the next stretch starts somewhere else). */
   static #piece(segs, q, i, k, off) {
-    if (!(k & BREAK)) segs.push(q[i * 3] + off[0], q[i * 3 + 1] + off[1], q[i * 3 + 2], q[i * 3 + 3] + off[0], q[i * 3 + 4] + off[1], q[i * 3 + 5], k & RIDE ? 4 : k & 4 ? 3 : k & 2 ? 2 : k & 1);
+    if (!(k & BREAK)) segs.push(q[i * 3] + off[0], q[i * 3 + 1] + off[1], q[i * 3 + 2], q[i * 3 + 3] + off[0], q[i * 3 + 4] + off[1], q[i * 3 + 5], k & HEARTH ? 5 : k & RIDE ? 4 : k & 4 ? 3 : k & 2 ? 2 : k & 1);
   }
 
   /** The line you follow, from where you are on it (the part behind you is not drawn). */

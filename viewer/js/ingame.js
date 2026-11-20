@@ -120,12 +120,23 @@ export function trackOf(route, tolerance = TOLERANCE) {
  * line before it, over the sea between two maps.)
  */
 export function alsoOf(route) {
-  const pieces = (route.also ?? []).map((q) => ({ map: q.map, joins: !!q.joins, points: q.points, kinds: typeof q.kinds === 'number' ? new Uint8Array(q.points.length / 3).fill(q.kinds) : q.kinds }));
+  // (not the hearthstone's line: the game draws that itself, from where you are at the moment - see innOf)
+  const pieces = (route.also ?? []).filter((q) => !q.hearth).map((q) => ({ map: q.map, joins: !!q.joins, points: q.points, kinds: typeof q.kinds === 'number' ? new Uint8Array(q.points.length / 3).fill(q.kinds) : q.kinds }));
   for (let tol = ALSO_TOLERANCE; ; tol *= 1.6) {
     const out = [];
     for (const q of pieces) trackOf({ points: q.points, kinds: q.kinds, legs: [] }, tol).stretches.forEach((s, k) => out.push({ map: q.map, kind: s.kind, points: s.points, joins: q.joins && k === 0 }));
     if (out.reduce((sum, s) => sum + s.points.length / 2, 0) <= ALSO_BUDGET || tol > 60) return out;
   }
+}
+
+/**
+ * Where a journey's hearthstone takes you, where it begins with the stone: [map, x, y] - or
+ * null. A journey that begins so has no line from where you stand (its line begins at the inn):
+ * the addon, told where the inn is, draws one from you to it.
+ */
+export function innOf(route) {
+  const at = route?.inn;
+  return at && Number.isInteger(at.map) && Number.isFinite(at.x) && Number.isFinite(at.y) ? [at.map, Math.round(at.x * 10) / 10, Math.round(at.y * 10) / 10] : null;
 }
 
 /** A route's line as stretches of one kind of going each: [{ kind, points: [x, y, ...] }]. */
@@ -232,7 +243,7 @@ export function routesOf(app) {
       const track = trackOf(r, tol), also = alsoOf(r);
       points += track.stretches.reduce((n, s) => n + s.points.length / 2, 0) + also.reduce((n, s) => n + s.points.length / 2, 0);
       const goal = x.target?.name ?? (x.kind === 'guide' ? "your guide's step" : x.kind === 'quest' ? 'the quest' : x.kind === 'death' ? 'your body' : x.kind === 'ally' ? 'them' : 'your waypoint');
-      return { ...base, state: 'route', plan: planOf(r), map: p.mapId ?? 0, seconds: Math.round(p.remaining()?.seconds ?? r.seconds ?? 0), stretches: track.stretches.map((s) => ({ kind: s.kind, points: s.points })), steps: stepsOf(r, track.ends, goal), also };
+      return { ...base, state: 'route', plan: planOf(r), map: p.mapId ?? 0, seconds: Math.round(p.remaining()?.seconds ?? r.seconds ?? 0), stretches: track.stretches.map((s) => ({ kind: s.kind, points: s.points })), steps: stepsOf(r, track.ends, goal), also, inn: innOf(r) };
     });
     if (points <= OTHER_BUDGET || tol > 40) return out;
   }
@@ -309,6 +320,8 @@ export class InGameRoute {
         ...base, state: 'route', text: app.routeText ?? '', detached: !!r.route.detached, stretches: track.stretches,
         // the rest of the journey, for the game's world map: its lines on other continents and across the sea
         also: alsoOf(r.route),
+        // where its hearthstone takes you, where it begins with the stone (the game draws the line from you to there)
+        inn: innOf(r.route),
         // the colour this route has here, and the other routes there are, each in its own: drawn in the game as they are here
         color: app.trips?.color(app.trips.leadKind) ?? null, others: othersOf(app),
         // the same journey as a list of things to do, for the arrow and the step list in the game

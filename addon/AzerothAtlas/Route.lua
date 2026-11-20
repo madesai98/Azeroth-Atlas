@@ -63,7 +63,11 @@ local NEXT_AT = 8             -- yards from the end of what can be walked here: 
 local F_TAXI = 16             -- (as in AzerothAtlas.lua) player flag: on a flight path
 local BREAK = 8               -- kind flag: this point starts a new stretch
 -- kinds of stretch: on foot, swimming, one no longer sent (it was "through a danger zone"), in the air, carried by a boat or zeppelin
-local COLOUR = { [0] = { 1, 0.82, 0.1 }, { 0.35, 0.75, 1 }, { 1, 0.4, 0.25 }, { 0.8, 0.92, 1 }, { 0.76, 0.61, 1 } }
+-- (and a sixth that no delivery has: the line from you to your inn, where a journey begins with your hearthstone - see Hearth)
+local COLOUR = { [0] = { 1, 0.82, 0.1 }, { 0.35, 0.75, 1 }, { 1, 0.4, 0.25 }, { 0.8, 0.92, 1 }, { 0.76, 0.61, 1 }, { 1, 0.42, 0.84 } }
+local HEARTH = 5              -- that sixth kind
+local HEARTH_NEAR = 40        -- yards from the inn within which the stone has been used (or is not worth a line)
+local HEARTH_STEP = 4         -- yards you move before that line is drawn again from where you are
 local ALSO_MAX = 60           -- lines of a journey that are only shown (on other continents, across the sea), at most
 local MORE_MAX = 80           -- lines of the other routes (shown beside the one that is followed), at most
 local OTHERS_MAX = 8          -- other routes of a delivery (each with its steps), at most
@@ -76,12 +80,13 @@ local AGAIN, AGAIN_MAX = 30, 300 -- seconds from giving a waypoint's route up to
 -- A route has a colour of its own on the 3D map (your guide's green, your waypoint's blue...),
 -- and is drawn in it here: as it is where you walk, turned toward light blue where you swim,
 -- a light tint of it where you fly, toward violet where a boat carries you. (As RouteRenderer
--- does on the 3D map: viewer/js/route.js.)
+-- does on the 3D map: viewer/js/route.js.) And a pink of its own, hardly tinted (no route is pink), for the
+-- line your hearthstone takes you along: nobody is to take that one for a way to walk.
 local function Shades(colour)
   local r, g, b = floor(colour / 65536) % 256 / 255, floor(colour / 256) % 256 / 255, colour % 256 / 255
   local function mix(tr, tg, tb, t) return { r + (tr - r) * t, g + (tg - g) * t, b + (tb - b) * t } end
   local walk = { r, g, b }
-  return { [0] = walk, mix(0.36, 0.78, 1, 0.55), walk, mix(1, 1, 1, 0.62), mix(0.76, 0.61, 1, 0.5) }
+  return { [0] = walk, mix(0.36, 0.78, 1, 0.55), walk, mix(1, 1, 1, 0.62), mix(0.76, 0.61, 1, 0.5), mix(1, 0.42, 0.84, 0.85) }
 end
 local shadesOf = {} -- (worked out once for each colour)
 local function Shade(colour, kind)
@@ -270,6 +275,12 @@ local function Build(m, other)
     end
   end
   if m.there == true then r.there = true elseif m.there == false then r.there = false end
+  -- inn: the journey begins with your hearthstone, which takes you here ({ map, north, west }).
+  -- It has no line on the map from where you stand - the line begins at the inn - so one is drawn (DrawMap: Hearth).
+  if type(m.inn) == "table" then
+    local im, ix, iy = tonumber(m.inn[1]), tonumber(m.inn[2]), tonumber(m.inn[3])
+    if im and ix and iy then r.inn = { map = im, north = ix, west = iy } end
+  end
   local tall = type(m.zs) == "table" and type(m.am) == "table"
   local n = 0
   if type(m.track) == "table" then
@@ -1072,7 +1083,10 @@ function shared.Scan(now)
     end
   end
   if lone and p.world then
-    if lone.bare then
+    -- (a journey that begins with your hearthstone has its line at the inn, far from where you
+    -- stand: like one with nothing to draw here, it is left when you have gone from where you
+    -- stood when it came - by the stone, or on foot - and not for being far from its line)
+    if lone.bare or lone.inn then
       astray = p.map ~= lone.bornMap or not lone.bornN or (p.north - lone.bornN) ^ 2 + (p.west - lone.bornW) ^ 2 > BARE_MOVED * BARE_MOVED
     elseif p.map == lone.map then
       astray = lone.off > STRAY
@@ -1283,7 +1297,7 @@ function shared.Command(word, rest)
     say("/atlas hearth (your hearthstone: used in routes, or left out)   /atlas strip (where the coded strip is: /atlas strip topright 0 40)")
     say("/atlas boats (when the boats, zeppelins and tram leave, as far as known)   /atlas boats listen (other players' sightings: taken or not)")
     say("/atlas guide (which guide addon the route follows: Guidelime or RestedXP)   /atlas guide auto, /atlas guide guidelime, /atlas guide restedxp (set it)")
-    say("Shift-click the world map: a quick waypoint.   Ctrl-click: a pin, and you are asked which level where there are several.")
+    say("Shift-click the world map: a quick waypoint.   Ctrl-click: a pin, and you are asked which level where there are several (/atlas ask: asked, or not; /atlas level asks whenever you like).")
   end
 end
 
@@ -1330,6 +1344,42 @@ local function Finish(s)
   for i = s.used + 1, #s.under do
     s.under[i]:Hide()
     s.over[i]:Hide()
+  end
+end
+-- A broken line from one spot of the canvas to another, in the colour of the hearthstone's
+-- line: as much of it as lies on the canvas (W wide, H high, its top left corner the origin and
+-- y going down as minus; beyond: the canvas is a stitched map's, which has no edge to cut at).
+-- Of a line right across a great map the dashes get longer, not more.
+local function Hearth(s, x1, y1, x2, y2, W, H, beyond, unit, thick, colour)
+  local dx, dy = x2 - x1, y2 - y1
+  local lo, hi = 0, 1
+  if not beyond then
+    -- (cut at the canvas's four sides: where along the line it comes on, and where it goes off)
+    local function side(p, q)
+      if p == 0 then return q >= 0 end
+      local at = q / p
+      if p < 0 then
+        if at > hi then return false elseif at > lo then lo = at end
+      else
+        if at < lo then return false elseif at < hi then hi = at end
+      end
+      return true
+    end
+    if not (side(-dx, x1) and side(dx, W - x1) and side(dy, -y1) and side(-dy, H + y1)) then return end
+  end
+  local len = sqrt(dx * dx + dy * dy) * (hi - lo)
+  if len < 2 * unit then return end
+  local ax, ay = x1 + dx * lo, y1 + dy * lo
+  local ux, uy = dx * (hi - lo) / len, dy * (hi - lo) / len
+  local dash, gap = 7 * unit, 5 * unit
+  local count = len / (dash + gap)
+  if count > 120 then dash, gap = dash * count / 120, gap * count / 120 end
+  local at = 0
+  while at < len do
+    local to = at + dash
+    if to > len then to = len end
+    Stroke(s, "TOPLEFT", ax + ux * at, ay + uy * at, ax + ux * to, ay + uy * to, HEARTH, thick, colour)
+    at = to + gap
   end
 end
 
@@ -1444,13 +1494,32 @@ local function DrawMap()
   local function six(a, b, c, d, e, g)
     return a and (floor(a * 1e9) .. "," .. floor(b * 1e9) .. "," .. floor(c * 1e5) .. "," .. floor(d * 1e9) .. "," .. floor(e * 1e9) .. "," .. floor(g * 1e5)) or "-"
   end
+  -- The journeys that begin with your hearthstone (inns: of the one that leads, and of the
+  -- others): each has a line from where you stand to its inn, which is drawn again as you move.
+  local me = shared.player
+  local inns, stood = nil, ""
+  if open and me.world then
+    local function inn(o, colour, lead)
+      local at = o and o.inn
+      if not at or at.map ~= me.map or (me.north - at.north) ^ 2 + (me.west - at.west) ^ 2 < HEARTH_NEAR * HEARTH_NEAR then return end
+      inns = inns or {}
+      inns[#inns + 1] = { north = at.north, west = at.west, colour = colour, lead = lead }
+    end
+    inn(whole, rc, true)
+    if rest then
+      for _, o in ipairs(rest) do
+        if o.state == "route" and not o.gone then inn(o, o.rc, false) end
+      end
+    end
+    if inns then stood = #inns .. "," .. floor(me.north / HEARTH_STEP) .. "," .. floor(me.west / HEARTH_STEP) end
+  end
   local sig = rev .. ":" .. tostring(uiMap) .. ":" .. floor(W) .. ":" .. floor(H) .. ":" .. floor(unit * 1000) .. ":" .. (r and (r.moved or 0) or ("-" .. t.kind .. "," .. t.x .. "," .. t.y))
-    .. ":" .. six(ax, bx, cx, ay, by, cy) .. ":" .. tostring(top) .. ":" .. (gm ~= continent and six(gax, gbx, gcx, gay, gby, gcy) or "=") .. ":" .. walked
+    .. ":" .. six(ax, bx, cx, ay, by, cy) .. ":" .. tostring(top) .. ":" .. (gm ~= continent and six(gax, gbx, gcx, gay, gby, gcy) or "=") .. ":" .. walked .. ":" .. stood
   if sig == onMap.sig then return end
   onMap.sig = sig
   s.used = 0
   onMap.goal:Hide()
-  if not ax and not gax and not ((also or more or rest) and open) then Finish(s) return end
+  if not ax and not gax and not ((also or more or rest or inns) and open) then Finish(s) return end
   -- (over a stitched map's art, which is drawn higher up than the game's own map)
   local level = top and top >= onMap.level and top + 1 or onMap.level
   if f:GetFrameLevel() ~= level then
@@ -1542,6 +1611,25 @@ local function DrawMap()
             end
           end
         end
+      end
+    end
+  end
+  -- Your hearthstone's line: straight from where you stand to the inn, broken, in a colour of
+  -- its own. A journey that begins with the stone has nothing else to show where you are - its
+  -- line begins at the inn - and looked as if no route had come at all. (Reported on 19
+  -- November 2026: "wasting time tryna make the route work then realizing its working".)
+  if inns then
+    for _, at in ipairs(inns) do
+      local p = where[me.map]
+      if p == nil then
+        local pa, pb, pc, pd, pe, pf, pg = Projection(uiMap, me.map, at.north, at.west)
+        p = pa and { pa, pb, pc, pd, pe, pf, pg } or false
+        where[me.map] = p
+      end
+      if p then
+        Hearth(s, (p[1] * me.north + p[2] * me.west + p[3]) * W, -(p[4] * me.north + p[5] * me.west + p[6]) * H,
+          (p[1] * at.north + p[2] * at.west + p[3]) * W, -(p[4] * at.north + p[5] * at.west + p[6]) * H,
+          W, H, p[7], unit, thick * (at.lead and 0.9 or 0.7), at.colour)
       end
     end
   end

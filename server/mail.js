@@ -169,6 +169,7 @@ export class RouteMail {
    *   text, detached, stretches: [{ kind, points: [x, y, x, y, ...], heights: [z, ...], stack: '0110...' }],
    *   there, sure, end: [x, y],   (what the map, which follows your height, knows: you are at the waypoint; you are on the route; where it ends)
    *   also: [{ map, kind, points: [x, y, ...] }], endMap,             (the rest of the journey, shown on the game's world map and not followed: its lines on other continents and across the sea; the map the route ends on)
+   *   inn: [map, x, y],                                               (where the journey's hearthstone takes you, where it begins with the stone: the game draws a line of its own from you to there)
    *   title, seconds, steps: [{ text, seconds, note, stretch }],      (for the arrow and the step list)
    *   levels: { id, at, ask, list: [text] },                          (when the spot has more than one level)
    *   slot, head,                                                     (which route this is - 'guide', 'waypoint' - and what the game's list of routes calls it)
@@ -220,6 +221,8 @@ export class RouteMail {
       }
       return steps;
     };
+    // where a journey's hearthstone takes you: a map and a spot on it
+    const inn = (v) => (Array.isArray(v) && v.length === 3 && Number.isInteger(v[0]) && v[0] >= 0 && v[0] <= 65535 && Number.isFinite(v[1]) && Number.isFinite(v[2]) && Math.abs(v[1]) < 40000 && Math.abs(v[2]) < 40000 ? [v[0], v[1], v[2]] : null);
     const { stretches, kept } = track(r.stretches, { used: 0, limit: POINT_LIMIT }, true);
     const also = shown(r.also, { used: 0, limit: ALSO_LIMIT }, ALSO_PIECES);
     const steps = todo(r.steps, kept);
@@ -234,6 +237,7 @@ export class RouteMail {
         plan: Number.isFinite(o.plan) ? o.plan | 0 : 0, map: Number.isFinite(o.map) ? o.map | 0 : 0,
         text: typeof o.text === 'string' ? o.text.slice(0, 120) : '', seconds: Number.isFinite(o.seconds) ? Math.max(0, Math.round(o.seconds)) : 0,
         stretches: line.stretches, steps: state === 'route' ? todo(o.steps, line.kept) : [], also: state === 'route' ? shown(o.also, budget, ALSO_PIECES) : [],
+        inn: state === 'route' ? inn(o.inn) : null,
       });
     }
     this.whole = Array.isArray(r.routes) ? whole : null; // (null: a page that does not say them - an older one)
@@ -277,7 +281,7 @@ export class RouteMail {
       text: typeof r.text === 'string' ? r.text : '',
       name: typeof t?.name === 'string' ? t.name : '',
       detached: !!r.detached,
-      stretches, also,
+      stretches, also, inn: inn(r.inn),
       tall: stretches.length > 0 && stretches.every((s) => s.heights && s.stack),
       there: typeof r.there === 'boolean' ? r.there : null,
       sure: typeof r.sure === 'boolean' ? r.sure : null,
@@ -327,6 +331,8 @@ export class RouteMail {
       lua += `\n track = {\n${R.stretches.map((s) => `  { ${s.kind}, ${s.points.map(num).join(', ')} },`).join('\n')}\n },`;
       // (also: lines to show on the world map and not to follow - the map each is on, its kind (16 more: it goes on from the line before, over the sea), its points)
       if (R.also.length) lua += `\n also = {\n${R.also.map((s) => `  { ${s.map}, ${s.kind + (s.joins ? 16 : 0)}, ${s.points.map(num).join(', ')} },`).join('\n')}\n },`;
+      // (inn: the journey begins with your hearthstone, which takes you here - the map, and the spot on it. An addon older than 27 does not know the word, and passes it over)
+      if (R.inn) lua += ` inn = { ${R.inn[0]}, ${num(R.inn[1])}, ${num(R.inn[2])} },`;
       // (rc: the colour this route has on the 3D map; more: the other routes there are, to show beside it - the map each line is on, its kind, its route's colour, its points)
       if (R.color !== null) lua += ` rc = ${R.color},`;
       if (R.others.length) lua += `\n more = {\n${R.others.map((s) => `  { ${s.map}, ${s.kind}, ${s.color}, ${s.points.map(num).join(', ')} },`).join('\n')}\n },`;
@@ -360,6 +366,7 @@ export class RouteMail {
         if (o.steps.length) one += `\n   steps = { ${steps(o.steps)} },`;
         one += `\n   track = {${o.stretches.map((s) => `\n    { ${s.kind}, ${s.points.map(num).join(', ')} },`).join('')}\n   },`;
         if (o.also.length) one += `\n   also = {${o.also.map((s) => `\n    { ${s.map}, ${s.kind + (s.joins ? 16 : 0)}, ${s.points.map(num).join(', ')} },`).join('')}\n   },`;
+        if (o.inn) one += ` inn = { ${o.inn[0]}, ${num(o.inn[1])}, ${num(o.inn[2])} },`;
       }
       return `${one} },`;
     }).join('')}\n },`;

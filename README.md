@@ -954,7 +954,8 @@ With **more than one level**, the choice is yours:
 
 | Waypoint | What happens |
 | --- | --- |
-| A pin on the game's map (Ctrl-click) | The game asks "Which level is your waypoint on?" (the levels with how high they are relative to you and how long each takes). Until you answer, the route goes to the level nearest your own height |
+| A pin you put on the game's map with the mouse (Ctrl-click) | The game asks "Which level is your waypoint on?" (the levels with how high they are relative to you and how long each takes). Until you answer, the route goes to the level nearest your own height |
+| A pin another addon put on the game's map (a guide's next stop, a quest helper's quest giver) | No question: the level nearest your own height. It is that addon's pin, set when that addon pleases |
 | A marker clicked on the 3D map | The page asks the same, over the map. Until you answer, the route goes to the surface you clicked if you can get to it, else to the level nearest your own height |
 | A quick waypoint (Shift-click, in the game or here) | No question: the level nearest your own height |
 | A guide's step | No question: the level quickest to reach |
@@ -963,6 +964,28 @@ Whatever was chosen can be changed for as long as the waypoint stands: in the Ro
 (the levels are listed under the route, the one in use marked), or in the game with
 `/atlas level` or a click on the "Level:" line of the step list. The marker and the route's end
 are drawn on the level chosen, not on the terrain underneath.
+
+The question in the game is a window of its own, so it comes by itself only where the answer is
+yours alone to give, and it is easy to be rid of:
+
+- **Only for a pin of your own hand.** The game has one way of setting a pin, whoever does it,
+  and the addon listens to it: a pin counts as yours when, at that moment, the world map was
+  open with the cursor on the very spot (as it is for a Ctrl-click, and for a click with the
+  map's own pin button down; **OpenMap**'s map counts the same). A pin set any other way - by
+  a guide addon moving on to its next stop while you stand somewhere, by a quest helper, by
+  `/way` or a link in chat - is not asked about. (Reported on 19 November 2026: with two guide
+  addons running, the question "pops up randomly, like standing in one spot 10 minutes
+  straight".) After a `/reload` no pin counts as yours until you set one again.
+- **A cross in its corner** closes it, and nothing else. (Escape closes it too, with every
+  other window the game closes on Escape.) Closing it keeps the level shown.
+- **It can be dragged**, by anything of it that is not a button, and comes up from then on
+  where you let it go. `/atlas reset` puts it back under the top of the screen.
+- **"Do not ask me this again"**, a box at its foot: ticked, no pin is asked about, and each
+  goes to the level nearest your own height. `/atlas ask` (`on`, `off`, or neither to change
+  it) and **Ask which level a pin I set is on** in the addon's options are the same switch.
+  `/atlas level`, and the "Level:" line, ask whenever you like whatever it is set to.
+
+This needs version 27 of the addon (**Check for updates**, then `/reload` in the game).
 
 **On foot** the route is searched over the map's navigation data, which the extractor builds from
 the real geometry (`extractor/jobs/nav.js`): a grid of about one yard of every place a character
@@ -1107,6 +1130,17 @@ zones" for why going round them was taken out).
   beside "Routes" in the game (a click strikes it through), `/atlas hearth`, or the addon's
   options - every route is then worked out without it, and you get the next quickest way. The
   page says so under the routes while that is on.
+  **A journey that begins with the stone has a line of its own from you to the inn**: broken,
+  and pink, which no route is. The stone puts you down at the inn, so the journey's own line
+  begins there, and with nothing leading away from where you stand such a route looked as if
+  none had come at all (reported on 19 November 2026: "wasting time tryna make the route work
+  then realizing its working"). On the 3D map the line arches over the land between (straight,
+  it was under the hills after a few yards); on the game's world map it runs straight from
+  where you are at the moment to the inn, or to the edge of the map shown where the inn is
+  off it, and is gone once you are within forty yards of the inn. It is drawn where the inn
+  is on the continent you are on: to an inn across the sea there is nowhere on your map to
+  draw it to, and the list's first step ("Use your hearthstone") is what says so. Not on the
+  minimap. In the game it needs version 27 of the addon;
 
 All of these are stops in one network, on whichever map they are: the quickest chain from you
 to the waypoint is found by estimate, the walks in it are then worked out for real over the
@@ -1242,8 +1276,10 @@ To follow it without the map open (`addon/AzerothAtlas/Guide.lua`):
   done drop off the top. **A click on a route's name folds its steps away** (the name stays,
   marked "+"), as a click on a zone folds its quests away in Questie; **a click on "Routes"
   folds everything away**. Both are remembered. A journey that begins with your hearthstone has
-  that as the step you are on until you stand where its line begins: nothing is drawn from you
-  to an inn on the far side of the continent, and the line starts there. Boats say how long
+  that as the step you are on until you stand where its line begins: the journey's own line
+  starts at the inn, and a broken pink one on the world map goes from you to there (see "your
+  hearthstone" under "Route to your waypoint"). Standing far from such a route's own line is
+  not having left it: no newer one is looked for until you move. Boats say how long
   the wait is likely to be. Where the waypoint's spot has more than one level, a last line says
   which the route goes to; click it to choose another. A waypoint whose route is not there
   (yet) is listed all the same, with why: "Working out the route...", that there is no way, or
@@ -1294,7 +1330,8 @@ that stands on its own (type it again when done), `/atlas reset` puts them back.
 **Options.** All of this is also under **Esc > Options > AddOns > Azeroth Atlas** (or
 `/atlas options`): the strip (shown or not, and where: see "Live player link"), your
 hearthstone, the arrow (shown or not; unlocked, to be dragged, or locked), the list (shown or
-not; pinned under Questie's, or free, to be dragged), and moving the two.
+not; pinned under Questie's, or free, to be dragged), whether you are asked which level a pin
+you set is on, and moving the two.
 
 There is one router, the 3D map's, so the two cannot disagree. The route is not worked out
 again inside the game. With the **OpenMap** addon showing its stitched world map, the route is

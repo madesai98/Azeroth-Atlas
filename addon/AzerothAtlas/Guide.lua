@@ -10,7 +10,11 @@
 --                  "Routes", a name for each route (a click on it folds its steps away), and
 --                  beside the header your hearthstone, to leave it out of routes or not;
 --   the question   where the spot you are heading for has more than one level (a street and
---                  the floor above it), which of them you mean;
+--                  the floor above it), which of them you mean. Put to you by itself only for
+--                  a pin you set on the game's map with the mouse - not for one a guide or
+--                  any other addon set, which is where that addon means it. Its window has a
+--                  cross to close it by, goes where you drag it, and a box to tick so as
+--                  never to be asked (/atlas ask, and the options, are that same switch);
 --   Shift-click    on the world map: a quick waypoint there, no question asked - it goes to
 --                  the level nearest your own height.
 --
@@ -20,6 +24,7 @@
 -- /atlas move                   drag the two where you want them (again: done)
 -- /atlas reset                  back where they were
 -- /atlas level                  the question about the level, again
+-- /atlas ask                    whether that question is put by itself (for a pin of your own hand), or only when you ask
 
 local shared = AzerothAtlas
 if type(shared) ~= "table" or type(shared.Route) ~= "function" then return end
@@ -43,6 +48,7 @@ local HEAD_X, LINE_X, RIGHT = 6, 10, 10
 local BESIDE = 8              -- the room between Questie's list and the step list where it has to stand beside it
 local ARROW_AT = { "TOP", 0, -110 }
 local LIST_AT = { "TOPRIGHT", -255, -250 }
+local ASK_AT = { "TOP", 0, -240 } -- (the question about the level: until you drag it somewhere else)
 
 local function say(msg) print("|cff7fd4ffAzeroth Atlas|r: " .. msg) end
 local function Settings()
@@ -1064,6 +1070,13 @@ local function EnsureList()
 end
 
 -- ---- the question: which level? ----------------------------------------------------------------
+-- A window of its own, in the middle of things: so it is put there by itself only where the
+-- answer is yours alone to give (a pin of your own hand: see ByHand, below), it can be closed
+-- by its cross without closing anything else, dragged out of the way (where it is let go is
+-- where it comes up from then on), and told not to come by itself at all. (Reported on 19
+-- November 2026: it came up while the player stood reading, for a pin a guide addon had set;
+-- stood in the middle of the screen; and Escape, the one way to be rid of it, closed every
+-- other window with it.)
 local ask = { frame = nil, key = nil, id = nil, at = nil }
 local MAX_LEVELS = 6
 
@@ -1072,9 +1085,34 @@ local function EnsureAsk()
   local f = CreateFrame("Frame", "AzerothAtlasLevels", UIParent)
   f:SetSize(400, 100)
   f:SetFrameStrata("DIALOG")
-  f:SetPoint("TOP", UIParent, "TOP", 0, -240)
   f:SetClampedToScreen(true)
   f:EnableMouse(true)
+  -- where you last let it go, or under the top of the screen; dragged by anything of it that is not a button
+  Place(f, "askAt", ASK_AT)
+  f:SetMovable(true)
+  f:RegisterForDrag("LeftButton")
+  f:SetScript("OnDragStart", function(self)
+    self.held = true
+    self:StartMoving()
+  end)
+  f:SetScript("OnDragStop", function(self)
+    if not self.held then return end
+    self.held = nil
+    self:StopMovingOrSizing()
+    -- (where it stands is kept here, not by the game)
+    if self.SetUserPlaced then pcall(self.SetUserPlaced, self, false) end
+    local left, top = self:GetLeft(), self:GetTop()
+    if left and top then
+      Settings().askAt = { left, top }
+      Place(self, "askAt", ASK_AT)
+    end
+  end)
+  f:SetScript("OnHide", function(self)
+    if self.held then
+      self.held = nil
+      self:StopMovingOrSizing()
+    end
+  end)
   local back = f:CreateTexture(nil, "BACKGROUND")
   back:SetAllPoints(f)
   back:SetColorTexture(0.03, 0.04, 0.06, 0.92)
@@ -1089,7 +1127,7 @@ local function EnsureAsk()
   local sub = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   sub:SetPoint("TOP", title, "BOTTOM", 0, -3)
   sub:SetTextColor(0.7, 0.7, 0.7)
-  sub:SetText("The route shown goes to the one marked. Esc keeps it.")
+  sub:SetText("The route shown goes to the one marked. Closing this keeps it.")
   f.buttons = {}
   for i = 1, MAX_LEVELS do
     local b = CreateFrame("Button", nil, f)
@@ -1116,6 +1154,47 @@ local function EnsureAsk()
     b:Hide()
     f.buttons[i] = b
   end
+  -- a cross in its corner: closes this window and nothing else (the game's own look for one, or a plain one)
+  local okc, close = pcall(CreateFrame, "Button", nil, f, "UIPanelCloseButton")
+  if not okc or type(close) ~= "table" then
+    close = CreateFrame("Button", nil, f)
+    local x = close:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    x:SetPoint("CENTER", close, "CENTER", 0, 0)
+    x:SetText("x")
+    local glow = close:CreateTexture(nil, "HIGHLIGHT")
+    glow:SetAllPoints(close)
+    glow:SetColorTexture(1, 1, 1, 0.2)
+  end
+  close:SetSize(24, 24)
+  close:ClearAllPoints()
+  close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 1, 1)
+  close:SetScript("OnClick", function() f:Hide() end)
+  f.close = close
+  -- a box to tick: never asked by itself again (the same switch as /atlas ask, and as the options).
+  -- (A game that will not make the box leaves the window as it is without one.)
+  pcall(function()
+    local never = CreateFrame("CheckButton", nil, f)
+    never:SetSize(22, 22)
+    never:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 8, 5)
+    never:SetNormalTexture("Interface\\Buttons\\UI-CheckBox-Up")
+    never:SetPushedTexture("Interface\\Buttons\\UI-CheckBox-Down")
+    never:SetHighlightTexture("Interface\\Buttons\\UI-CheckBox-Highlight", "ADD")
+    never:SetCheckedTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    local words = never:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    words:SetPoint("LEFT", never, "RIGHT", 2, 1)
+    words:SetTextColor(0.7, 0.7, 0.7)
+    words:SetText("Do not ask me this again (\"Level\" in the list of routes still lets me choose)")
+    never:SetScript("OnClick", function(self)
+      local off = self:GetChecked() and true or false
+      -- (ask: false where you are not to be asked; nothing where you are)
+      if off then Settings().ask = false else Settings().ask = nil end
+      if off then
+        f:Hide()
+        say("you will not be asked which level a pin of yours is on: its route goes to the level nearest your own. To choose another, click \"Level\" in the list of routes or type /atlas level. /atlas ask brings the question back.")
+      end
+    end)
+    f.never = never
+  end)
   -- (Escape closes it, as it does the game's own windows)
   if type(UISpecialFrames) == "table" then table.insert(UISpecialFrames, "AzerothAtlasLevels") end
   f:Hide()
@@ -1144,7 +1223,9 @@ ShowAsk = function(r)
       b:Hide()
     end
   end
-  f:SetHeight(58 + count * 24)
+  -- (room for the box under them, where there is one; it shows what is so now)
+  f:SetHeight((f.never and 84 or 58) + count * 24)
+  if f.never then f.never:SetChecked(Settings().ask == false) end
   ask.id, ask.at = lv.id, lv.at
   f:Show()
   return true
@@ -1215,6 +1296,70 @@ local function Hook()
   pcall(WorldMapFrame.AddCanvasClickHandler, WorldMapFrame, OnCanvasClick)
 end
 
+-- ---- a pin put on the map by hand ------------------------------------------------------------------
+-- The question about the level is for a pin you put on the game's map yourself, with the mouse:
+-- you know which level you meant, and nothing else does. A pin another addon sets - a guide's
+-- next stop, a quest helper's quest giver - is that addon's, set when it pleases (while you
+-- stand somewhere reading your mail), and you are not to be asked about it.
+--
+-- The game has one way of setting a pin, whoever does it: C_Map.SetUserWaypoint. Its own map
+-- calls that for a Ctrl-click (and for a click with its "place a pin" button down), with the
+-- spot the cursor is on; /way, a pin's link in chat and every addon that sets one call it too.
+-- So it is listened to (a hook the game lets an addon hang behind one of its functions, which
+-- changes nothing of what the function does), and a pin counts as put there by hand when, at
+-- that moment, the world map is open and the cursor is on the very spot. OpenMap's map makes
+-- its pins from the cursor as well, and says where that is.
+-- (Where the game has no such hook, or does not say where the cursor is, nothing counts as put
+-- there by hand, and the question is never put by itself: it can always be asked for.)
+local W_PIN = 3      -- (as in AzerothAtlas.lua) the waypoint is a pin on the game's map
+local HAND_NEAR = 6  -- yards from the cursor's spot within which a pin was put there with the mouse
+local hand = { map = nil, north = nil, west = nil, hooked = false, said = nil }
+local function PinSet(point)
+  hand.map = nil
+  local pos = type(point) == "table" and point.position
+  if type(pos) ~= "table" then return end
+  local map, north, west = FromMap(point.uiMapID, pos.x, pos.y)
+  if not map then return end
+  local by = "not by the mouse on the map"
+  local shown = WorldMapFrame
+  if shown and not (shown.IsShown and not shown:IsShown()) then
+    local function under(ok, cMap, cNorth, cWest)
+      return ok and cMap == map and type(cNorth) == "number" and type(cWest) == "number" and (cNorth - north) ^ 2 + (cWest - west) ^ 2 <= HAND_NEAR * HAND_NEAR
+    end
+    -- (where the cursor is as the map shown has it - OpenMap's, where that is what shows; and, failing
+    -- that, as the game's own map underneath has it: whichever of the two made the pin made it from there)
+    local mine = under(pcall(CursorWorld, shown))
+    if not mine and shown.GetMapID and shown.GetNormalizedCursorPosition then
+      mine = under(pcall(function()
+        local x, y = shown:GetNormalizedCursorPosition()
+        return FromMap(shown:GetMapID(), x, y)
+      end))
+    end
+    if mine then
+      hand.map, hand.north, hand.west = map, north, west
+      by = "by the mouse on the map"
+    end
+  end
+  -- (noted when it is another thing than the last: a guide may set its pin again and again)
+  local saying = by .. ":" .. map .. ":" .. floor(north + 0.5) .. ":" .. floor(west + 0.5)
+  if saying ~= hand.said then
+    hand.said = saying
+    if shared.Log then shared.Log("pin: set " .. by .. ", map " .. map .. " at " .. floor(north + 0.5) .. " " .. floor(west + 0.5) .. (hand.map and "" or " (its level is not asked about)")) end
+  end
+end
+local function HookPin()
+  if hand.hooked then return end
+  if not (hooksecurefunc and C_Map and C_Map.SetUserWaypoint) then return end
+  hand.hooked = true
+  pcall(hooksecurefunc, C_Map, "SetUserWaypoint", function(point) pcall(PinSet, point) end)
+end
+-- Is the waypoint the game heads for (shared.target) a pin you put on its map with the mouse?
+local function ByHand(t)
+  if not hand.map or t.kind ~= W_PIN or t.map ~= hand.map then return false end
+  local north, west = t.x / 128 - 32768, t.y / 128 - 32768
+  return (north - hand.north) ^ 2 + (west - hand.west) ^ 2 <= 4
+end
+
 -- ---- five times a second (called by Route.lua once the route is up to date) ------------------------
 local function SetMoving(on)
   moving = on
@@ -1234,6 +1379,7 @@ end
 
 function shared.GuideScan(now)
   Hook()
+  HookPin()
   local r = shared.Route()
   local t = shared.target
   local db = Settings()
@@ -1278,14 +1424,15 @@ function shared.GuideScan(now)
     list.sig = ""
   end
 
-  -- the question about the level: once for each waypoint that has one to ask
+  -- the question about the level: once for each waypoint that has one to ask - where it is a
+  -- pin of your own hand (ByHand), and you have not said that you are not to be asked
   local key = t.kind ~= 0 and (t.map .. ":" .. t.x .. ":" .. t.y) or nil
   if ask.key and ask.key ~= key then ask.key = nil end
   local shown = ask.frame and ask.frame:IsShown()
   if r and r.lv then
     if r.lv.ask and key and ask.key ~= key and r.tm == t.map and r.tx == t.x and r.ty == t.y then
       ask.key = key
-      ShowAsk(r)
+      if db.ask ~= false and ByHand(t) then ShowAsk(r) end
     elseif shown and (ask.id ~= r.lv.id or ask.at ~= r.lv.at) then
       ShowAsk(r) -- (a newer delivery while it is open: show what is so now)
     end
@@ -1333,6 +1480,16 @@ function shared.GuideCommand(word, rest)
     say(db.arrowFree and "the arrow is unlocked: drag it where you want it (/atlas arrow lock when it is there)." or "the arrow is locked where it is: clicks go through it.")
     return true
   end
+  if word == "ask" then
+    -- /atlas ask, /atlas ask on, /atlas ask off: whether the question about the level is put by itself
+    if rest == "on" then db.ask = nil
+    elseif rest == "off" then db.ask = false
+    elseif db.ask == false then db.ask = nil
+    else db.ask = false end
+    say(db.ask == false and "you are not asked which level a pin of yours is on: its route goes to the level nearest your own. To choose another, click \"Level\" in the list of routes or type /atlas level."
+      or "where a pin you put on the map with the mouse has more than one level under it, you are asked which you mean. (A pin another addon sets is never asked about.)")
+    return true
+  end
   if word == "level" then
     local r = shared.Route()
     if r and r.lv then
@@ -1358,10 +1515,12 @@ function shared.GuideCommand(word, rest)
     say(moving and ("drag the arrow" .. (pinned and "" or " and the list of routes") .. " where you want " .. (pinned and "it" or "them") .. ", then type /atlas move again."
       .. (pinned and " (The list of routes hangs under Questie's quest list: /atlas pin sets it free.)" or "")) or "the arrow and the list of routes stay where they are now.")
   elseif word == "reset" then
-    db.arrowAt, db.listAt = nil, nil
+    db.arrowAt, db.listAt, db.askAt = nil, nil, nil
     for i = 1, #movers do
       if not (movers[i] == list.frame and list.docked) then Place(movers[i], movers[i].placeKey, movers[i].placeDefault) end
     end
+    -- (and the question about the level, where it has been dragged somewhere)
+    if ask.frame then Place(ask.frame, "askAt", ASK_AT) end
     say("the arrow and the list of routes are back where they started.")
   else
     return false
@@ -1371,7 +1530,7 @@ end
 
 -- (for the tests, and for a look from the game with /dump AzerothAtlas.GuidePeek())
 function shared.GuidePeek()
-  return { arrow = arrow, list = list, ask = ask, moving = moving, hooked = hooked, AimPoint = AimPoint, StepLeft = StepLeft, Look = Look }
+  return { arrow = arrow, list = list, ask = ask, hand = hand, moving = moving, hooked = hooked, AimPoint = AimPoint, StepLeft = StepLeft, Look = Look }
 end
 
 -- ---- the options: Esc > Options > AddOns > Azeroth Atlas ------------------------------------------
@@ -1563,6 +1722,8 @@ do
         function() return DB().arrowFree == true end, function(on) DB().arrowFree = on or nil end)
       -- the list: shown or not at all; and pinned under Questie's quest list, or free (it can be dragged with the mouse at any time)
       Check("Show the list of routes", 14, -376, function() return DB().list ~= false end, function(on) DB().list = on end)
+      -- the question about the level: put by itself for a pin of your own hand, or only when you ask (/atlas level, "Level" in the list)
+      Check("Ask which level a pin I set is on", 300, -376, function() return DB().ask ~= false end, function(on) if on then DB().ask = nil else DB().ask = false end end)
       Check("Pin it under Questie's quest list (unticked, it is free: drag it where you want it)", 38, -402,
         function() return DB().pin ~= false end, function(on) shared.SetPin(on) end)
     end)
