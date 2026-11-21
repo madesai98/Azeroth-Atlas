@@ -20,6 +20,7 @@ import { AppUpdate } from './appupdate.js';
 import { MIME, sendFile, safeJoin } from './http.js';
 import { AtlasDb } from './atlasdb.js';
 import { CombatLog } from './combatlog.js';
+import { Fights, measuredHealth } from './fights.js';
 import { Minimap } from './minimap.js';
 import { clockFigures, writeClockAddon } from './boats.js';
 import { writeDropsAddon } from './drops.js';
@@ -116,7 +117,11 @@ if (minimap) { tracker.eyes = minimap; minimap.start(); }
 // What the game's own combat log says of the creatures you fight: where each was, its level and
 // health, how it stands towards your side - and, inside a dungeon, where you are (see combatlog.js).
 // ("combatLog": false in config.json leaves the log unread)
+// (and how your own fights go, for the quest explorer to reckon a kill by: fights.js. Which level
+// you are is the live link's to say - the log's own "level" of a player is that of what they wear.)
+const fights = cfg.combatLog === false ? null : new Fights(cfg, { level: () => (tracker.state?.status === 'live' ? tracker.state.player?.level ?? null : null) });
 const combat = cfg.combatLog === false ? null : new CombatLog(cfg, {
+  fights,
   side: () => { const f = tracker.state?.status === 'live' ? tracker.state.player?.faction : null; return f === 'horde' ? 'H' : f === 'alliance' ? 'A' : null; },
   onNew: () => atlas.nudge(),
   // (where you are is worth showing while it is news: a log read hours later says where you were.
@@ -280,6 +285,15 @@ const server = http.createServer((req, res) => {
         else json(200, { ok: true, forgotten: seen.forget(d.map, d.id, d.object), count: seen.list.length });
       } catch (err) { json(400, { error: err.message }); }
     });
+    return;
+  }
+  if (p === '/api/fights') {
+    // how your own fights go (the last sixty you fought alone: fights.js), and which creatures' health
+    // has been measured in this game, at what - for the quest explorer (viewer/js/quests.js, pace.js)
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    let health = {};
+    try { health = measuredHealth(cfg.dataDir, combat?.store.levels ?? null, combat?.healthRev ?? 0); } catch { /* none to tell of */ }
+    res.end(JSON.stringify({ ...(fights?.figures() ?? { v: 1, fights: [], keep: 0, counted: null }), read: !!combat, health }));
     return;
   }
   if (p === '/api/transit/clock') {

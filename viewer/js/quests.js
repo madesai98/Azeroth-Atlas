@@ -13,12 +13,20 @@
 // at DROP_GUESS. The card says which numbers are of that kind.
 //
 // How long a quest takes is an estimate, and says so: the walk from who gives it to what it
-// asks for and on to who takes it, the kills (a creature's health over what someone of the
-// level deals, and the time between one kill and the next), the kills it takes to get what
-// only drops some of the time, and the wait for things to come back where a quest asks for
-// more than there are. "Plot the route" works the walking out for real, over the map's own
-// ground and flight paths, and draws it.
+// asks for and on to who takes it, the kills (a creature's health over what you deal, and the
+// time between one kill and the next), the kills it takes to get what only drops some of the
+// time, and the wait for things to come back where a quest asks for more than there are. "Plot
+// the route" works the walking out for real, over the map's own ground and flight paths, and
+// draws it.
+//
+// A kill is reckoned by your own pace where the game's combat log has it (pace.js; the server's
+// fights.js keeps your last sixty fights fought alone): what you really deal in a second, and
+// how long you really are from one kill to the next. Until eight such fights are there - and
+// for a character the log has none of - it is a round figure for the level. And a creature's
+// health is what a fight in this game measured, where one has; else the original game's, raised
+// by what this game adds at its level.
 import { RoutePlanner, RouteRenderer } from './route.js';
+import { roundDps, edge, healthHere, paceOf, ENOUGH } from './pace.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...children) => {
@@ -29,8 +37,10 @@ const el = (tag, props = {}, ...children) => {
 };
 
 const DROP_GUESS = 0.35;   // a drop rate nobody recorded is counted at this
-const BETWEEN = 12;        // seconds from one kill to the next: getting to it, and looting
-const REST = 0.35;         // of the time a fight takes, spent recovering from it
+const BETWEEN = 12;        // seconds from one kill to the next: getting to it, and looting (where your own is not known)
+const REST = 0.35;         // of the time a fight takes, spent recovering from it (the same)
+const OWN_EVERY = 60000;   // ms between asks for how your own fights have gone
+const SAME_ONE = 3;        // levels: fights kept of a character further than this from the one you are playing are another character's
 const USE = 18;            // seconds to get to a thing and use, open or pick it up
 const TALK = 10;           // seconds to take a quest, and to hand one in
 const DETOUR = 1.25;       // a walk is this many times the straight line, until it has been worked out
@@ -47,8 +57,8 @@ const KIND = { 1: 'Elite', 41: 'PvP', 62: 'Raid', 81: 'Dungeon', 82: 'World even
 const RANK_HP = [1, 2.8, 3.2, 6, 1.5]; // how much tougher than an ordinary creature of its level: ordinary, elite, rare elite, boss, rare
 
 const clock = (s) => (s >= 3600 ? `${Math.floor(s / 3600)} h ${String(Math.round((s % 3600) / 60)).padStart(2, '0')} min` : s >= 60 ? `${Math.round(s / 60)} min` : `${Math.max(1, Math.round(s))} s`);
-/** What someone of a level deals in a second, questing alone (a round figure: gear, class and talents all move it). */
-const dps = (level) => 2 + 1.55 * level + 0.011 * level * level;
+/** What someone of a level deals in a second, questing alone (a round figure: gear, class and talents all move it - pace.js). */
+const dps = roundDps;
 /** An ordinary creature's health at a level (for the ones the reference database does not have). */
 const health = (level) => 20 + 9 * level + 0.72 * level * level;
 
@@ -60,6 +70,8 @@ export function bindQuests(app) {
   let open = null;       // the quest whose card is showing
   let plot = null;       // the route plotted for a quest: { id, map, note, legs: [{ leg, from, target, planner, renderer }] }
   let shownFor = '', shownMine = null; // what the list was last made for
+  // how your own fights go, and which creatures' health has been measured in this game (the server's: /api/fights)
+  let own = { pace: null, health: {}, read: false, fights: 0, said: '' };
   const state = { text: '', side: 'mine', min: '', max: '', zone: '', mine: false, chains: false, sort: 'level' };
 
   const search = el('input', { type: 'text', placeholder: 'Search quests by name (or a number)', autocomplete: 'off', spellcheck: 'false' });
@@ -196,14 +208,25 @@ export function bindQuests(app) {
   function kill(id, level) {
     const m = Q.mobs?.[id] ?? {};
     const lv = m.lv ? (m.lv[0] + m.lv[1]) / 2 : level;
-    const hp = m.hp ?? health(lv) * (RANK_HP[m.rk ?? 0] ?? 1);
-    // (a creature below you goes down faster, one above you slower)
-    const edge = Math.max(0.5, Math.min(2.5, 1 + 0.08 * (level - lv)));
+    // Its health: what a fight in this game measured; else the original game's - or, where that
+    // has none either, a usual figure for its level and rank - times what this game adds at the level.
+    const more = healthHere(lv), measured = own.health?.[id];
+    const hp = measured > 0 ? measured : (m.hp ?? health(lv) * (RANK_HP[m.rk ?? 0] ?? 1)) * more;
     // (a boss, or anything with many times the health of its level: a fight for a group, counted at a round figure)
-    const group = m.rk === 3 || hp > GROUP_OVER * health(lv);
-    const fight = group ? (m.rk === 3 ? BOSS_FIGHT : GROUP_FIGHT) : hp / (dps(level) * edge);
-    return { fight, cycle: fight * (1 + REST) + BETWEEN, level: lv, guess: !m.hp, group, rank: m.rk ?? 0, places: m.sp ?? 0, back: m.rs ?? BACK, backKnown: !!m.rs };
+    const group = m.rk === 3 || hp > GROUP_OVER * health(lv) * more;
+    // what you deal: your own, where the log has it; a creature below you goes down faster, one above you slower
+    const p = pace();
+    const fight = group ? (m.rk === 3 ? BOSS_FIGHT : GROUP_FIGHT) : hp / (dps(level) * (p ? p.times : 1) * edge(level, lv));
+    const between = !group && p && p.between !== null ? p.between : fight * REST + BETWEEN;
+    return { fight, cycle: fight + between, level: lv, hp, guess: !(measured > 0) && !m.hp, health: measured > 0 ? 'measured' : m.hp ? 'old' : 'usual', more, group, rank: m.rk ?? 0, places: m.sp ?? 0, back: m.rs ?? BACK, backKnown: !!m.rs };
   }
+  /** Your own pace, where it is known and is that of the character you are playing: pace.js. */
+  function pace() {
+    const p = own.pace, who = me();
+    return p && (!who.live || Math.abs(p.level - who.level) <= SAME_ONE) ? p : null;
+  }
+  /** A creature's health and where the figure is from, for the card. */
+  const healthSaid = (k) => `${Math.round(k.hp).toLocaleString()} health${k.health === 'measured' ? '' : k.health === 'usual' ? ' (a usual figure for its level)' : k.more > 1.001 ? ` (the original game’s, and the ${Math.round((k.more - 1) * 100)}% this game adds at that level)` : ''}`;
   /** Killing \`count\` of a creature: the kills themselves, or the wait for it to come back where there are fewer of it than that. */
   function kills(id, count, level) {
     const k = kill(id, level);
@@ -235,7 +258,7 @@ export function bindQuests(app) {
    *                plotted route), in place of the straight-line figure (leg i: from stop i - 1 to stop i)
    */
   function estimate(id, walked = null) {
-    const key = `${id}|${me().level}|${layer.data?.map ?? ''}`;
+    const key = `${id}|${me().level}|${layer.data?.map ?? ''}|${own.said}`;
     if (walked === null && index.memo.has(key)) return index.memo.get(key);
     const q = Q.quests[id], who = me();
     // (for someone of your level, if the quest is one for your level; else for someone of the quest's own)
@@ -249,7 +272,7 @@ export function bindQuests(app) {
       if (need.kind === 'n') {
         const k = kills(need.id, need.count, level);
         if (k.guess && Q.mobs) rough.push(`${nameOf('n', need.id)} is new to this game: its health is taken from its level`);
-        parts.push(capped({ label: `Kill ${need.count} ${nameOf('n', need.id)}`, seconds: k.seconds, detail: `level ${Math.round(k.level)}${['', ' elite', ' rare elite', ' boss', ' rare'][k.rank]}: ${k.group ? `a fight for a group, counted at ${clock(k.fight)}` : `${Math.round(k.fight)} s a fight`}, ${Math.round(k.cycle)} s from one to the next${k.waits ? `; only ${k.places} of them, back after ${clock(k.back)}${k.backKnown ? '' : ' (not recorded: a usual figure)'}: the wait is longer than the fighting` : ''}` }, rough));
+        parts.push(capped({ label: `Kill ${need.count} ${nameOf('n', need.id)}`, fought: !k.group, seconds: k.seconds, detail: `level ${Math.round(k.level)}${['', ' elite', ' rare elite', ' boss', ' rare'][k.rank]}, ${healthSaid(k)}: ${k.group ? `a fight for a group, counted at ${clock(k.fight)}` : `${Math.round(k.fight)} s a fight`}, ${Math.round(k.cycle)} s from one to the next${k.waits ? `; only ${k.places} of them, back after ${clock(k.back)}${k.backKnown ? '' : ' (not recorded: a usual figure)'}: the wait is longer than the fighting` : ''}` }, rough));
         if (k.group) rough.push(`${nameOf('n', need.id)} takes a group: the fight is counted at ${clock(k.fight)}, and finding the group is not counted`);
         if (k.scarce) rough.push(`only ${k.places} ${nameOf('n', need.id)} on record, ${clock(k.back)} in coming back (a dungeon's, or a rare one): counted as if there were enough`);
         else if (k.rank === 1 || k.rank === 2) rough.push(`${nameOf('n', need.id)} is ${['', 'an elite', 'a rare elite'][k.rank]}: counted as fought alone`);
@@ -267,7 +290,7 @@ export function bindQuests(app) {
           const c = it.dc?.[n], rate = c ? (c[0] / 100) * c[1] : DROP_GUESS;
           if (!(rate > 0)) continue;
           const k = kills(n, Math.ceil(need.count / rate), level);
-          const option = { seconds: k.seconds, at: ['n', n], detail: `from ${nameOf('n', n)}: ${c ? `drops ${c[0]}% of the time${c[1] > 1 ? `, ${c[1]} at a time` : ''}` : `drop rate not recorded, counted at ${DROP_GUESS * 100}%`}, so about ${k.count.toLocaleString()} kill${k.count === 1 ? '' : 's'} at ${k.group ? `${clock(k.cycle)} each (a fight for a group)` : `${Math.round(k.cycle)} s each`}${k.waits ? ` (only ${k.places} of them, back after ${clock(k.back)}: the wait for them to come back is longer)` : ''}`, guess: !c, group: k.group };
+          const option = { seconds: k.seconds, at: ['n', n], detail: `from ${nameOf('n', n)}: ${c ? `drops ${c[0]}% of the time${c[1] > 1 ? `, ${c[1]} at a time` : ''}` : `drop rate not recorded, counted at ${DROP_GUESS * 100}%`}, so about ${k.count.toLocaleString()} kill${k.count === 1 ? '' : 's'} at ${k.group ? `${clock(k.cycle)} each (a fight for a group)` : `${Math.round(k.cycle)} s each (${healthSaid(k)}: ${Math.round(k.fight)} s a fight)`}${k.waits ? ` (only ${k.places} of them, back after ${clock(k.back)}: the wait for them to come back is longer)` : ''}`, guess: !c, group: k.group, fought: !k.group };
           if (!best || option.seconds < best.seconds) best = option;
         }
         for (const o of it.o ?? []) {
@@ -281,7 +304,7 @@ export function bindQuests(app) {
         if (!best) best = { seconds: 0, at: null, detail: 'given to you with the quest, made, or come by some other way: no time counted' };
         if (best.guess && Q.mobs) rough.push(`how often ${it.n ?? 'an item'} drops is not recorded`);
         if (best.group) rough.push(`${it.n ?? 'an item'} comes from a fight that takes a group: finding the group is not counted`);
-        parts.push(capped({ label: `${got ? 'Collect' : 'Bring'} ${need.count} ${it.n ?? nameOf('i', need.id)}`, seconds: best.seconds, detail: best.detail }, rough));
+        parts.push(capped({ label: `${got ? 'Collect' : 'Bring'} ${need.count} ${it.n ?? nameOf('i', need.id)}`, fought: !!best.fought, seconds: best.seconds, detail: best.detail }, rough));
         const p = best.at ? where(best.at[0], best.at[1], from) : null;
         if (p?.map !== undefined) spots.push(p);
       }
@@ -314,7 +337,9 @@ export function bindQuests(app) {
     if (!Q.mobs) rough.unshift('this map\u2019s data was built before the quest explorer, and has no counts, drop rates, health or respawn times in it: everything here is by rule of thumb until you press Update map');
     const work = parts.reduce((s, p) => s + p.seconds, 0);
     // (walked: 0 none of the way has been worked out, 1 some of it, 2 all of it)
-    const out = { id, seconds: travel + work + 2 * TALK, travel, walked: !exact ? 0 : exact < stops.length - 1 ? 1 : 2, parts, level, rough: [...new Set(rough)], stops, from, to };
+    // (fought: something of it is a fight of your own - what those were reckoned by is said on the card)
+    const fought = parts.some((p) => p.fought);
+    const out = { id, seconds: travel + work + 2 * TALK, travel, walked: !exact ? 0 : exact < stops.length - 1 ? 1 : 2, parts, level, rough: [...new Set(rough)], stops, from, to, fought, pace: fought ? pace() : null };
     if (walked === null) index.memo.set(key, out);
     return out;
   }
@@ -383,8 +408,38 @@ export function bindQuests(app) {
     $('questCount').textContent = index.quests.length.toLocaleString();
   }
 
+  // ---- your own pace -------------------------------------------------------------------------
+  /** What the fights of an estimate were reckoned by, in words. */
+  function paceSaid(e) {
+    const p = e.pace;
+    if (p) return `Fights at your own pace: ${Math.round(p.dps)} damage a second over your last ${p.fights} fights alone (${p.times.toFixed(1)} times the round figure for level ${p.level})${p.between !== null ? `, and ${Math.round(p.between)} s from a kill to your first blow at the next` : ''}.`;
+    const round = `Fights at a round figure for level ${e.level}: ${Math.round(dps(e.level))} damage a second, a third of the fight and ${BETWEEN} s from one kill to the next.`;
+    if (own.pace) return `${round} (The fights the game’s combat log has are a level ${own.pace.level} character’s.)`;
+    if (!own.read) return `${round} The game’s combat log is left unread ("combatLog": false in config.json), so your own pace is not known.`;
+    return `${round} Your own takes its place once ${ENOUGH} fights fought alone have been read from the game’s combat log${own.fights ? ` (${own.fights} so far)` : ''}: the addon’s options have the game keep it.`;
+  }
+  /** Ask the server how your fights have gone; the times are worked out anew where that has changed. */
+  async function askOwn() {
+    try {
+      const res = await fetch('/api/fights', { cache: 'no-store' });
+      if (!res.ok) return;
+      const d = await res.json();
+      const p = paceOf(d.fights);
+      const said = JSON.stringify([p ? [Math.round(p.times * 50), p.between === null ? null : Math.round(p.between), p.level] : null, Object.keys(d.health ?? {}).length, !!d.read, p ? 0 : d.fights?.length ?? 0]);
+      if (said === own.said) return;
+      own = { pace: p, health: d.health && typeof d.health === 'object' ? d.health : {}, read: !!d.read, fights: d.fights?.length ?? 0, said };
+      if (!index) return;
+      index.memo.clear();
+      for (const e of index.quests) e.time = undefined;
+      showList();
+      if (open !== null && card.style.display !== 'none') show(open);
+    } catch { /* the server is away: what was known stands */ }
+  }
+  askOwn();
+  setInterval(askOwn, OWN_EVERY);
+
   // ---- the card ------------------------------------------------------------------------------
-  const link = (text, title, onclick) => el('a', { title, text, onclick: (e) => { e.preventDefault(); onclick(); } });
+  const link =(text, title, onclick) => el('a', { title, text, onclick: (e) => { e.preventDefault(); onclick(); } });
   const look = (p) => { if (!p || p.map === undefined) return; const go = () => { const z = p.z ?? app.scene.heightAt(p.x, p.y) ?? 0; app.camera.lookAt([p.x, p.y, z], 160, app.camera.heading, -45, true); }; app.letGo?.(); if (app.scene.map.id !== p.map) app.openMap(p.map).then(go); else go(); };
   function show(id) {
     const q = Q.quests[id];
@@ -413,6 +468,7 @@ export function bindQuests(app) {
       el('div', { class: 'part' }, el('span', { class: 'grow', text: `Getting about (${['by the straight line', 'part of it worked out over the map', 'worked out over the map'][e.walked]})` }), el('span', { class: 't', text: clock(e.travel) })),
       ...e.parts.map((p) => el('div', { class: 'part', title: p.detail }, el('span', { class: 'grow' }, document.createTextNode(p.label), p.detail ? el('div', { class: 'dim small', text: p.detail }) : null), el('span', { class: 't', text: p.seconds ? clock(p.seconds) : '–' }))),
       el('div', { class: 'part' }, el('span', { class: 'grow', text: 'Taking it and handing it in' }), el('span', { class: 't', text: clock(2 * TALK) })),
+      e.fought ? el('div', { class: 'dim small', id: 'questPace', style: 'margin-top:4px', text: paceSaid(e) }) : null,
       e.rough.length ? el('div', { class: 'warn small', style: 'margin-top:4px', text: `Rougher than usual: ${e.rough.join('; ')}.` }) : null,
       el('div', { class: 'sub', text: 'Where' }),
       place('From', e.from, q.si?.length ? `an item: ${Q.items?.[q.si[0]]?.n ?? 'one you find'}` : 'somewhere the data does not record'),
@@ -487,6 +543,8 @@ export function bindQuests(app) {
     drawRest(pass) { if (plot) for (const l of plot.legs) l.renderer.drawRest(pass); },
     cover(pass) { if (plot) for (const l of plot.legs) l.renderer.cover(pass); },
     show, estimate: (id) => (index ? estimate(id) : null), chain: (id) => (index ? chain(id) : null),
+    /** (for the tests) how your own fights go, as last asked - and asked again now */
+    get own() { return own; }, askOwn,
     get plot() { return plot; },
   };
 }

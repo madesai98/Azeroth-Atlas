@@ -27,6 +27,10 @@
 // itself is only ever read: never changed, moved or deleted. Kept facts go to the Atlas database with the rest of what this copy
 // learns (atlasdb/collect.js), under the same switch.
 //
+// One thing more is made of the log, and kept apart (fights.js, <dataDir>/user/fights.json): how
+// your own fights went - how long each of the last sixty lasted and what you dealt in it - for
+// the quest explorer to reckon a kill by. That is yours alone and goes nowhere.
+//
 // A line, as this game writes it (log version 22):
 //
 //   11/18/2026 12:09:18.482-8  RANGE_DAMAGE,<who did it>,"name",<flags>,<raid flags>,<to whom>,"name",<flags>,<raid flags>,
@@ -96,7 +100,9 @@ export function creatureOf(guid) {
 /**
  * One line of the log.
  * @returns null (not a line), or { at, event, version (the log's first line), zone (a change of map: its number),
- *   unit: { guid, flags (as far as the line gives them), owned, health, most, x, y, facing, level } | null }
+ *   src, sflags, dst, dflags (who did it and to whom, as the game names and marks them),
+ *   unit: { guid, flags (as far as the line gives them), owned, health, most, x, y, facing, level } | null,
+ *   amount (of a blow that landed: what it took off, not counting what it dealt beyond the death) }
  */
 export function parseLine(line) {
   const cut = line.indexOf('  ');
@@ -109,6 +115,7 @@ export function parseLine(line) {
   for (const [guid, flags] of [[f[1], Number(f[3])], [f[5], Number(f[7])]]) {
     if (typeof guid === 'string' && guid.startsWith('Player-') && Number.isFinite(flags) && (flags & MINE) && (flags & PLAYER)) { out.mine = guid; break; }
   }
+  out.src = f[1]; out.sflags = Number(f[3]); out.dst = f[5]; out.dflags = Number(f[7]);
   if (f.length < 28) return out;
   // the row of figures: after the two who fought (and the spell, where there is one)
   for (let i = 9; i <= 13 && i + 19 <= f.length; i++) {
@@ -120,6 +127,8 @@ export function parseLine(line) {
     const guid = f[i];
     const flags = guid === f[1] ? Number(f[3]) : guid === f[5] ? Number(f[7]) : NaN;
     out.unit = { guid, flags: Number.isFinite(flags) ? flags : null, owned: f[i + 1] !== NOBODY, health: v[0], most: v[1], x: v[12], y: v[13], facing: v[15], level: v[16] };
+    // (after the row, a blow has what it dealt, what it would have dealt unhindered, and how much of it was beyond the death: -1 for none)
+    if (f[0].endsWith('_DAMAGE') && isNumber(f[i + 19])) out.amount = Math.max(0, Number(f[i + 19]) - Math.max(0, Number(f[i + 21]) || 0));
     break;
   }
   return out;
@@ -130,12 +139,13 @@ export class CombatLog {
    * @param side   () => 'A' | 'H' | null: which side you are on, as far as the map knows (the live link says)
    * @param onFix  ({ map, x, y, facing, at }) => called with where you are, each time the log says
    * @param onNew  () => called when something new about a creature has been kept
+   * @param fights (fights.js) what is passed every line, to follow how your own fights go
    */
-  constructor(cfg, { side = () => null, onFix = null, onNew = null } = {}) {
+  constructor(cfg, { side = () => null, onFix = null, onNew = null, fights = null } = {}) {
     const folder = flavourFolder(cfg);
     this.dir = folder ? path.join(cfg.installRoot, folder, 'Logs') : null;
     this.file = path.join(cfg.dataDir, 'user', 'logged.json');
-    this.side = side; this.onFix = onFix; this.onNew = onNew;
+    this.side = side; this.onFix = onFix; this.onNew = onNew; this.fights = fights;
     // (mine: which side each character of yours is on, under a scrambled form of its name - see #whose)
     this.store = { v: 1, read: {}, places: {}, levels: {}, stands: {}, mine: {} };
     try {
@@ -165,6 +175,7 @@ export class CombatLog {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.#save(true);
+    this.fights?.save(true);
   }
 
   status() {
@@ -193,6 +204,7 @@ export class CombatLog {
     }
     if (fresh) { try { this.onNew?.(); } catch { /* its own affair */ } }
     this.#save(false);
+    this.fights?.save(false);
     return fresh;
   }
 
@@ -203,7 +215,7 @@ export class CombatLog {
     // (a file begun in the middle - by a run before this one - has its version on its first line)
     if (from > 0 && this.state.file !== name) this.#head(fd);
     // (another log may be another character's: whose it is, and where they are, is learned anew from it)
-    if (this.state.file !== name) { this.mine = null; this.mySide = null; this.zone = null; }
+    if (this.state.file !== name) { this.mine = null; this.mySide = null; this.zone = null; this.fights?.reset(); }
     this.state.file = name;
     let rest = Buffer.alloc(0); // the end of what was read, where it stopped in the middle of a line
     try {
@@ -251,6 +263,8 @@ export class CombatLog {
     if (l.version !== undefined) { this.#version(l.version); return 0; }
     if (l.zone !== undefined) { this.zone = l.zone; return 0; }
     if (l.mine) this.#whose(l.mine, l.at);
+    // (how your own fights go: fights.js)
+    if (this.fights && KNOWN_VERSIONS.has(this.version)) { try { this.fights.line(l); } catch { /* its own affair */ } }
     const u = l.unit;
     if (!u || !KNOWN_VERSIONS.has(this.version)) return 0;
     if (![u.x, u.y].every((v) => Number.isFinite(v) && Math.abs(v) < 40000) || (u.x === 0 && u.y === 0)) return 0;
@@ -271,7 +285,7 @@ export class CombatLog {
     const s = this.store;
     if (Number.isInteger(u.level) && u.level >= 1 && u.level <= 99 && Number.isInteger(u.most) && u.most > 0 && u.most <= 2e9) {
       const by = (s.levels[who.id] ??= {});
-      if (by[u.level] !== u.most) { by[u.level] = u.most; fresh++; }
+      if (by[u.level] !== u.most) { by[u.level] = u.most; fresh++; this.healthRev = (this.healthRev ?? 0) + 1; }
     }
     const side = this.mySide;
     const how = u.flags & HOSTILE ? -1 : u.flags & NEUTRAL ? 0 : u.flags & FRIENDLY ? 1 : null;

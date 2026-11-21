@@ -294,7 +294,7 @@ The map only redraws when the view changes, so it uses no GPU while you are just
 | `minimap` | `false` = never look at the game's minimap to find you inside a dungeon (see "Inside a dungeon: your place, read off the game's minimap") |
 | `autoUpdate` | `false` = the map tool only says when a newer version of itself is out, and puts it in when you press the button (see "Updates"). `"never"` = it is never put in, whatever is pressed |
 | `auctions` | Auction prices (see "Auction prices"): `{ "house": "us-110" }` = the auction house this copy shows (chosen on the page); `false` = off altogether |
-| `combatLog` | `false` = the game's combat log is never read (see "What a fight shows") |
+| `combatLog` | `false` = the game's combat log is never read (see "What a fight shows"); the quest times then go by a round figure for your level, not your own pace |
 | `atlas` | `false` = the map is built from QuestieDB and the reference database alone, without what the Atlas database adds (see "The map is built from it") |
 | `database` | The Atlas database (see "The Atlas database"): `{ "share": false }` = this copy sends nothing of what it learns; `{ "apply": false }` = what a newer database adds is not put on the map by itself, only when you press **Update map**; `{ "url": "...", "apiKey": "..." }` = another database than the one this version names, and the key to sign in to it with; `{ "maintain": true }` = this copy also makes and publishes the database (the database must list it as a maintainer); `false` = off altogether |
 
@@ -749,12 +749,37 @@ made of, line by line, with the numbers behind each line:
   takes it. Until you plot the route this is the straight line, a quarter added for the way
   round things, at your running speed; a part on another map is counted at five minutes.
   Plotted, it is the real way, flights and boats included.
-- **Killing**: a creature's health over what a player of the level deals in a second, and the
-  time between one fight and the next (recovering: a third of the fight; getting to the next
-  and looting: 12 s). What a player deals is a round figure for questing alone (about 19 a
-  second at level 10, 58 at 30, 135 at 60): your class, gear and talents move it. A creature
-  below you goes down faster, one above you slower. The level counted is yours when the quest
-  is one for your level, else the quest's own.
+- **Killing**: a creature's health over what you deal in a second, and the time from one kill
+  to the next. A creature below you goes down faster, one above you slower (8% a level). The
+  level counted is yours when the quest is one for your level, else the quest's own.
+  - **What you deal is your own**, where the game's combat log has it (asked for on 21 November
+    2026: "each user can keep track of their own rolling average DPS and use that in the
+    estimate for time to kill instead of some kind of idealized simulation"). The map follows
+    your fights as the game writes them and keeps the last sixty you fought alone: how long
+    each lasted and what you dealt in it. Sixty fights are an hour or so of questing, so the
+    figure moves with you as you level and change what you wear. It is kept as how many times a
+    round figure for your level you deal (about 19 a second at level 10, 58 at 30, 135 at 60),
+    so that it carries to creatures above and below you and to quests of levels you have yet to
+    reach. The same fights say how long you are from a kill to your first blow at the next -
+    looting, getting your breath, walking over. The card says what was used: "Fights at your
+    own pace: 120 damage a second over your last 60 fights alone (1.4 times the round figure
+    for level 38), and 19 s from a kill to your first blow at the next."
+  - Until eight such fights have been read, and for a character of yours none are kept of, it
+    is the round figure, with a third of the fight and 12 s from one kill to the next - and
+    the card says that instead, and how many fights there are so far. The game keeps its log
+    when the addon asks it to (see "What a fight shows"); only fights fought while the live
+    link is on are kept, since it is the link that says which level you are (the log's own
+    "level" of a player turned out to be the level of what they wear: 28 for a character of
+    level 37).
+  - A fight is yours alone when nobody else dealt a tenth of it and you dealt most of the
+    creature's health. Two creatures at once are one fight with two kills, its seconds counted
+    once. Not kept: a fight you died in, one the creature got away from, one in a group.
+  - **A creature's health** is what a fight in this game measured, where one has: yours, a
+    moment after the fight, or anybody's by way of the Atlas database. Else it is the original
+    game's raised by what this game adds at the creature's level: nothing up to level 8, 5% at
+    level 10, 30% from level 20 on (measured in the logs: every creature of one level fought so
+    far has exactly those; between 11 and 20 the straight line between them is taken). The card
+    says which: "1,867 health (the original game's, and the 30% this game adds at that level)".
 - **Collecting**: the kills it takes at the recorded drop rate ("drops 66% of the time, so about
   10 kills"), from whichever source is quickest; a chest or a plant at 18 s each. A drop rate
   nobody recorded is counted at 35%, and the card says so.
@@ -777,9 +802,52 @@ What makes a figure rougher than usual is said on the card under it. In particul
 - Escort quests, timed events and anything a quest only says in words ("speak with", "find")
   are counted as the travel and the talking alone.
 
-So the figures are good for comparing quests and for adding up a chain or an evening, and less
-good to the minute: the median quest comes to 5 minutes, three quarters are under a quarter of
-an hour.
+**Held against the game's own log** (21 November 2026, on the question whether the times are too
+short). Thirty-two hours of one player's combat log - 937 creatures killed, 459 of them alone -
+and the application's notes of one evening of a level 37 character, beside what the reckoning
+said of the same creatures and quests:
+
+- **A fight**: for the level 37 character real fights came to 1.3 times the reckoned, all
+  together, by two errors that nearly cancelled. Creatures here have 1.3 times the original
+  game's health, and it was the original's that was counted; and the player dealt 111 a second
+  to a creature of their own level where the round figure says 74. A level 14 character dealt
+  15 where it says 26: for them a fight was reckoned at half what it takes. Hence your own
+  pace and this game's health, above.
+- **From one kill to the next**, while at it: one every 37 s, reckoned at 33.
+- **A quest that is only kills** came out right: ten Lashtail Raptors, six minutes reckoned,
+  six taken.
+- **An evening did not.** Ten quests were handed in, reckoned at an hour and a half in all, in
+  6.3 hours in the game - of which 35 minutes were fighting, 24 were spent dead and ten on
+  flight paths. Not all of those hours were questing (they were not measured as such), and the
+  figure for a quest was never meant to hold what lies between quests. But what the reckoning
+  leaves out is most of an evening.
+
+What it leaves out, or has too low, and has **not** been mended by the above - plainest first:
+
+- A thing to open or pick up is counted at 18 s each, and nothing for the creatures that stand
+  around it or the way from one to the next. Eight Stolen Shipments: 2 minutes reckoned, 46
+  from tracking the quest to having them (other quests were done on the way, so that is not a
+  measurement of the eight either).
+- The way is the straight line and a quarter until you plot the route, and the way from where
+  one quest ends to where the next begins is not counted at all.
+- Dying, and the walk back.
+- The creatures in the way that no quest asks for, and the kills beyond the reckoned number
+  when the drops are unkind (23 Lesser Water Elementals for six bracers, 16 reckoned).
+
+So the times are best read as what a quest takes once you stand in front of what it asks for:
+good for comparing quests, fair for a quest of kills, too short for one of things to be found,
+and not a count of how many you will have done by midnight. The median quest comes to 5
+minutes, three quarters are under a quarter of an hour.
+
+Tried: the server's following of fights, with logs written in the game's own layout (32 checks:
+a fight alone, two creatures at once, somebody else's hand in it, a pet's blows, a fight left,
+dying, the time to the next, the last sixty of seventy, another character, what is on the disk)
+and with the three real logs put through it as if they were being written (87 fights kept of
+the level 37 character's known hours: 120 a second, 1.4 times the round figure, 19 s between -
+the same as counting them by hand); the page's reckoning with the server's answer stood in for
+(15 checks). That the reader keeps the same facts of creatures as before was checked on the
+same logs. **Not seen yet**: the figure building up from a game being played, with the live
+link saying the level.
 
 ## Route to your waypoint
 
@@ -2899,9 +2967,15 @@ it, off at every login). Each line names who struck whom and carries figures of 
 where it stood, its level, its health. The map reads the file while the game runs
 (`server/combatlog.js`; only ever reads it) and keeps, of each creature: where it was when it
 first came into a fight, its health at that level, and whether it was hostile to your side. Not
-kept: anything of players, pets and guardians, how the fight went, or when it was. Your own
-place in those lines is used for one thing, on your own computer: showing you on the map inside
-a dungeon (see "Dungeons"). The addon asks the game to keep the log each time you enter the
+kept: anything of other players, pets and guardians, or when a fight was. Your own place in
+those lines is used for one thing, on your own computer: showing you on the map inside a
+dungeon (see "Dungeons"). And of how your own fights went one thing is made, which stays on
+your computer too (`server/fights.js`, `user/fights.json` in the map's data folder): of the
+last sixty you fought alone, how long each lasted, what you dealt in it, how many creatures
+died and of which level, which level you were, and how long after the fight before it began -
+for the quest explorer to reckon a kill by your own pace (see "Quests": how the time is worked
+out). No name is in it, nothing of anybody else, and it is no part of what goes to the Atlas
+database. The addon asks the game to keep the log each time you enter the
 world, and never switches off a log it did not switch on itself; `/atlas fights` (or the
 addon's options) stops it asking, and `"combatLog": false` in `config.json` stops the map
 reading. The file grows by a few megabytes an evening and the game never clears it: delete old
