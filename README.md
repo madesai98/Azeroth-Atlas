@@ -620,6 +620,31 @@ floor at their spot nearest the height it has followed you to, notes it on that 
 **seen in game**, and says what it learned under the switches ("height corrected from 6.0 to
 12.0 yd"). An NPC the database has nowhere near is added where you met them.
 
+**Someone who is not where the database has them.** This game has moved some people, and built
+some places anew. QuestieDB has Archmage Ansirem Runeweaver at the gate of ruined Dalaran, where
+a wall of the city this game built over it stands now; he is inside. Kept as one more place, the
+old one stayed on the map, and the way to him led to whichever of the two was nearer you - from
+the south, the wall (reported 21 November 2026). So where the databases put someone in **one
+place only**, and they are met forty yards or more from it, and nobody has met them at that
+place, the place is **moved** to where they were met rather than one more being added. The map
+says so: "Archmage Ansirem Runeweaver: 372 yd from the one place the database has them, so not
+there in this game. Moved here, 110.8 yd up."
+
+- Someone the databases put in several places (a guard, someone who walks a round) gets one
+  more place, as before; the ones they had stay.
+- Someone met at their one place as well keeps it: Archmage Tervosh is in his tower in
+  Theramore and, for a quest, out in the marsh, and both stay. So does someone whose level a
+  fight there settled.
+- The map build does the same with every copy's sightings (below), so once one player has met
+  someone, everyone's map has them there; and `quests.json`, which keeps one place for each
+  person a quest involves (the way to them from another continent), has that place too.
+- On the data as it was on 21 November 2026 it moved seven people, all in the Eastern Kingdoms:
+  Ansirem (372 yd), Afadra Dunwall (from Dun Morogh into Ironforge, 1,311 yd), the Lost Horse,
+  a Stormwind Harbor Guard, Thomas Miller and Sognar Cliffbeard (both walk a round), and Donald
+  Rabonne (67 yd).
+- It needs the map built again once (application 0.6.12: the page offers **Update map**, for a
+  newer map tool). Until then the map has both places, as before.
+
 The same goes for **an object you take things out of**: a chest, a herb, a vein of ore, a crate
 for a quest. When its loot window opens the addon says which object it is, and the map notes it
 where you stand, as it notes someone you talk to. (What you fish up comes out of your own float,
@@ -643,7 +668,8 @@ axe, Rockslicer - which opens nothing, and is left out.
 **What other players have seen** is on your map too: the Atlas database puts every copy's
 sightings together, and the map build lays them over the spawn points like your own (height
 source **seen in game by another player**). Yours, where you have one of the same spot, is believed
-first; and someone the reference database places stays as placed, whoever saw them where. The
+first; and someone the reference database places stays as placed, whoever saw them where -
+unless they were met only far from that one place: then they are moved, as above. The
 level another player fought a creature on comes the same way (**fought on this level by another
 player**: see "A creature you fight" below).
 

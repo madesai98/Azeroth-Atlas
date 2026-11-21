@@ -9,7 +9,9 @@
 // It also keeps the heights honest: when the game says you have opened an NPC's window you
 // are standing next to it, so its height is yours. That is noted on the spawn point (source
 // "seen in game"), sent to the server to keep (user/npcs-seen.json, which outlives every map
-// update), and laid over the extracted data from then on. A creature you fight says less - it is
+// update), and laid over the extracted data from then on. Someone met far from the one place the
+// databases have them is not there in this game: that place is moved to where you met them (#lone).
+// A creature you fight says less - it is
 // fought where it was chased to - but enough to settle which level of a cave it is on, where
 // that was the map's own guess (see #fought).
 import { GLOBALS_WGSL, targets } from './gpu.js';
@@ -243,6 +245,9 @@ export class NpcLayer {
       mask: new BigUint64Array(meta.entries.length + mine.length + 64), spawnCount: null,
       typed: meta.entries.some((e) => e.ct), // (does this map's data say what kind of thing a creature is? One built before that was added does not)
       index: new Map(meta.entries.map((e, i) => [(e.k ? 'o' : 'n') + e.id, i])),
+      // (the first `base` spots are the databases', the rest what other players' sightings added; `met`:
+      // those of the databases' a sighting met and left as they were. null: a map built before the file said - see #lone)
+      base: Number.isInteger(meta.base) && meta.base <= n ? meta.base : null, met: new Set(meta.met ?? []),
     };
     for (let i = 0; i < n; i++) { d.x[i] = xyz[i * 3]; d.y[i] = xyz[i * 3 + 1]; d.z[i] = xyz[i * 3 + 2]; }
     d.owner.set(owner); d.src.set(source);
@@ -279,12 +284,49 @@ export class NpcLayer {
     // a level another player's fight settled is no surer than one your own does)
     if (r.fight && (i < 0 || (d.src[i] >= 3 && d.src[i] !== FOUGHT && d.src[i] !== FOUGHT_SHARED))) return -1;
     if (i < 0) {
-      if (d.n >= d.owner.length) return -1;
-      i = d.n++;
-      d.x[i] = r.x; d.y[i] = r.y; d.owner[i] = e;
+      // (the one place the databases have them, where nobody has met them: not where they stand in this game - see #lone)
+      const one = this.#lone(e);
+      if (one >= 0) i = one;
+      else {
+        if (d.n >= d.owner.length) return -1;
+        i = d.n++;
+        d.owner[i] = e;
+      }
+      d.x[i] = r.x; d.y[i] = r.y;
     }
     d.z[i] = r.z; d.src[i] = r.fight ? FOUGHT : SEEN;
     return i;
+  }
+
+  /**
+   * The one place the databases put someone on this map, where they put them in that one place
+   * only and nobody has been met there: no sighting of yours or another player's, no fight. -1
+   * where there is none such: several places (a guard, a wanderer), one somebody was met at, or
+   * a map built before its file said which spots are the databases' (meta.base).
+   * Someone you meet SAME yards and more from it is not there in this game, which has moved
+   * some and built places anew (Archmage Ansirem Runeweaver stood at the gate of ruined Dalaran:
+   * a wall of the city built over it stands there now, and he is inside). Your sighting takes
+   * that place over (#overlay) rather than being one more, which the way to them would lead to
+   * whenever it was the nearer of the two. The map build does the same with every copy's
+   * sightings (extractor/jobs/npcs.js, resolveHeights).
+   */
+  #lone(e) {
+    const d = this.data;
+    if (!Number.isInteger(d.base)) return -1;
+    let one = -1;
+    for (let i = 0; i < d.base; i++) {
+      if (d.owner[i] !== e) continue;
+      if (one >= 0) return -1;
+      one = i;
+    }
+    // (seen there, by you or another player, or fought there: 5 to 8 - or met by another player and left as it was)
+    if (one < 0 || d.src[one] > 4 || d.met.has(one)) return -1;
+    // (nor met there by you: a sighting of yours the reference height turned away still says they stood there)
+    const entry = d.entries[e];
+    for (const r of this.seen ?? []) {
+      if (r.map === d.map && r.id === entry.id && !!r.object === !!entry.k && Math.hypot(r.x - d.x[one], r.y - d.y[one]) < SAME) return -1;
+    }
+    return one;
   }
 
   /** The spawn point of an entry nearest a spot, within `reach` yards (or -1). */
@@ -899,17 +941,21 @@ export class NpcLayer {
     for (const f of floors) if (Math.abs(f - tracker.z) <= 2.5 && (near === null || Math.abs(f - tracker.z) < Math.abs(near - tracker.z))) near = f;
     if (near !== null) z = near;
     const rec = { map: d.map, id: m.id, object: m.object, x: sx, y: sy, z: Math.round(z * 100) / 100, px: m.x, py: m.y, was, sure: !!tracker.sure };
+    // (met far from the one place the databases have them: that place is moved here - #lone)
+    const lone = i < 0 && e !== undefined ? this.#lone(e) : -1;
+    const off = lone >= 0 ? Math.hypot(d.x[lone] - sx, d.y[lone] - sy) : 0;
     const at = this.#overlay(rec);
     if (at < 0) return;
     (this.seen ??= []).push(rec);
     fetch('/api/npcs/seen', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(rec) }).catch(() => { /* kept for this session only */ });
     if (e === undefined) this.#classify();
     this.rebuild();
-    const name = d.entries[d.owner[at]].n;
-    this.onNote(i < 0 ? `${name}: not where the database has them. Noted here, ${z.toFixed(1)} yd up.`
+    const name = d.entries[d.owner[at]].n, moved = lone >= 0 && at === lone;
+    this.onNote(moved ? `${name}: ${Math.round(off)} yd from the one place the database has them, so not there in this game. Moved here, ${z.toFixed(1)} yd up.`
+      : i < 0 ? `${name}: not where the database has them. Noted here, ${z.toFixed(1)} yd up.`
       : was === null ? `${name}: height noted, ${z.toFixed(1)} yd.`
       : Math.abs(was - z) > 1.5 ? `${name}: height corrected from ${was.toFixed(1)} to ${z.toFixed(1)} yd (it was ${HEIGHT_HOW[wasSrc].split(':')[0]}).`
-      : `${name}: height confirmed (${z.toFixed(1)} yd).`, { spawn: at, corrected: was !== null && Math.abs(was - z) > 1.5 });
+      : `${name}: height confirmed (${z.toFixed(1)} yd).`, { spawn: at, corrected: moved || (was !== null && Math.abs(was - z) > 1.5) });
   }
 
   /**

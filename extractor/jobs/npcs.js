@@ -27,7 +27,9 @@
 //                                       as the page lays your own sightings over them: it moves
 //                                       the nearest spot of the same NPC, or adds one - and is
 //                                       not believed where it contradicts the reference database
-//                                       by more than a storey or two.
+//                                       by more than a storey or two. Someone the databases put
+//                                       in one place only, met far from it and never there, is
+//                                       moved to where they were met (see resolveHeights).
 //      where a fight with it began      from the game's combat log: a spot with no height, like
 //                                       QuestieDB's, which gets one the same way (4 to 0 above).
 //                                       It is the only kind of spot there is inside a dungeon
@@ -64,7 +66,7 @@ import { packContainer, writeFileAtomic } from '../container.js';
 import { objectNeeds } from '../world.js';
 import { reactions } from './creatures.js';
 
-export const NPCS_VERSION = 11; // (11: another player's sighting leaves alone whom the reference database places; 10: what a vendor sells, how much a trainer teaches, the game's own quest pins; 8: what the Atlas database adds - atlas.js - and the game's own list of bosses; 9: what an object asks of whoever opens it)
+export const NPCS_VERSION = 12; // (12: someone the databases put in one place, met only elsewhere, is moved to where they were met - and the file says which spots are the databases'; 11: another player's sighting leaves alone whom the reference database places; 10: what a vendor sells, how much a trainer teaches, the game's own quest pins; 8: what the Atlas database adds - atlas.js - and the game's own list of bosses; 9: what an object asks of whoever opens it)
 export const NSEC = { META: 1, SPAWNS: 2, OWNER: 3, SOURCE: 4 };
 // (5 and 6 are the page's own: someone you talked to, a creature you fought - viewer/js/npcs.js)
 export const HEIGHT = { NONE: 0, GUESS: 1, ONLY: 2, REFERENCE: 3, AGREED: 4, SHARED: 7, FOUGHT: 8 };
@@ -396,26 +398,54 @@ export function resolveHeights(m, mapId, nav, ref) {
   // surer of where they stand than any player's map was of where the player did, and the page
   // counts on that when it puts YOUR height right by theirs. And a sighting that lifts anybody
   // sixty yards is left out.
-  let count = n;
-  for (const s of m.seen ?? []) {
+  //   But someone the databases put in ONE place, who was met only elsewhere - SEEN_SAME yards
+  // and more from it, and never there - does not stand there in this game, which has moved
+  // some and built places anew: Archmage Ansirem Runeweaver stood at the gate of ruined
+  // Dalaran, where a wall of the city built over it stands now, and he is inside. There the
+  // sighting takes that place over rather than being one more, which the way to him led to
+  // whenever it was the nearer of the two. Not for someone the databases put in several places
+  // (a guard, a wanderer), nor someone met at that place too: Archmage Tervosh is in his tower
+  // and, for a quest, out in the marsh, and both are kept. (The page does the same with yours:
+  // viewer/js/npcs.js, #lone - so it is told which spots are the databases' and which of those
+  // a sighting met without moving them: base and met in the file.)
+  const spotsOf = new Map(); // each NPC's spots: the databases', then those sightings add
+  for (let k = 0; k < n; k++) { const list = spotsOf.get(owner[k]); if (list) list.push(k); else spotsOf.set(owner[k], [k]); }
+  const nearest = (e, x, y, upTo) => {
     let best = -1, bestD = SEEN_SAME;
-    for (let k = 0; k < count; k++) {
-      if (owner[k] !== s.e) continue;
-      const d = Math.hypot(spawns[k * 3] - s.x, spawns[k * 3 + 1] - s.y);
+    for (const k of spotsOf.get(e) ?? []) {
+      if (k >= upTo) continue;
+      const d = Math.hypot(spawns[k * 3] - x, spawns[k * 3 + 1] - y);
       if (d < bestD) { bestD = d; best = k; }
     }
+    return best;
+  };
+  // (the databases' spots someone was met at, whether or not that changed them)
+  const met = new Uint8Array(n);
+  for (const s of m.seen ?? []) { const k = nearest(s.e, s.x, s.y, n); if (k >= 0) met[k] = 1; }
+  let count = n, moved = 0;
+  for (const s of m.seen ?? []) {
+    let best = nearest(s.e, s.x, s.y, count);
     if (best >= 0) {
       const was = spawns[best * 3 + 2];
       if (source[best] === HEIGHT.REFERENCE || source[best] === HEIGHT.AGREED) continue;
       if (Number.isFinite(was) && s.z - was > SEEN_LIFT) continue;
       counts[source[best]]--;
-    } else best = count++;
+    } else {
+      // (their one place, if it is the databases' alone: nobody met there, no fight settled its level, not moved already)
+      const list = spotsOf.get(s.e), one = list?.length === 1 && list[0] < n ? list[0] : -1;
+      if (one >= 0 && !met[one] && source[one] <= HEIGHT.AGREED) { best = one; counts[source[best]]--; moved++; }
+      else { best = count++; if (list) list.push(best); else spotsOf.set(s.e, [best]); }
+    }
     spawns[best * 3] = s.x; spawns[best * 3 + 1] = s.y; spawns[best * 3 + 2] = s.z;
     owner[best] = s.e; source[best] = HEIGHT.SHARED;
     counts[HEIGHT.SHARED]++;
   }
   if (count < room) { spawns = spawns.slice(0, count * 3); owner = owner.slice(0, count); source = source.slice(0, count); }
-  return { spawns, owner, source, counts };
+  // (base: the first so many spots are the databases', the rest what sightings added; met: those
+  // of the databases' a sighting met and left as they were - a reference height, or too far under it)
+  const metKept = [];
+  for (let k = 0; k < n; k++) if (met[k] && source[k] <= HEIGHT.AGREED) metKept.push(k);
+  return { spawns, owner, source, counts, base: n, met: metKept, moved };
 }
 
 /** Write one map's file. Returns a short summary for the manifest. */
@@ -423,13 +453,16 @@ export function writeNpcs(out, m, h, info) {
   const meta = { source: info.source, reference: info.reference, entries: m.entries, unplaced: m.unplaced.slice(0, 300) };
   // (the bosses of the place, by the game's own list and in its order)
   if (m.bosses?.length) meta.bosses = m.bosses;
+  // (which spots are the databases' and which of those a sighting met: see resolveHeights)
+  if (Number.isInteger(h.base)) meta.base = h.base;
+  if (h.met?.length) meta.met = h.met;
   writeFileAtomic(out, packContainer('WFP1', NPCS_VERSION, [
     { id: NSEC.META, data: Buffer.from(JSON.stringify(meta)) },
     { id: NSEC.SPAWNS, data: h.spawns },
     { id: NSEC.OWNER, data: h.owner },
     { id: NSEC.SOURCE, data: h.source },
   ]));
-  return { entries: m.entries.length, spawns: h.owner.length, heights: h.counts, unplaced: m.unplaced.length };
+  return { entries: m.entries.length, spawns: h.owner.length, heights: h.counts, unplaced: m.unplaced.length, moved: h.moved ?? 0 };
 }
 
 /**
@@ -525,8 +558,27 @@ export function buildQuests(db, zones, ref = null) {
     const rows = table?.get(thing.id);
     return rows?.length >= 4 ? [rows[0], r1(rows[1]), r1(rows[2])] : null;
   };
-  const needNpc = (id) => { const n = npcById.get(id); if (n && !npcs[id]) npcs[id] = [n.name, ...(first(n.spawns) ?? elsewhere(n, ref?.creatures) ?? [])]; };
-  const needObj = (id) => { const o = objById.get(id); if (o && !objects[id]) objects[id] = [o.name, ...(first(o.spawns) ?? elsewhere(o, ref?.objects) ?? [])]; };
+  // Where someone is that QuestieDB puts in one place only, and players have met only elsewhere -
+  // SEEN_SAME yards and more from it, never there: where they were met, as on the map itself
+  // (resolveHeights: Archmage Ansirem Runeweaver, inside the Dalaran built over the ruin's gate).
+  const metElsewhere = (thing) => {
+    if (!thing.seen?.length || thing.flat?.length) return null;
+    let one = null;
+    for (const [zoneId, points] of thing.spawns ?? []) {
+      const z = zoneByArea.get(zoneId);
+      if (!z) continue;
+      for (const p of points) {
+        if (!Array.isArray(p) || !(p[0] >= 0) || !(p[1] >= 0)) continue;
+        if (one) return null; // (several places: a guard, a wanderer - whichever was met, the others are as likely)
+        one = [z.map, z.region[2] - (p[1] / 100) * (z.region[2] - z.region[0]), z.region[3] - (p[0] / 100) * (z.region[3] - z.region[1])];
+      }
+    }
+    if (!one || thing.seen.some((s) => s.map === one[0] && Math.hypot(s.x - one[1], s.y - one[2]) < SEEN_SAME)) return null;
+    const s = thing.seen.find((q) => q.map === one[0]) ?? thing.seen[0];
+    return [s.map, r1(s.x), r1(s.y)];
+  };
+  const needNpc = (id) => { const n = npcById.get(id); if (n && !npcs[id]) npcs[id] = [n.name, ...(metElsewhere(n) ?? first(n.spawns) ?? elsewhere(n, ref?.creatures) ?? [])]; };
+  const needObj = (id) => { const o = objById.get(id); if (o && !objects[id]) objects[id] = [o.name, ...(metElsewhere(o) ?? first(o.spawns) ?? elsewhere(o, ref?.objects) ?? [])]; };
   const needItem = (id) => {
     if (items[id]) return;
     const it = db.item(id);

@@ -527,12 +527,12 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
         }
       }
       const heights = [0, 0, 0, 0, 0, 0, 0, 0, 0];
-      let spawns = 0, places = 0;
+      let spawns = 0, places = 0, moved = 0;
       for (const map of maps) {
         const e = map.npcsEntry;
         if (!e?.meta) continue;
         next.artifacts[e.rel] = { sig: e.sig, meta: e.meta };
-        spawns += e.meta.spawns; places++;
+        spawns += e.meta.spawns; places++; moved += e.meta.moved ?? 0;
         e.meta.heights.forEach((c, i) => { heights[i] = (heights[i] ?? 0) + c; });
       }
       // the quests (who gives and takes each, what it asks for)
@@ -542,7 +542,7 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
       next.artifacts['quests.json'] = { sig: qs };
       npcInfo = { source, reference: reference?.name ?? null, spawns, heights, quests: db.quests.length };
       const pct = (c) => `${((c / Math.max(1, spawns)) * 100).toFixed(0)}%`;
-      log(`${source}${atlas ? ` and the Atlas database (${atlas.rev})` : ''}: ${spawns.toLocaleString()} NPC and object spawn points placed on ${places} maps. Heights: ${pct(heights[4])} from the reference database and confirmed by the ground, ${pct(heights[3])} from the reference database alone, ${pct(heights[2])} the only place to stand, ${pct(heights[1])} the likeliest of several, ${pct(heights[0])} not known${heights[7] ? `, ${heights[7].toLocaleString()} as another player saw them` : ''}${heights[8] ? `, ${heights[8].toLocaleString()} on the level another player fought them on` : ''}`);
+      log(`${source}${atlas ? ` and the Atlas database (${atlas.rev})` : ''}: ${spawns.toLocaleString()} NPC and object spawn points placed on ${places} maps. Heights: ${pct(heights[4])} from the reference database and confirmed by the ground, ${pct(heights[3])} from the reference database alone, ${pct(heights[2])} the only place to stand, ${pct(heights[1])} the likeliest of several, ${pct(heights[0])} not known${heights[7] ? `, ${heights[7].toLocaleString()} as another player saw them` : ''}${heights[8] ? `, ${heights[8].toLocaleString()} on the level another player fought them on` : ''}${moved ? `; ${moved.toLocaleString()} moved to where players met them, the one place the databases had for them not being where they stand in this game` : ''}`);
     } catch (err) {
       log(`NPC layer unavailable: ${err.message}`);
     }
