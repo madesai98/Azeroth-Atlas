@@ -26,7 +26,7 @@
 // to date by itself as ever (server/appupdate.js). When this file is among the ones updated
 // (or another of the application's own: overlay.cjs, preload.cjs), the application starts
 // itself again.
-const { app, BaseWindow, BrowserWindow, WebContentsView, Menu, shell, screen, dialog, ipcMain, globalShortcut } = require('electron');
+const { app, BaseWindow, WebContentsView, Menu, shell, screen, dialog, ipcMain, globalShortcut } = require('electron');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -236,7 +236,7 @@ function open() {
     else if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) { e.preventDefault(); web.toggleDevTools(); }
   });
   over = overlays({
-    electron: { BaseWindow, BrowserWindow, WebContentsView, screen, globalShortcut, ipcMain },
+    electron: { BaseWindow, WebContentsView, screen, globalShortcut, ipcMain },
     home: win, view, address: URL_, preload: PRELOAD, file: path.join(app.getPath('userData'), 'overlays.json'),
     // (the tests: nothing of the overlays is put on the screen either - unless one of them asks to look at exactly that)
     noted, fit, unseen: !!process.env.AZEROTH_ATLAS_HIDDEN && !process.env.AZEROTH_ATLAS_OVERLAYS_SEEN, ready: () => showing === 'map' && !quitting,

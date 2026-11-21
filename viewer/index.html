@@ -272,7 +272,7 @@
   body.ov:not(.ov-pin-side) #sideHead { cursor: move; }
   /* a panel's own handles: to move it by, to pin it, to put it away, to resize it */
   .ovtools { position: absolute; top: 5px; right: 6px; display: none; gap: 3px; z-index: 8; }
-  body.ov .ovtools, body.mini .ovtools { display: flex; }
+  body.ov .ovtools { display: flex; }
   .ovtools button { width: 22px; height: 22px; padding: 0; line-height: 1; font-size: 13px; border-radius: 5px; background: rgba(16, 19, 26, 0.86); }
   .ovtools button.on { border-color: var(--accent); color: var(--accent); }
   .ovgrip { position: absolute; left: 50%; top: 4px; width: 90px; height: 16px; margin-left: -45px; border-radius: 8px; background: rgba(16, 19, 26, 0.86); border: 1px solid var(--line); cursor: move; display: none; z-index: 8; touch-action: none; }
@@ -281,22 +281,18 @@
   #mapBox .ovtools, #mapBox .ovgrip, #mapBox .ovsize { opacity: 0; transition: opacity 0.15s; }
   #mapBox:hover .ovtools, #mapBox:hover .ovgrip, #mapBox:hover .ovsize, body.ov-dragging .ovtools, body.ov-dragging .ovgrip, body.ov-dragging .ovsize { opacity: 1; }
   body.ov:not(.ov-pin-map) #mapBox .ovgrip, body.ov:not(.ov-pin-map) #mapBox .ovsize, body.ov:not(.ov-pin-side) #side .ovsize { display: block; }
-  body.mini:not(.ov-pin-mini) #mapBox .ovgrip, body.mini:not(.ov-pin-mini) #mapBox .ovsize { display: block; }
 
-  /* ---- the minimap: a second, light copy of the page, nothing of it but the map (role.js, overlay.js) ---- */
-  html.mini, html.mini body { background: transparent; }
-  body.mini #side, body.mini #sideToggle, body.mini #readout, body.mini #btnFind, body.mini #help, body.mini #flyhint, body.mini #crosshair, body.mini #report, body.mini #prices { display: none !important; }
-  body.mini #mapBox { left: 0; top: 0; right: 0; bottom: 0; transition: opacity 0.25s; opacity: var(--ov-mini-o, 1); border: 2px solid rgba(255, 255, 255, 0.4); background: #0c0f14; }
-  body.mini.shape-circle #mapBox { border-radius: 50%; }
-  body.mini.shape-rounded #mapBox { border-radius: 16%; }
-  body.mini #loading { bottom: 42%; font-size: 11px; padding: 2px 8px; }
-  body.mini #fatal { padding: 8px; font-size: 11px; border-radius: inherit; }
-  body.mini #fatal h2 { font-size: 12px; margin: 0 0 4px; }
-  body.mini #fatal button { display: none !important; }
-  body.mini .ovtools { top: 24px; right: 50%; transform: translateX(50%); }
-  body.mini.shape-circle .ovgrip { top: 9%; }
-  body.mini.shape-circle .ovtools { top: calc(9% + 20px); }
-  body.mini.shape-circle .ovsize { right: 12%; bottom: 12%; }
+  /* ---- the minimap: the map's own box, shown small and always on you (overlay.js) ---- */
+  body.ov-mini #readout, body.ov-mini #btnFind, body.ov-mini #help, body.ov-mini #flyhint, body.ov-mini #crosshair, body.ov-mini #prices { display: none !important; }
+  body.ov.ov-mini #mapBox { border: 2px solid rgba(255, 255, 255, 0.4); }
+  body.ov.ov-shape-circle #mapBox { border-radius: 50%; }
+  body.ov.ov-shape-rounded #mapBox { border-radius: 16%; }
+  body.ov.ov-shape-square #mapBox { border-radius: 0; }
+  body.ov-mini #loading { bottom: 42%; font-size: 11px; padding: 2px 8px; }
+  body.ov-mini #mapBox .ovtools { top: 24px; right: 50%; transform: translateX(50%); }
+  body.ov-shape-circle #mapBox .ovgrip { top: 9%; }
+  body.ov-shape-circle #mapBox .ovtools { top: calc(9% + 20px); }
+  body.ov-shape-circle #mapBox .ovsize { right: 12%; bottom: 12%; }
 </style>
 </head>
 <body>

@@ -18,7 +18,6 @@ import { HeightTracker } from './height.js';
 import { note } from './log.js';
 import { Places } from './places.js';
 import { basis, clamp, DEG } from './math.js';
-import { MINI, talk, say } from './role.js';
 
 const angleDelta = (a, b) => ((a - b + 540) % 360) - 180;
 const HOLD_ZOOM_MS = 5000;   // after you have zoomed yourself, the automatic zoom leaves the view alone this long
@@ -62,24 +61,9 @@ export class PlayerLink {
     try { const s = JSON.parse(localStorage.getItem(INSIDE_KEY)); if (s && Number.isInteger(s.map) && Date.now() - s.at < INSIDE_FOR) this.inside = s; } catch { /* nothing kept */ }
   }
 
-  /** (the map, to the minimap over the game: what the game last said) */
-  tell() { if (!MINI && this.state?.status) say({ t: 'player', state: this.state }); }
-
   connect() {
-    if (MINI) {
-      // The minimap over the game keeps no line to the server of its own (role.js): the map tells
-      // it what it hears. Nothing heard for a while - the map is loading itself again - and the
-      // signal counts as lost, as it would with the server away.
-      let heard = 0;
-      talk?.addEventListener('message', (e) => { if (e.data?.t === 'player' && e.data.state) { heard = Date.now(); this.receive(e.data.state); } });
-      setInterval(() => {
-        if (heard && Date.now() - heard > 4000 && this.state.status === 'live') { this.state = { ...this.state, status: 'nosignal', reason: 'server' }; this.onChange(); }
-        if (!heard || Date.now() - heard > 4000) say({ t: 'hello' });
-      }, 2000);
-      return;
-    }
     const es = new EventSource('/api/player/events');
-    es.onmessage = (e) => { const state = JSON.parse(e.data); this.receive(state); say({ t: 'player', state }); };
+    es.onmessage = (e) => { this.receive(JSON.parse(e.data)); };
     es.onerror = () => {
       // The server is away. For a moment, most likely: it starts itself again when the map is
       // updated (server/watch.js). So you stay where you were last seen, as with any lost signal,

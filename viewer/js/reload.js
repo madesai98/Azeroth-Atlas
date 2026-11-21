@@ -5,12 +5,6 @@
 // A script of its own, loaded before the map: a mistake in the map's code must not stop the
 // page from picking up the fix. The page knows which files it was made from by the stamp the
 // server wrote into it.
-//
-// (The minimap over the game - a second, light copy of the page: role.js - keeps no line to the
-// server for this. The map tells it, over the channel between them, and it loads itself again
-// when the map does.)
-import { MINI, talk, say } from './role.js';
-
 let mine = document.querySelector('meta[name="wfmap-stamp"]')?.content ?? null;
 let run = null; // which run of the server was last heard from
 
@@ -20,7 +14,7 @@ function listen() {
     let d;
     try { d = JSON.parse(e.data); } catch { return; }
     if (mine === null) mine = d.viewer;
-    else if (d.viewer !== mine) { say({ t: 'reload' }); location.reload(); return; }
+    else if (d.viewer !== mine) { location.reload(); return; }
     // (the server has been started again: whoever keeps something with it sends it once more)
     if (run !== null && d.started !== run) window.dispatchEvent(new CustomEvent('wfmap-server'));
     run = d.started;
@@ -28,5 +22,4 @@ function listen() {
   // (the browser tries again by itself while the server is away; where it has given up, start over)
   es.onerror = () => { if (es.readyState === EventSource.CLOSED) { es.close(); setTimeout(listen, 2000); } };
 }
-if (MINI) talk?.addEventListener('message', (e) => { if (e.data?.t === 'reload') setTimeout(() => location.reload(), 1200); });
-else listen();
+listen();

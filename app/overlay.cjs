@@ -4,38 +4,35 @@
 //
 //   side   the sidebar, and everything in it
 //   map    the map itself, full size
-//   mini   a small map that stays on you: a minimap
+//   mini   the map small, and always on you: a minimap
 //
-// The first two are not a second map. They are the application's own page - the one map there
-// is, with its routes, its place in your guide, what it sends the game - taken out of its
-// window and put into one that is see-through, has no frame and stays on top of everything,
-// laid over the game's window; there the page shows its sidebar and its map as two panels and
-// nothing else (viewer/js/overlay.js). Let go of both, and the page is back in its window as it
-// was. (A second copy of the page would be a second map working out the same routes and
-// sending the game its own: the game is handed one route, and the last to speak would win.)
-// While it is over the game, the application's own window says so, with a button to bring it
-// back.
-//
-// The minimap is a second copy of the page, and a light one (it sends nothing anywhere, and is
-// told where you are by the first): a small window of its own, see-through outside its shape.
+// None of them is a second map. All are the application's own page - the one map there is,
+// with its routes, its place in your guide, what it sends the game - taken out of its window
+// and put into one that is see-through, has no frame and stays on top of everything, laid
+// over the game's window; there the page shows panels and nothing else (viewer/js/overlay.js):
+// its sidebar, and its map either full size or as a minimap - one picture of the map, never
+// two, the full map first. Put all of them away, and the page is back in its window as it was.
+// So nothing is ever drawn twice, or worked out twice, and while any of them is up nothing is
+// drawn in the application's own window: it only says that the map is over the game, with a
+// button to bring it back.
 //
 // What is done here, and not in the page:
-//   - the windows: made, shown, hidden, kept where the game's window is. The page says where
+//   - the window: made, shown, hidden, kept where the game's window is. The page says where
 //     the game's window is (it hears it from the map's server, which reads the game's window);
-//     with no game on this computer's screens they are laid over the main screen, so that they
-//     can be set up without it. With the game minimized they are put away until it is back.
+//     with no game on this computer's screens it is laid over the main screen, so that things
+//     can be set up without it. With the game minimized it is put away until the game is back.
 //   - the keys: one for each overlay, asked of Windows for the whole computer, so that they
 //     work while the game has the keyboard. A key so held is taken from every other program,
 //     so they are held only while the game is running (as the map's server sees it), and the
 //     ones they come with are not ones anything is typed with (Ctrl + Alt + a figure is how
 //     many keyboards type @, # and {).
-//   - the mouse. An overlay's window lies over the whole of the game's, and must not take a
-//     click meant for the game: it takes none, except while the pointer is on a panel the page
-//     has said can be clicked (it is looked at thirty times a second). The windows never take
-//     the keyboard either - a click on the map over the game leaves your character running -
-//     until you click into something to type in, and give it back when you are done.
+//   - the mouse. The window lies over the whole of the game's, and must not take a click meant
+//     for the game: it takes none, except while the pointer is on a panel the page has said
+//     can be clicked (it is looked at thirty times a second). It never takes the keyboard
+//     either - a click on the map over the game leaves your character running - until you
+//     click into something to type in, and gives it back when you are done.
 //   - what you have set (overlays.json, beside what the window remembers): the page shows it
-//     and changes it, every window is told of a change.
+//     and changes it, and is told of every change.
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -49,10 +46,8 @@ const DEFAULTS = {
   mini: { shown: false, hotkey: 'Control+Alt+F3', pinned: false, anchor: 'tr', origin: 'tr', x: -24, y: 24, w: 260, h: 260, opacity: { still: 100, moving: 100, combat: 85 }, through: { moving: false, combat: false }, shape: 'circle', turn: true, auto: false },
 };
 const LEAST = { side: [260, 220], map: [320, 220], mini: [120, 120] }; // the smallest an overlay can be made
-const KEEP_MINI = 5 * 60 * 1000; // a minimap put away is kept this long, ready to come back at once
 
 const num = (v, lo, hi, d) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
-const frac = (c) => (c === 'l' || c === 't' ? 0 : c === 'c' ? 0.5 : 1);
 
 /** What was set, made whole and sound: anything missing or out of range is as it comes. */
 function sound(raw) {
@@ -81,20 +76,6 @@ function sound(raw) {
   return out;
 }
 
-/**
- * Where an overlay lies inside the game's window: { x, y, w, h } from that window's top left
- * corner. A point of the game's window (anchor) and a point of the overlay itself (origin) are
- * held x and y apart; whatever the game's window is resized to, that holds. Kept inside the
- * game's window, and no bigger than it. (The page has the same reckoning for its own panels:
- * viewer/js/overlay.js, place.)
- */
-function place(o, gw, gh, least = [1, 1]) {
-  const w = Math.round(Math.max(Math.min(least[0], gw), Math.min(o.w, gw))), h = Math.round(Math.max(Math.min(least[1], gh), Math.min(o.h, gh)));
-  // (each point at a whole pixel - the middle of an odd width is half a pixel on - so that what is worked back from a place leads to that place again)
-  const x = Math.round(frac(o.anchor[1]) * gw) + o.x - Math.round(frac(o.origin[1]) * w), y = Math.round(frac(o.anchor[0]) * gh) + o.y - Math.round(frac(o.origin[0]) * h);
-  return { x: Math.round(Math.min(Math.max(0, x), gw - w)), y: Math.round(Math.min(Math.max(0, y), gh - h)), w, h };
-}
-
 /** A key as Windows is asked for it, or null: nothing with a quote or a space in it, a key at the end, the rest ways of holding. */
 function key(text) {
   if (typeof text !== 'string' || !text) return null;
@@ -110,26 +91,25 @@ function key(text) {
 /**
  * @param d  what the application hands over: { electron (its own module), home (the window the page lives in), view (the page),
  *           address (the page's), preload, file (where what is set is kept), noted (to note what happens), unseen (true: nothing is
- *           ever put on the screen - for the tests), fit (lay the page out in its window again) }
+ *           ever put on the screen - for the tests), fit (lay the page out in its window again), ready (the page shows the map) }
  */
 function overlays(d) {
-  const { BaseWindow, BrowserWindow, WebContentsView, screen, globalShortcut, ipcMain } = d.electron;
+  const { BaseWindow, WebContentsView, screen, globalShortcut, ipcMain } = d.electron;
   let settings = sound(null);
   try { settings = sound(JSON.parse(fs.readFileSync(d.file, 'utf8'))); } catch { /* nothing set yet */ }
   const game = { status: 'off', window: null }; // as the page last said: the game's window in the screen's own pixels
   let host = null;        // the see-through window the page is put into
   let hosted = false;     // the page is in it
   let away = null;        // what the application's own window shows meanwhile
-  let mini = null;        // the minimap's window
-  let miniGone = 0;       // (a timer: the minimap's window is given up once it has been put away for a while)
-  const keys = {};        // overlay -> the key Windows has given it, or false: it would not
-  const mouse = { rects: [], hold: false, miniThrough: false, miniHold: false, hostTakes: null, miniTakes: null, typing: null };
+  const keys = {};        // overlay -> the key Windows has given it, false: it would not, null: none held
+  let held = false;       // the keys are held (the game is running)
+  const mouse = { rects: [], hold: false, takes: null, typing: false };
   let closing = false;
   let watching = 0;
 
   const save = () => { try { fs.mkdirSync(path.dirname(d.file), { recursive: true }); fs.writeFileSync(d.file, JSON.stringify(settings, null, 1)); } catch (err) { d.noted('what is set for the overlays could not be kept', { error: err.message }); } };
   const alive = (w) => !!w && !w.isDestroyed();
-  const pages = () => [d.view?.webContents, alive(mini) ? mini.webContents : null, away?.webContents].filter((c) => c && !c.isDestroyed());
+  const pages = () => [d.view?.webContents, away?.webContents].filter((c) => c && !c.isDestroyed());
 
   /** The game's window, as this application counts places on the screen - or the main screen, with no game to lay anything over. */
   function ground() {
@@ -143,14 +123,13 @@ function overlays(d) {
     const b = screen.getPrimaryDisplay().bounds;
     return { x: b.x, y: b.y, w: b.width, h: b.height, from: 'screen' };
   }
-  const away_ = () => game.status === 'minimized'; // the game is minimized: nothing is laid over a desktop
+  const minimized = () => game.status === 'minimized'; // the game is minimized: nothing is laid over a desktop
   const running = () => ['live', 'nosignal', 'minimized'].includes(game.status); // the game is there: the keys are held
-  let held = false;
 
   /** What every page is told: what is set, where the game is, whether the page is over the game, which keys Windows gave. */
   function told() {
     const g = ground();
-    return { settings, game: { w: g.w, h: g.h, from: g.from, status: game.status, minimized: away_() }, over: hosted, keys: { ...keys }, keysHeld: held, least: LEAST, unseen: !!d.unseen };
+    return { settings, game: { w: g.w, h: g.h, from: g.from, status: game.status, minimized: minimized() }, over: hosted, keys: { ...keys }, keysHeld: held, least: LEAST, unseen: !!d.unseen };
   }
   const tell = () => { const t = told(); for (const c of pages()) { try { c.send('atlas:overlay:changed', t); } catch { /* gone */ } } };
 
@@ -174,17 +153,16 @@ function overlays(d) {
     }
   }
 
-  // ---- the windows ----------------------------------------------------------------------------
-  const SEE_THROUGH = { frame: false, transparent: true, show: false, skipTaskbar: true, focusable: false, resizable: false, minimizable: false, maximizable: false, fullscreenable: false, hasShadow: false, backgroundColor: '#00000000' };
+  // ---- the window -----------------------------------------------------------------------------
   const onTop = (w) => { try { w.setAlwaysOnTop(true, 'screen-saver'); } catch { /* as high as it goes */ } };
-  const takes = (w, on) => { try { w.setIgnoreMouseEvents(!on); } catch { /* gone */ } };
+  const takes = (on) => { if (alive(host)) { try { host.setIgnoreMouseEvents(!on); } catch { /* gone */ } } };
 
   function makeHost() {
     if (alive(host)) return host;
-    host = new BaseWindow({ ...SEE_THROUGH, title: 'Azeroth Atlas (over the game)', width: 800, height: 600 });
+    host = new BaseWindow({ frame: false, transparent: true, show: false, skipTaskbar: true, focusable: false, resizable: false, minimizable: false, maximizable: false, fullscreenable: false, hasShadow: false, backgroundColor: '#00000000', title: 'Azeroth Atlas (over the game)', width: 800, height: 600 });
     onTop(host);
-    takes(host, false);
-    mouse.hostTakes = false;
+    mouse.takes = false;
+    takes(false);
     host.on('closed', () => { host = null; });
     return host;
   }
@@ -215,99 +193,59 @@ function overlays(d) {
         d.home.contentView.addChildView(view);
         view.setBackgroundColor('#0b0e14');
         hosted = false;
-        mouse.rects = []; mouse.hold = false;
-        if (mouse.typing === 'host') mouse.typing = null;
+        mouse.rects = []; mouse.hold = false; mouse.typing = false;
         d.fit();
       }
       d.noted(over ? 'the page is put over the game' : 'the page is back in its window');
     } catch (err) { d.noted('the page could not be moved between its window and the overlay', { error: err.message, over }); }
   }
 
-  function makeMini() {
-    if (alive(mini)) return mini;
-    mini = new BrowserWindow({ ...SEE_THROUGH, title: 'Azeroth Atlas (minimap)', width: settings.mini.w, height: settings.mini.h, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: d.preload, backgroundThrottling: false } });
-    onTop(mini);
-    takes(mini, false);
-    mouse.miniTakes = false; mouse.miniHold = false;
-    const mine = mini;
-    mine.on('closed', () => { if (mini === mine) mini = null; });
-    mine.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    mine.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(d.address)) e.preventDefault(); });
-    // (the map's server away for a moment - it starts itself again after an update: tried again)
-    mine.webContents.on('did-fail-load', (e, code, text, url, main) => { if (main && alive(mine)) setTimeout(() => { if (alive(mine)) mine.loadURL(`${d.address}?overlay=mini`).catch(() => {}); }, 2500); });
-    mine.webContents.on('render-process-gone', () => { if (alive(mine)) mine.destroy(); });
-    mine.loadURL(`${d.address}?overlay=mini`).catch(() => {});
-    return mini;
-  }
-
-  /** Everything put as it should be: which windows there are, where, and what is on show. */
+  /** Everything put as it should be: where the page is, where its window lies, and whether it is on show. */
   function arrange() {
     if (closing) return;
-    const g = ground(), gone = away_();
-    const wantPanels = (settings.side.shown || settings.map.shown) && !gone && d.ready();
-    move(wantPanels);
+    const g = ground();
+    // (any of the three up: the page is over the game - and nothing of the map is left in its own window to draw)
+    move(IDS.some((id) => settings[id].shown) && !minimized() && d.ready());
     if (hosted && alive(host)) {
       const b = host.getBounds();
       if (b.x !== g.x || b.y !== g.y || b.width !== g.w || b.height !== g.h) { host.setBounds({ x: g.x, y: g.y, width: g.w, height: g.h }); d.view.setBounds({ x: 0, y: 0, width: g.w, height: g.h }); }
       if (!d.unseen && !host.isVisible()) { host.showInactive(); onTop(host); }
     }
-    const wantMini = settings.mini.shown && !gone && d.ready();
-    if (wantMini) {
-      clearTimeout(miniGone); miniGone = 0;
-      const m = makeMini(), p = place(settings.mini, g.w, g.h, LEAST.mini);
-      const want = { x: g.x + p.x, y: g.y + p.y, width: p.w, height: p.h }, b = m.getBounds();
-      if (b.x !== want.x || b.y !== want.y || b.width !== want.width || b.height !== want.height) m.setBounds(want);
-      if (!d.unseen && !m.isVisible()) { m.showInactive(); onTop(m); }
-    } else if (alive(mini)) {
-      if (mini.isVisible()) mini.hide();
-      if (!miniGone) miniGone = setTimeout(() => { miniGone = 0; if (alive(mini) && !(settings.mini.shown && !away_())) mini.destroy(); }, KEEP_MINI);
-    }
-    watch();
+    if (hosted && !watching) watching = setInterval(look, 33);
+    else if (!hosted && watching) { clearInterval(watching); watching = 0; }
     tell();
   }
 
   // ---- the mouse ------------------------------------------------------------------------------
-  /** Looked at while an overlay is up: a window takes the mouse only while the pointer is on something of it that can be clicked. */
+  /** Looked at while the page is over the game: its window takes the mouse only while the pointer is on something of it that can be clicked. */
   function look() {
+    if (!hosted || !alive(host)) return;
     let p = null;
     try { p = screen.getCursorScreenPoint(); } catch { return; }
-    if (hosted && alive(host)) {
-      const b = host.getBounds();
-      // (not held on to while you type: a click on the game then goes to the game, which takes the keyboard back with it)
-      const on = mouse.hold || mouse.rects.some((r) => p.x >= b.x + r.x && p.x < b.x + r.x + r.w && p.y >= b.y + r.y && p.y < b.y + r.y + r.h);
-      if (on !== mouse.hostTakes) { mouse.hostTakes = on; takes(host, on); }
-    }
-    if (alive(mini) && (mini.isVisible() || d.unseen)) {
-      const b = mini.getBounds();
-      let on = !mouse.miniThrough && p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
+    const b = host.getBounds(), x = p.x - b.x, y = p.y - b.y;
+    // (not held on to while you type: a click on the game then goes to the game, which takes the keyboard back with it)
+    const on = mouse.hold || mouse.rects.some((r) => {
+      if (x < r.x || x >= r.x + r.w || y < r.y || y >= r.y + r.h) return false;
       // (round: its corners are the game's)
-      if (on && settings.mini.shape === 'circle') { const rx = b.width / 2, ry = b.height / 2; on = ((p.x - b.x - rx) / rx) ** 2 + ((p.y - b.y - ry) / ry) ** 2 <= 1; }
-      on = on || mouse.miniHold;
-      if (on !== mouse.miniTakes) { mouse.miniTakes = on; takes(mini, on); }
-    }
-  }
-  function watch() {
-    const up = (hosted && alive(host)) || (alive(mini) && settings.mini.shown);
-    if (up && !watching) watching = setInterval(look, 33);
-    else if (!up && watching) { clearInterval(watching); watching = 0; }
+      return !r.round || ((x - r.x - r.w / 2) / (r.w / 2)) ** 2 + ((y - r.y - r.h / 2) / (r.h / 2)) ** 2 <= 1;
+    });
+    if (on !== mouse.takes) { mouse.takes = on; takes(on); }
   }
 
   /** The keyboard: taken while you type into an overlay, and given back. */
-  function typing(which, on) {
-    const w = which === 'host' ? host : mini;
-    if (!alive(w)) return;
+  function typing(on) {
+    if (!alive(host)) return;
     try {
+      mouse.typing = on;
       if (on) {
-        mouse.typing = which;
-        w.setFocusable(true);
-        if (!d.unseen) { w.focus(); (which === 'host' ? d.view.webContents : w.webContents).focus(); }
+        host.setFocusable(true);
+        if (!d.unseen) { host.focus(); d.view.webContents.focus(); }
       } else {
-        if (mouse.typing === which) mouse.typing = null;
-        if (!d.unseen) w.blur();
-        w.setFocusable(false);
-        onTop(w);
+        if (!d.unseen) host.blur();
+        host.setFocusable(false);
+        onTop(host);
       }
-    } catch (err) { d.noted('an overlay could not take or give back the keyboard', { error: err.message, which, on }); }
+    } catch (err) { d.noted('the overlay could not take or give back the keyboard', { error: err.message, on }); }
   }
 
   // ---- what is asked of it -------------------------------------------------------------------
@@ -336,13 +274,13 @@ function overlays(d) {
     return told();
   }
 
-  const who = (e) => (d.view && e.sender === d.view.webContents ? 'page' : alive(mini) && e.sender === mini.webContents ? 'mini' : away && e.sender === away.webContents ? 'away' : null);
+  const who = (e) => (d.view && e.sender === d.view.webContents ? 'page' : away && e.sender === away.webContents ? 'away' : null);
   const from = (e) => { const url = e.senderFrame?.url ?? ''; return who(e) && (url.startsWith(d.address) || url.startsWith('file:')) ? who(e) : null; };
   ipcMain.handle('atlas:overlay:get', (e) => (from(e) ? { ...told(), role: from(e) } : null));
   ipcMain.handle('atlas:overlay:set', (e, patch) => (from(e) ? set(patch) : null));
   ipcMain.handle('atlas:overlay:toggle', (e, id) => { if (from(e)) toggle(String(id)); return from(e) ? told() : null; });
-  // (both put away: the page is back in its window)
-  ipcMain.handle('atlas:overlay:dock', (e) => { if (!from(e)) return null; return set({ side: { shown: false }, map: { shown: false } }); });
+  // (all of them put away: the page is back in its window)
+  ipcMain.handle('atlas:overlay:dock', (e) => { if (!from(e)) return null; return set({ side: { shown: false }, map: { shown: false }, mini: { shown: false } }); });
   // (the game's window, as the map's server has it: the page passes it on)
   ipcMain.on('atlas:overlay:game', (e, info) => {
     if (from(e) !== 'page' || !info || typeof info !== 'object') return;
@@ -353,21 +291,20 @@ function overlays(d) {
     if (running() !== held) bind();
     arrange();
   });
-  // (what of the page can be clicked just now, in the overlay's window: [{ x, y, w, h }]; and a drag under way)
+  // (what of the page can be clicked just now, in the overlay's window: [{ x, y, w, h, round }]; and a drag under way)
   ipcMain.on('atlas:overlay:rects', (e, list) => {
     if (from(e) !== 'page') return;
-    mouse.rects = Array.isArray(list) ? list.slice(0, 12).filter((r) => r && [r.x, r.y, r.w, r.h].every((v) => typeof v === 'number' && Number.isFinite(v))).map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h })) : [];
+    mouse.rects = Array.isArray(list) ? list.slice(0, 12).filter((r) => r && [r.x, r.y, r.w, r.h].every((v) => typeof v === 'number' && Number.isFinite(v))).map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h, round: r.round === true })) : [];
   });
-  ipcMain.on('atlas:overlay:hold', (e, on) => { const f = from(e); if (f === 'page') mouse.hold = on === true; else if (f === 'mini') mouse.miniHold = on === true; });
-  ipcMain.on('atlas:overlay:through', (e, on) => { if (from(e) === 'mini') mouse.miniThrough = on === true; });
-  ipcMain.on('atlas:overlay:typing', (e, on) => { const f = from(e); if (f === 'page' && hosted) typing('host', on === true); else if (f === 'mini') typing('mini', on === true); });
+  ipcMain.on('atlas:overlay:hold', (e, on) => { if (from(e) === 'page') mouse.hold = on === true; });
+  ipcMain.on('atlas:overlay:typing', (e, on) => { if (from(e) === 'page' && hosted) typing(on === true); });
   // (for the tests: how things stand)
   ipcMain.handle('atlas:overlay:state', (e) => (from(e) && process.env.AZEROTH_ATLAS_TEST ? {
     hosted, game: { ...game }, ground: ground(), keys: { ...keys }, keysHeld: held, settings,
-    host: alive(host) ? { bounds: host.getBounds(), visible: host.isVisible(), onTop: host.isAlwaysOnTop(), focusable: host.isFocusable(), takes: mouse.hostTakes } : null,
-    mini: alive(mini) ? { bounds: mini.getBounds(), visible: mini.isVisible(), onTop: mini.isAlwaysOnTop(), focusable: mini.isFocusable(), takes: mouse.miniTakes, url: mini.webContents.getURL() } : null,
-    mouse: { rects: mouse.rects, hold: mouse.hold, miniThrough: mouse.miniThrough, typing: mouse.typing }, homeHasPage: !hosted,
+    host: alive(host) ? { bounds: host.getBounds(), visible: host.isVisible(), onTop: host.isAlwaysOnTop(), focusable: host.isFocusable(), takes: mouse.takes } : null,
+    mouse: { rects: mouse.rects, hold: mouse.hold, typing: mouse.typing }, homeHasPage: !hosted,
     page: (() => { try { return d.view.getBounds(); } catch { return null; } })(),
+    windows: BaseWindow.getAllWindows().length,
   } : null));
 
   screen.on('display-metrics-changed', () => arrange());
@@ -380,15 +317,14 @@ function overlays(d) {
     /** The application's window has been resized: what it shows while the page is away fills it. */
     fitAway() { if (hosted && away) { const [w, h] = d.home.getContentSize(); away.setBounds({ x: 0, y: 0, width: w, height: h }); } },
     get hosted() { return hosted; },
-    /** The application is going: every window of the overlays with it. */
+    /** The application is going: the overlay's window with it. */
     close() {
       closing = true;
-      clearInterval(watching); clearTimeout(miniGone);
+      clearInterval(watching);
       try { globalShortcut.unregisterAll(); } catch { /* none */ }
-      if (alive(mini)) mini.destroy();
       if (alive(host)) { try { if (hosted) host.contentView.removeChildView(d.view); } catch { /* gone */ } host.destroy(); }
     },
   };
 }
 
-module.exports = { overlays, sound, place, key, DEFAULTS, LEAST, IDS, POINTS, SHAPES };
+module.exports = { overlays, sound, key, DEFAULTS, LEAST, IDS, POINTS, SHAPES };

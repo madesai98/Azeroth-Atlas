@@ -1863,10 +1863,19 @@ with a key of its own, in the game or anywhere:
 | --- | --- | --- |
 | **Sidebar** | the sidebar, and everything in it | Ctrl + Alt + F1 |
 | **Map** | the map, full size | Ctrl + Alt + F2 |
-| **Minimap** | a small map that stays on you | Ctrl + Alt + F3 |
+| **Minimap** | the same map shown small, and on you | Ctrl + Alt + F3 |
+
+**One picture of the map at a time** (asked for on 20 November 2026, a day after the overlays:
+"only one viewport is ever visible at once"). The map and the minimap are the same map, shown
+full size or small - never both. The full map comes first: bring it up while the minimap is
+up, and the minimap is put away for that long; put the full map away, and the minimap is back
+by itself, where it was. (The minimap's key, pressed meanwhile, changes only whether it is to
+come back.) And while anything is over the game, nothing of the map is drawn in the
+application's own window: there is one map, and it is drawn once, where you are looking.
 
 They are set under **Overlay settings** in the sidebar, an overlay at a time (Sidebar, Map,
-Minimap; a dot marks the ones that are up):
+Minimap; a dot marks the ones that are up, a ring a minimap that waits for the full map to be
+put away):
 
 - **Shown over the game**, and its **key**: click the key, then press the one you want - with
   Ctrl, Alt or Shift held, or one of F1 to F24 (a letter or a figure by itself would be taken
@@ -1890,8 +1899,12 @@ Minimap; a dot marks the ones that are up):
   game's window, and is never bigger than it.
 - **Size**, in pixels.
 - For the minimap: its **shape** (round, rounded, square), and its own **Turn with me** and
-  **Auto-zoom**. The map and the sidebar go by the switches under **You**, as the
-  application's window does; the minimap by these two alone. It always follows you.
+  **Auto-zoom**. The map goes by the switches under **You**, in the application's window and
+  over the game alike; the minimap by these two alone - and it always follows you, whether
+  the map does or not. Those switches stand as you left them meanwhile, and when the map is
+  the map again it follows you or not as they say, looking where and from how far it looked
+  before. How far off the minimap looks from (the wheel zooms it, the right button swings it)
+  is kept as the minimap's own.
 
 **Where the game is.** The overlays lie over the game's window as the map's server finds it
 (the same reading that finds the coded strip: the window's inside, without its frame), and
@@ -1908,44 +1921,53 @@ your character runs on. Only when you click into something to type in (the searc
 number) does the overlay take the keyboard, and it gives it back when you leave that - Esc, or
 a click on the game.
 
-**One map, not two.** The sidebar and the map over the game are not a second copy of the map.
-They are the application's own page, taken out of its window and laid over the game's in one
-that is see-through, has no frame and stays on top; there the page shows two panels and
-nothing else. Put both away and it is back in its window as it was, the same page: nothing is
-loaded again, no route worked out twice. (A second copy would be a second map sending the game
-its own route - the game is handed one, and the last to speak would win - and a second set of
-everything on the graphics card the game is using.) While the page is over the game, the
-application's own window says so, with a button that brings it back. "Report a problem" and
-anything that has gone wrong bring it back by themselves: their windows are the page's own.
+**One map, not two.** What is over the game is not a second copy of the map. It is the
+application's own page, taken out of its window and laid over the game's in one that is
+see-through, has no frame and stays on top; there the page shows its sidebar and its map as two
+panels and nothing else - the map full size, or small as the minimap. Put them all away and it
+is back in its window as it was, the same page: nothing is loaded again, no route worked out
+twice. (A second copy would be a second map sending the game its own route - the game is
+handed one, and the last to speak would win - and a second set of everything on the graphics
+card the game is using. For one version, 0.6.8, the minimap was such a copy, a light one in a
+window of its own, and could be up beside the full map: two pictures of one map. From 0.6.9 it
+is the map itself.) While the page is over the game, the application's own window says so and
+draws nothing, with a button that brings it back. "Report a problem" and anything that has
+gone wrong bring it back by themselves: their windows are the page's own.
 
-The minimap is a second copy, and a light one (`/?overlay=mini`): it draws, and does nothing
-else. It sends the server nothing but its own notes, keeps no line open to it, works out
-routes only to draw them, and is told where you are - and of a marker dropped on the map -
-by the page itself. What is set on the map (which layers are drawn, the NPCs, the routes) is
-what the minimap draws, and changes there when it is changed here.
+**What it costs.** One picture, of the size it is shown at: a minimap 260 pixels a side is a
+ninth of the full map as it comes (960 by 640), and a smaller part still of the application's
+window. Over the game the map is never taken for the window in front, so it is drawn thirty
+times a second at most and only when something in it has changed, a frame is never begun before the
+graphics card has handed back the last, and the resolution steps down while the card is slow
+(see "Running beside the game"). With only the sidebar up there is no picture at all: nothing
+is drawn until the map or the minimap is brought up.
 
 **In a fight** is the game's own word for it, which the addon passes on in its strip (version
 31 of the addon; with an older one you are never taken to be fighting). **Moving** is the
 game's own speed for you, a change of place, or a flight path.
 
-How it is made: `app/overlay.cjs` (the windows, the keys, the mouse; what is set is kept in
-`overlays.json` beside what the window remembers), `app/main.cjs` (the page as a view that can
-be lifted out of its window), `viewer/js/overlay.js` (the panels, where they lie, the
-settings), `viewer/js/role.js` (the light copy). Only in the application: a page open in a
-browser cannot draw over anything, and its "Overlay settings" says so.
+How it is made: `app/overlay.cjs` (the window over the game, the keys, the mouse; what is set is
+kept in `overlays.json` beside what the window remembers), `app/main.cjs` (the page as a view
+that can be lifted out of its window), `viewer/js/overlay.js` (the panels, where they lie, the
+map as a minimap and as the map again, the settings). Only in the application: a page open in
+a browser cannot draw over anything, and its "Overlay settings" says so.
 
-Tried on the real page with the application stood in for (59 checks: where a panel lies for
+Tried on the real page with the application stood in for (67 checks: where a panel lies for
 every pair of points and three sizes of window, dragging and resizing, pinned, the three
-opacities and what lets clicks through, the settings, the minimap beside the map) and in the
-application itself, run with nothing of it put on the screen (30 checks: the page lifted over
-and back without starting again or losing its graphics, the windows following the game's, the
-keys given by Windows, the minimap's window, what is set kept across a restart). That a page
-lifted into a see-through window really is see-through was looked at once on this screen with
-a small window, and that the map goes on drawing there - and the minimap in its own - once
-with the overlays put on the screen for a few seconds. **Not tried in the game itself**: the
-overlays over the running game, the keys while the game has the keyboard, the mouse going
-through to it, the keyboard taken for typing and given back. If any of that is not as it should be, "Report a problem" has what is set and how the
-windows stand.
+opacities and what lets clicks through, the settings; the minimap as the map shown small - on
+you while the map's own switches stand as they were, put away by the full map and back after
+it from as near as it had been zoomed, the map's view as it was left, and thirty pictures a
+second where sixty were asked for) and in the application
+itself, run with nothing of it put on the screen (29 checks: the page lifted over and back
+without starting again or losing its graphics, the window following the game's, the keys given
+by Windows, the minimap with no window and no page of its own, what is set kept across a
+restart). The minimap was looked at as the page draws it, in a browser nobody sees. That a
+page lifted into a see-through window really is see-through was looked at once on this screen
+with a small window, and that the map goes on drawing there once with the overlays put on the
+screen for a few seconds - both with 0.6.8, not again since. **Not tried in the game itself**:
+the overlays over the running game, the keys while the game has the keyboard, the mouse going
+through to it, the keyboard taken for typing and given back. If any of that is not as it
+should be, "Report a problem" has what is set and how the windows stand.
 
 ## Live player link
 
@@ -2788,7 +2810,9 @@ from the card, while the page went on sending sixty a second. Frames queued up, 
 fell behind and then froze while the queue drained. The map therefore:
 
 - does not begin a frame until the card has finished the last one;
-- draws at most 30 times a second while it is not the window in front;
+- draws at most 30 times a second while it is not the window in front - and always while it is
+  drawn over the game (see "Overlays"), where the game is what is in front whatever Windows
+  tells the page;
 - drops to 75 %, then 50 % resolution while the card is still slow to hand frames back (the
   line under the layer switches says so), and returns to full resolution when the card has time
   again, or at once when you click on the map;

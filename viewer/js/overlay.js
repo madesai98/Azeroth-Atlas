@@ -1,32 +1,39 @@
 // The overlays, as the page has them: the map drawn over the game.
 //
 // The application can bring three things up over the game's window, each with a key of its own
-// (app/overlay.cjs has the windows, the keys and the mouse; this is the page's side of it):
+// (app/overlay.cjs has the window, the keys and the mouse; this is the page's side of it):
 //
 //   side   the sidebar, and everything in it
 //   map    the map itself, full size
-//   mini   a small map that stays on you: a minimap
+//   mini   the map small, and always on you: a minimap
 //
-// The sidebar and the map over the game are THIS page - the one map there is - taken out of
-// the application's window and laid over the game's in a see-through one the size of the
-// game's window. There the page shows nothing but two panels: its sidebar, and the box its
-// map is in. Each lies where it was put: a point of the game's window (its top left corner,
-// the middle of its right edge... nine to choose from) and a point of the panel itself are
-// held so many pixels apart, so that a panel put in a corner is still in that corner when the
-// game's window is resized. A panel that is not pinned can be dragged (the sidebar by its
-// head, the map by the grip at its top) and resized (the corner at its bottom right), inside
-// the game's window and no further. Each is as clear or as faint as is set for standing still,
-// for moving and for a fight, and can let clicks through while you move or fight. Whatever
-// of the page can be clicked at the moment is told to the application, which lets the mouse
-// through everywhere else.
+// All three are THIS page - the one map there is - taken out of the application's window and
+// laid over the game's in a see-through one the size of the game's window. There the page
+// shows nothing but panels: its sidebar, and the box its map is in.
 //
-// The minimap is a second copy of the page (role.js: MINI) in a small window of its own: only
-// the map, always on you, round or square, turning with you and zooming by the kind of place
-// as is set for it alone - the map itself and the sidebar go by the switches under "You".
+// One picture of the map, never two. The map's box is the full map or the minimap, not both:
+// while the full map is up the minimap is put away, and is back when the full map is put away
+// (if it was up before). So there is one map being drawn, at one size - nothing of it twice -
+// and with either of them up, nothing at all is drawn in the application's own window, which
+// only says that the map is over the game.
+//
+// Each panel lies where it was put: a point of the game's window (its top left corner, the
+// middle of its right edge... nine to choose from) and a point of the panel itself are held so
+// many pixels apart, so that a panel put in a corner is still in that corner when the game's
+// window is resized. A panel that is not pinned can be dragged (the sidebar by its head, the
+// map by the grip at its top, the minimap anywhere) and resized (the corner at its bottom
+// right), inside the game's window and no further. Each is as clear or as faint as is set for
+// standing still, for moving and for a fight, and can let clicks through while you move or
+// fight. Whatever of the page can be clicked at the moment is told to the application, which
+// lets the mouse through everywhere else.
+//
+// As a minimap the map is always on you, round or square, turning with you and zooming by the
+// kind of place as is set for the minimap alone, from as far off as you last had it. The
+// switches under "You" are the full map's (and the application's window's): they stand as they
+// were, and the view as it was comes back with the full map.
 //
 // What is set is the application's to keep (the sidebar's "Overlay settings" shows and changes
 // it); a page in a browser has no application behind it, and says so.
-import { MINI } from './role.js';
 import { note } from './log.js';
 
 const $ = (id) => document.getElementById(id);
@@ -37,13 +44,14 @@ export const POINTS = ['tl', 'tc', 'tr', 'cl', 'cc', 'cr', 'bl', 'bc', 'br'];
 const POINT_WORDS = { tl: 'top left corner', tc: 'top edge, middle', tr: 'top right corner', cl: 'left edge, middle', cc: 'middle', cr: 'right edge, middle', bl: 'bottom left corner', bc: 'bottom edge, middle', br: 'bottom right corner' };
 const SHAPES = [['circle', 'Round'], ['rounded', 'Rounded'], ['square', 'Square']];
 const MOVING_FOR = 700; // ms after the last sign of you moving that you still count as moving
+const RIG_KEY = 'wfmap.minirig'; // how the minimap looks at you: how far off, how steeply, from which side
 const frac = (c) => (c === 'l' || c === 't' ? 0 : c === 'c' ? 0.5 : 1);
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 /**
  * Where an overlay lies inside the game's window: { x, y, w, h } from that window's top left
  * corner. Its anchor (a point of the game's window) and its origin (a point of its own) are
- * o.x and o.y apart. Kept inside the game's window, and no bigger than it. (The application
- * has the same reckoning for the minimap's window: app/overlay.cjs, place.)
+ * o.x and o.y apart. Kept inside the game's window, and no bigger than it.
  */
 export function place(o, gw, gh, least = [1, 1]) {
   const w = Math.round(Math.max(Math.min(least[0], gw), Math.min(o.w, gw))), h = Math.round(Math.max(Math.min(least[1], gh), Math.min(o.h, gh)));
@@ -58,7 +66,15 @@ export function apart(anchor, origin, gw, gh, left, top, w, h) {
 }
 
 /**
- * A key pressed, as the application asks Windows for it ("Control+Alt+1") - or null: not a key
+ * Which of the three are on the screen, by what is set to be shown: the full map and the
+ * minimap are one picture, and the full map comes first.
+ */
+export function upOf(settings) {
+  return { side: !!settings.side.shown, map: !!settings.map.shown, mini: !!settings.mini.shown && !settings.map.shown };
+}
+
+/**
+ * A key pressed, as the application asks Windows for it ("Control+Alt+F2") - or null: not a key
  * an overlay can have (a key that only holds, or a letter or a figure with nothing held, which
  * would be taken from the game and from everything typed anywhere).
  */
@@ -76,7 +92,7 @@ export function keyOf(e) {
   if (!held.some((h) => h !== 'Shift') && !/^F\d+$/.test(k)) return null;
   return [...held, k].join('+');
 }
-/** ...and as it is shown: "Ctrl + Alt + 1". */
+/** ...and as it is shown: "Ctrl + Alt + F2". */
 export const keyWords = (k) => (k ? k.replace(/Control/g, 'Ctrl').replace(/Super/g, 'Win').replace(/^num(\d)$/, 'Numpad $1').replace(/\+num(\d)$/, '+Numpad $1').split('+').join(' + ') : 'none');
 
 const el = (tag, props = {}, ...kids) => {
@@ -88,22 +104,23 @@ const el = (tag, props = {}, ...kids) => {
 
 export function bindOverlays(app) {
   const st = {
-    told: null,         // how things stand, as the application last said: { settings, game, over, keys, least }
+    told: null,         // how things stand, as the application last said: { settings, game, over, keys, keysHeld, least }
     tab: 'side',        // the overlay whose settings the sidebar shows
     asking: null,       // the overlay a key is being pressed for
     movedAt: -1e9, at: null, combat: false, how: 'still',
     drag: null,         // a panel being dragged or resized: { id, kind, rect, ... }
+    form: null,         // what the map's box is just now, over the game: 'map', 'mini' or null (put away)
     gameSaid: '', typing: false, built: false, rects: '',
   };
   const html = document.documentElement, body = document.body;
-  const over = () => !MINI && !!st.told?.over;
-  const size = () => (MINI ? [st.told?.game?.w ?? screen.width, st.told?.game?.h ?? screen.height] : [window.innerWidth, window.innerHeight]);
+  const over = () => !!st.told?.over;
+  const size = () => [window.innerWidth, window.innerHeight];
 
   // ---- how you are doing: still, moving, in a fight --------------------------------------------
   /** The game has said something (player.js): where its window is goes to the application; whether you move or fight is kept. */
   function heard() {
     const s = app.player?.state, p = s?.player;
-    if (api && !MINI && s) {
+    if (api && s) {
       const said = JSON.stringify([s.status, s.window ?? null]);
       if (said !== st.gameSaid) { st.gameSaid = said; api.game({ status: s.status, window: s.window ?? null }); }
     }
@@ -122,39 +139,88 @@ export function bindOverlays(app) {
     if (how !== st.how) { st.how = how; lay(); }
   }
 
-  // ---- the page over the game: two panels ------------------------------------------------------
+  // ---- the map as a minimap, and as the map again -----------------------------------------------
+  // One map, one view. As a minimap it is on you, from where the minimap was last looked at
+  // from, turning and zooming as is set for the minimap; what the map's own view and following
+  // were is kept meanwhile, and put back when it is the map again.
+  let rig = { dist: 140, pitch: -70, heading: 0 };
+  try { const r = JSON.parse(localStorage.getItem(RIG_KEY)); if (r && [r.dist, r.pitch, r.heading].every(Number.isFinite)) rig = { dist: clamp(r.dist, 6, 60000), pitch: clamp(r.pitch, -89.5, -5), heading: ((r.heading % 360) + 360) % 360 }; } catch { /* as it comes */ }
+  let kept = null;
+  const keepRig = () => {
+    const r = app.player?.rig;
+    if (!app.miniForm || !r || (r.dist === rig.dist && r.pitch === rig.pitch && r.heading === rig.heading)) return;
+    rig = { dist: r.dist, pitch: r.pitch, heading: r.heading };
+    try { localStorage.setItem(RIG_KEY, JSON.stringify(rig)); } catch { /* not remembered */ }
+  };
+  function asMini(on) {
+    const P = app.player, cam = app.camera;
+    if (!P || !cam || !!app.miniForm === on) return;
+    if (on) {
+      kept = { rig: P.rig ? { ...P.rig } : null, map: app.scene?.map.id ?? null, pos: [...cam.pos], heading: cam.heading, pitch: cam.pitch };
+      app.miniForm = true;
+      const o = st.told.settings.mini;
+      P.turn = !!o.turn; P.auto = !!o.auto;
+      P.rig = { ...rig };
+      P.setFollow(true);
+    } else {
+      keepRig();
+      app.miniForm = false;
+      const k = kept;
+      kept = null;
+      // (turning and zooming as the switches under "You" have them; following, if that is what was set)
+      if ($('optFollow').checked) { P.rig = k?.rig ? { ...k.rig } : null; app.applyFollow?.(); P.setFollow(true); }
+      else {
+        P.setFollow(false);
+        app.applyFollow?.();
+        // (the view as it was, where that is still the map being looked at)
+        if (k && app.scene?.map.id === k.map) { cam.anim = null; cam.pos = k.pos; cam.heading = k.heading; cam.pitch = k.pitch; cam.rev = (cam.rev ?? 0) + 1; }
+      }
+    }
+    app.dirty = true;
+  }
+
+  // ---- the page over the game: its panels ------------------------------------------------------
   const through = (o) => (st.how === 'still' ? false : !!o.through?.[st.how]) && !st.drag;
   const rectOf = (id) => (st.drag?.id === id ? st.drag.rect : place(st.told.settings[id], ...size(), st.told.least?.[id]));
 
   /** Everything put where and how it is set. */
   function lay() {
-    const t = st.told;
-    const on = over();
+    const t = st.told, on = over();
     html.classList.toggle('ov', on);
     body.classList.toggle('ov', on);
-    // (with the map put away there is nothing to draw: main.js, step)
-    app.noDraw = on && !t.settings.map.shown;
-    if (MINI && t) {
-      const o = t.settings.mini;
-      for (const [k] of SHAPES) body.classList.toggle(`shape-${k}`, o.shape === k);
-      body.classList.toggle('ov-pin-mini', !!o.pinned);
-      html.style.setProperty('--ov-mini-o', String(o.opacity[st.how] / 100));
-      api?.through(through(o));
-      // how it turns and zooms is its own (the map's switches are not asked: main.js, recall)
-      if ($('optTurn').checked !== o.turn || $('optAuto').checked !== o.auto) { $('optTurn').checked = o.turn; $('optAuto').checked = o.auto; app.applyFollow?.(); }
-      if (app.player && !app.player.follow) app.player.setFollow(true);
-      tools();
-    }
-    if (!on) { if (st.rects !== '[]' && api && !MINI) { st.rects = '[]'; api.rects([]); } if (!MINI) app.dirty = true; return; }
+    const up = on ? upOf(t.settings) : { side: false, map: false, mini: false };
+    const form = up.map ? 'map' : up.mini ? 'mini' : null;
+    st.form = form;
+    // (with neither the map nor the minimap up there is nothing to draw: main.js, step - and what is
+    // drawn over the game is drawn at the pace of a map that is not the window in front: mayDraw)
+    app.noDraw = on && !form;
+    app.overGame = on;
+    asMini(form === 'mini');
+    body.classList.toggle('ov-mini', form === 'mini');
+    for (const [k] of SHAPES) body.classList.toggle(`ov-shape-${k}`, form === 'mini' && t.settings.mini.shape === k);
+    if (!on) { if (st.rects !== '[]' && api) { st.rects = '[]'; api.rects([]); } app.dirty = true; return; }
+    if (form === 'mini') { const o = t.settings.mini, P = app.player; if (P && (P.turn !== !!o.turn || P.auto !== !!o.auto)) { P.turn = !!o.turn; P.auto = !!o.auto; } }
     const list = [];
-    for (const id of ['side', 'map']) {
-      const o = t.settings[id];
-      body.classList.toggle(`ov-no${id}`, !o.shown);
-      body.classList.toggle(`ov-pin-${id}`, !!o.pinned);
-      const r = rectOf(id);
-      for (const k of ['x', 'y', 'w', 'h']) html.style.setProperty(`--ov-${id}-${k}`, `${r[k]}px`);
-      html.style.setProperty(`--ov-${id}-o`, String(o.opacity[st.how] / 100));
-      if (o.shown && !through(o)) list.push(r);
+    // the sidebar
+    {
+      const o = t.settings.side;
+      body.classList.toggle('ov-noside', !up.side);
+      body.classList.toggle('ov-pin-side', !!o.pinned);
+      const r = rectOf('side');
+      for (const k of ['x', 'y', 'w', 'h']) html.style.setProperty(`--ov-side-${k}`, `${r[k]}px`);
+      html.style.setProperty('--ov-side-o', String(o.opacity[st.how] / 100));
+      if (up.side && !through(o)) list.push(r);
+    }
+    // the map's box: the full map, or the minimap
+    body.classList.toggle('ov-nomap', !form);
+    if (form) {
+      const o = t.settings[form];
+      body.classList.toggle('ov-pin-map', !!o.pinned);
+      const r = rectOf(form);
+      for (const k of ['x', 'y', 'w', 'h']) html.style.setProperty(`--ov-map-${k}`, `${r[k]}px`);
+      html.style.setProperty('--ov-map-o', String(o.opacity[st.how] / 100));
+      // (round: its corners are the game's to click)
+      if (!through(o)) list.push(form === 'mini' && o.shape === 'circle' ? { ...r, round: true } : r);
     }
     const said = JSON.stringify(list);
     if (said !== st.rects) { st.rects = said; api?.rects(list); }
@@ -164,37 +230,38 @@ export function bindOverlays(app) {
 
   // ---- a panel's handles: to move it by, to pin it, to put it away, to resize it ----------------
   const handles = {};
+  const boxId = () => st.form ?? 'map';
   function tools() {
-    if (handles.made) { for (const id of Object.keys(handles.pin ?? {})) handles.pin[id].classList.toggle('on', !!st.told?.settings[id]?.pinned); return; }
+    const s = st.told?.settings;
+    if (handles.made) { handles.pinSide.classList.toggle('on', !!s?.side.pinned); handles.pinBox.classList.toggle('on', !!s?.[boxId()].pinned); return; }
     handles.made = true;
-    handles.pin = {};
     const make = (id, box, grip) => {
       const pin = el('button', { text: '\u{1F4CC}', title: 'Pin it where it is: it cannot be moved or resized until it is unpinned' });
-      const shut = el('button', { text: '×', title: `Put it away${st.told?.settings[id]?.hotkey ? ` (${keyWords(st.told.settings[id].hotkey)} brings it back)` : ''}` });
-      pin.addEventListener('click', () => api?.set({ [id]: { pinned: !st.told.settings[id].pinned } }));
-      shut.addEventListener('click', () => api?.set({ [id]: { shown: false } }));
-      handles.pin[id] = pin;
-      pin.classList.toggle('on', !!st.told?.settings[id]?.pinned);
+      const shut = el('button', { text: '×', title: 'Put it away (its key brings it back)' });
+      pin.addEventListener('click', () => api?.set({ [id()]: { pinned: !st.told.settings[id()].pinned } }));
+      shut.addEventListener('click', () => api?.set({ [id()]: { shown: false } }));
       const bar = el('div', { class: 'ovtools' }, pin, shut);
       for (const b of [pin, shut]) b.addEventListener('pointerdown', (e) => e.stopPropagation());
       const corner = el('div', { class: 'ovsize', title: 'Drag to resize' });
       box.append(bar, corner);
       if (grip === true) { grip = el('div', { class: 'ovgrip', title: 'Drag to move' }); box.append(grip); }
-      grip.addEventListener('pointerdown', (e) => begin(e, id, 'move'));
-      corner.addEventListener('pointerdown', (e) => begin(e, id, 'size'));
+      grip.addEventListener('pointerdown', (e) => begin(e, id(), 'move'));
+      corner.addEventListener('pointerdown', (e) => begin(e, id(), 'size'));
+      return pin;
     };
-    if (MINI) make('mini', $('mapBox'), true);
-    else { make('side', $('side'), $('sideHead')); make('map', $('mapBox'), true); }
+    handles.pinSide = make(() => 'side', $('side'), $('sideHead'));
+    handles.pinBox = make(boxId, $('mapBox'), true);
+    tools();
   }
 
   /** A drag begins: of the panel itself, or of its corner. */
   function begin(e, id, kind) {
     const t = st.told, o = t?.settings[id];
-    if (e.button !== 0 || !o || o.pinned || (!over() && !MINI) || e.target.closest?.('button, input, select, a')) return;
+    if (e.button !== 0 || !o || o.pinned || !over() || e.target.closest?.('button, input, select, a')) return;
     e.preventDefault(); e.stopPropagation();
     const [gw, gh] = size();
     const rect = place(o, gw, gh, t.least?.[id]);
-    st.drag = { id, kind, rect: { ...rect }, from: rect, sx: e.screenX, sy: e.screenY, gw, gh, least: t.least?.[id] ?? [80, 80], sent: 0 };
+    st.drag = { id, kind, rect: { ...rect }, from: rect, sx: e.screenX, sy: e.screenY, gw, gh, least: t.least?.[id] ?? [80, 80] };
     body.classList.add('ov-dragging');
     api?.hold(true);
     const move = (ev) => {
@@ -208,11 +275,7 @@ export function bindOverlays(app) {
         // (round is round: as wide as it is high)
         if (id === 'mini' && o.shape === 'circle') { const s = Math.min(Math.max(r.w, r.h), d.gw - f.x, d.gh - f.y); r.w = s; r.h = s; }
       }
-      if (MINI) {
-        // (the minimap's window is the application's to move: asked for as it goes, some thirty times a second)
-        const now = performance.now();
-        if (now - d.sent > 30) { d.sent = now; api?.set({ mini: { ...apart(o.anchor, o.origin, d.gw, d.gh, r.x, r.y, r.w, r.h), w: r.w, h: r.h } }); }
-      } else lay();
+      lay();
     };
     const end = () => {
       window.removeEventListener('pointermove', move, true);
@@ -234,50 +297,30 @@ export function bindOverlays(app) {
     window.addEventListener('pointerup', end, true);
     window.addEventListener('pointercancel', end, true);
   }
+  // (as a minimap: a left drag of the map moves the minimap, not the view off you - and a click drops
+  // no marker; the right button swings the view, the wheel zooms)
+  $('mapBox').addEventListener('pointerdown', (e) => {
+    if (!app.miniForm || e.button !== 0 || e.target.closest?.('.ovtools, .ovsize, .ovgrip')) return;
+    e.stopPropagation();
+    begin(e, 'mini', 'move');
+  }, true);
+  $('mapBox').addEventListener('dblclick', (e) => { if (app.miniForm) e.stopPropagation(); }, true);
 
   // ---- the keyboard, while it is over the game --------------------------------------------------
-  // An overlay's window never takes the keyboard from the game - until you click into something
+  // The overlay's window never takes the keyboard from the game - until you click into something
   // to type in. Then it does, and gives it back when you leave that (Esc, or a click elsewhere).
   const typed = (t) => !!t?.closest?.('input:not([type=checkbox]):not([type=color]):not([type=radio]), textarea, select') || !!t?.closest?.('.ovkey.asking');
-  const setTyping = (on) => { if (st.typing !== on && (over() || MINI)) { st.typing = on; api?.typing(on); } else if (!on) st.typing = false; };
-  document.addEventListener('pointerdown', (e) => { if ((over() || MINI) && typed(e.target)) setTyping(true); }, true);
+  const setTyping = (on) => { if (st.typing !== on && over()) { st.typing = on; api?.typing(on); } else if (!on) st.typing = false; };
+  document.addEventListener('pointerdown', (e) => { if (over() && typed(e.target)) setTyping(true); }, true);
   document.addEventListener('focusout', () => { setTimeout(() => { if (st.typing && !typed(document.activeElement) && !st.asking) setTyping(false); }, 120); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && st.typing && !st.asking && typed(document.activeElement)) document.activeElement.blur(); });
   window.addEventListener('blur', () => { if (st.typing) { if (typed(document.activeElement)) document.activeElement.blur(); st.asking = null; setTyping(false); show(); } });
-
-  // ---- the minimap: nothing but the map, always on you ------------------------------------------
-  if (MINI) {
-    html.classList.add('mini');
-    body.classList.add('mini', 'shape-circle');
-    // (a left drag of the minimap moves the minimap, not the view off you; the right button swings the view, the wheel zooms)
-    $('mapBox').addEventListener('pointerdown', (e) => {
-      if (e.button !== 0 || e.target.closest?.('.ovtools, .ovsize, .ovgrip')) return;
-      e.stopPropagation();
-      begin(e, 'mini', 'move');
-    }, true);
-    $('mapBox').addEventListener('dblclick', (e) => e.stopPropagation(), true);
-    // What the map has set is what the minimap draws: when it changes there, it changes here.
-    let again = 0;
-    window.addEventListener('storage', (e) => {
-      let v = null;
-      try { v = JSON.parse(e.newValue); } catch { return; }
-      if (!v || typeof v !== 'object') return;
-      try {
-        if (e.key === 'wfmap.ui') { app.reapply?.(); lay(); }
-        else if (e.key === 'wfmap.npcs') app.npcs?.set(v);
-        else if (e.key === 'wfmap.routes') { for (const k of Object.keys(v)) if (app.trips?.settings?.[k]) Object.assign(app.trips.settings[k], v[k]); app.showRouteList?.(); app.dirty = true; }
-        else if (e.key === 'wfmap.route') { $('optRoute').checked = v.on !== false; app.applyRoute?.(); }
-        // (the spawn zones, the figures: read as the page starts - so it starts again, once the changing is over)
-        else if (e.key === 'wfmap.danger' || e.key === 'wfmap.figure') { clearTimeout(again); again = setTimeout(() => location.reload(), 2500); }
-      } catch (err) { console.warn('what was set on the map could not be taken over by the minimap', err); }
-    });
-  }
 
   // ---- what is set: the sidebar's section -----------------------------------------------------
   const ui = {};
   function build() {
     const box = $('ovBody');
-    if (!box || st.built || MINI) return;
+    if (!box || st.built) return;
     st.built = true;
     ui.note = el('div', { id: 'ovNote', class: 'dim small' });
     if (!api) {
@@ -287,6 +330,7 @@ export function bindOverlays(app) {
     }
     const set = (patch) => api.set({ [st.tab]: patch });
     const row = (...kids) => el('div', { class: 'row' }, ...kids);
+    const cur = () => st.told.settings[st.tab];
     const check = (text, title, get, put) => {
       const input = el('input', { type: 'checkbox' });
       input.addEventListener('change', () => put(input.checked));
@@ -314,17 +358,18 @@ export function bindOverlays(app) {
       }
       return g;
     };
-    const cur = () => st.told.settings[st.tab];
 
     ui.tabs = el('div', { class: 'btnrow tabs' }, ...IDS.map((id) => {
       const b = el('button', { text: NAMES[id] });
       b.addEventListener('click', () => { st.tab = id; st.asking = null; show(); });
-      (ui.shows ??= []).push(() => { b.classList.toggle('chosen', st.tab === id); b.textContent = `${NAMES[id]}${st.told.settings[id].shown ? ' ●' : ''}`; });
+      // (a dot: on the screen; a ring: set to be shown, and put away while the full map is up)
+      (ui.shows ??= []).push(() => { const up = upOf(st.told.settings); b.classList.toggle('chosen', st.tab === id); b.textContent = `${NAMES[id]}${up[id] ? ' ●' : st.told.settings[id].shown ? ' ○' : ''}`; });
       return b;
     }));
     ui.key = el('button', { class: 'ovkey', title: 'The key that brings this overlay up and puts it away, wherever the keyboard is - in the game too. Click, then press the key you want (with Ctrl, Alt or Shift held, or one of F1 to F24). Esc leaves it as it is; Backspace takes the key away.' });
     ui.key.addEventListener('click', () => { st.asking = st.asking ? null : st.tab; if (st.asking) setTyping(true); show(); });
     ui.keyMsg = el('div', { class: 'small warn' });
+    ui.only = el('div', { class: 'small dim' });
     const shown = check('Shown over the game', 'Bring it up over the game’s window, or put it away. Its key does the same.', (o) => o.shown, (v) => set({ shown: v }));
     shown.append(ui.key);
     const pct = (k, text) => row(el('span', { class: 'grow', text }), number((o) => o.opacity[k], (v) => set({ opacity: { [k]: v } }), 5, 100), el('span', { text: '%' }));
@@ -341,8 +386,8 @@ export function bindOverlays(app) {
         check('Auto-zoom', 'The minimap’s distance from you goes by the kind of place you are in (the three distances under You). Its own switch: unticked, it stays as far off as you zoom it with the wheel.', () => st.told.settings.mini.auto, (v) => api.set({ mini: { auto: v } }))));
     const reset = el('button', { text: 'Put it back where it comes', title: 'Where it lies, how big it is and what it is held by, as they were before anything was changed.' });
     reset.addEventListener('click', () => api.set({ [st.tab]: { anchor: null, origin: null, x: null, y: null, w: null, h: null } }));
-    box.append(ui.note, ui.tabs, shown, ui.keyMsg,
-      check('Pinned: it cannot be moved or resized', 'Unpinned, drag it by its head (the sidebar) or the grip at its top (the map, the minimap - which can be dragged anywhere), and resize it by its bottom right corner. It stays inside the game’s window.', (o) => o.pinned, (v) => set({ pinned: v })),
+    box.append(ui.note, ui.tabs, shown, ui.keyMsg, ui.only,
+      check('Pinned: it cannot be moved or resized', 'Unpinned, drag it by its head (the sidebar) or the grip at its top (the map; the minimap can be dragged anywhere), and resize it by its bottom right corner. It stays inside the game’s window.', (o) => o.pinned, (v) => set({ pinned: v })),
       pct('still', 'Opacity standing still'), pct('moving', 'Opacity while moving'), pct('combat', 'Opacity in a fight'),
       row(el('span', { class: 'grow', text: 'Clicks go through it' }), thru('moving', 'moving'), thru('combat', 'in a fight')),
       row(el('span', { class: 'grow', text: 'Held to the game window’s', title: 'The point of the game’s window it is held to (the first grid), and the point of the overlay itself that is held there (the second). Resize the game’s window, and it keeps its distance from that point.' }), grid('anchor', 'The point of the game’s window it is held to'),
@@ -367,8 +412,8 @@ export function bindOverlays(app) {
 
   /** The section, as things stand. */
   function show() {
-    if (MINI || !st.built || !api || !st.told) return;
-    const t = st.told, o = t.settings[st.tab];
+    if (!st.built || !api || !st.told) return;
+    const t = st.told, o = t.settings[st.tab], up = upOf(t.settings);
     for (const f of ui.shows ?? []) f();
     ui.mini.style.display = st.tab === 'mini' ? 'flex' : 'none';
     ui.key.classList.toggle('asking', st.asking === st.tab);
@@ -378,8 +423,12 @@ export function bindOverlays(app) {
     // (a key held for an overlay is taken from every other program: so they are held only while the game runs)
     ui.keyMsg.className = o.hotkey && given === false ? 'small warn' : 'small dim';
     if (!ui.keyMsg.textContent && o.hotkey && t.keysHeld === false) ui.keyMsg.textContent = 'The keys work while the game is running: with no game there, none is taken from other programs.';
-    const up = IDS.filter((id) => t.settings[id].shown).length;
-    $('ovNow').textContent = up ? `${up} up` : '';
+    // (one picture of the map at a time)
+    ui.only.textContent = st.tab === 'mini' && o.shown && t.settings.map.shown ? 'Put away while the full map is up: it is back when that is put away.'
+      : st.tab === 'map' && o.shown && t.settings.mini.shown ? 'The minimap is put away while this is up, and comes back after it.'
+      : st.tab !== 'side' ? 'The map and the minimap are one picture: only one of them is up at a time, the full map first.' : '';
+    const count = IDS.filter((id) => up[id]).length;
+    $('ovNow').textContent = count ? `${count} up` : '';
     ui.note.textContent = t.game.minimized ? 'The game is minimized: the overlays are put away until it is back.'
       : t.game.from === 'game' ? `Drawn over the game’s window (${t.game.w} × ${t.game.h}), and kept inside it.`
       : `No game window is to be seen: an overlay brought up now lies over the main screen (${t.game.w} × ${t.game.h}), to be set up there.`;
@@ -390,8 +439,11 @@ export function bindOverlays(app) {
     if (!t || typeof t !== 'object' || !t.settings) return;
     const was = st.told;
     st.told = t;
-    if (!MINI && !!was?.over !== !!t.over) note('overlay', t.over ? 'the page is over the game: the sidebar and the map as panels' : 'the page is back in its window', { game: t.game, shown: IDS.filter((id) => t.settings[id].shown) });
+    // (over the game the keyboard is the game's: a key held as the page went there is never heard
+    // let go of, and would drift the view from then on)
+    if (!was?.over && t.over) app.camera?.keys.clear();
     lay();
+    if (!!was?.over !== !!t.over || (was && JSON.stringify(upOf(was.settings)) !== JSON.stringify(upOf(t.settings)))) note('overlay', t.over ? `over the game: ${IDS.filter((id) => upOf(t.settings)[id]).map((id) => NAMES[id].toLowerCase()).join(', ') || 'nothing'}` : 'the page is back in its window', { game: t.game, set: IDS.filter((id) => t.settings[id].shown) });
     show();
   }
 
@@ -400,13 +452,15 @@ export function bindOverlays(app) {
     api.on(take);
     api.get().then(take, () => {});
     window.addEventListener('resize', () => { if (over()) lay(); });
-    // (a window of the page's own that only the application's window can show - "Report a problem",
-    // something gone wrong: the page goes back there for it)
+    window.addEventListener('pagehide', keepRig);
     setInterval(() => {
       mood();
+      // (as a minimap it is on you, whatever took the view elsewhere - a place searched for, a map chosen)
+      if (app.miniForm) { const P = app.player; if (P?.live && !P.follow) P.setFollow(true); keepRig(); }
+      // (a window of the page's own that only the application's window can show - "Report a problem",
+      // something gone wrong: the page goes back there for it)
       if (over() && ($('fatal').style.display === 'flex' || $('report').style.display === 'flex')) api.dock();
     }, 250);
   }
-  if (!api && MINI) { body.classList.add('mini'); html.classList.add('mini'); }
   return { heard, state: st, lay, take };
 }
