@@ -22,6 +22,7 @@ import { AtlasDb } from './atlasdb.js';
 import { CombatLog } from './combatlog.js';
 import { Minimap } from './minimap.js';
 import { clockFigures, writeClockAddon } from './boats.js';
+import { writeDropsAddon } from './drops.js';
 import { Auctions } from './auctions.js';
 import { openLogs, logDir, note, noteCrashes } from './log.js';
 import { Reports } from './report.js';
@@ -72,6 +73,15 @@ const handBoats = () => {
     if (r?.written) note('database', 'the boats: where each line stands on the server\'s clock, as the Atlas database has measured it, written for the addon', { lines: r.lines, fresh: r.fresh || undefined });
   } catch (err) { note('database', 'the boats\' figures could not be written for the addon', { error: err.message }); }
 };
+// (and how often each creature drops what quests ask for, which the addon shows in the game's own tooltip - drops.js.
+// Looked at when the map starts, each time the database has been fetched, and when the addon is installed.)
+const handDrops = () => {
+  try {
+    const r = writeDropsAddon(cfg, cfg.dataDir);
+    if (r?.written) note('database', 'drop rates: how often each creature drops what quests ask for, as the Atlas database has it, written for the addon', { creatures: r.creatures, rates: r.rates, itemsNamed: r.named, fresh: r.fresh || undefined });
+    return r;
+  } catch (err) { note('database', 'the drop rates could not be written for the addon', { error: err.message }); return null; }
+};
 // The database fetched anew: the map's creatures, NPCs and quests are built again with it, by
 // itself. A short job - only the maps the database changed anything on are done again - and
 // the one way what the other copies have learned reaches this one's map without anybody having
@@ -91,9 +101,10 @@ const applyDatabase = () => {
     startUpdate(false);
   } catch (err) { note('map', 'the map could not be updated with the Atlas database by itself', { error: err.message }); }
 };
-const atlas = new AtlasDb(cfg, configFile, { hold: () => job.running, after: () => { handBoats(); applyDatabase(); } });
+const atlas = new AtlasDb(cfg, configFile, { hold: () => job.running, after: () => { handBoats(); handDrops(); applyDatabase(); } });
 atlas.start();
 handBoats();
+handDrops();
 setTimeout(applyDatabase, 8000).unref?.();
 // Where you are inside a dungeon, read off the game's minimap: the game hides it from the addon
 // there, and the minimap's picture shows it (see minimap.js). Only while a map page is open and
@@ -357,6 +368,8 @@ const server = http.createServer((req, res) => {
       }
       const st = install ? installAddon(cfg, { gameSeen: ['live', 'minimized', 'nosignal'].includes(tracker.state.status) }) : guides ? teachGuideAddons(cfg) : addonStatus(cfg);
       if (install) mail.use(ADDON);
+      // (the drop rates go in with it: a folder of their own, which the game finds when it next starts)
+      if (install && handDrops()?.fresh) st.restart = true;
       if (install) note('addon', `the addon was installed in the game's folder: version ${st.installedVersion ?? '?'}`, { restartNeeded: st.restart, carriedOver: st.carried ?? undefined, current: st.current, mailboxes: st.mail });
       else if (guides) note('addon', st.taught ? 'guide addons taught about floors' : 'guide addons put back as their makers wrote them', { changed: st.done, asTheyAre: st.guides?.addons });
       else if (changedAddon(st)) note('addon', 'the addon in the game\'s folder', { installed: st.installed, version: st.installedVersion, brought: st.version, current: st.current, mailboxes: st.mail, oldCopy: st.legacy || undefined, guides: st.guides, why: st.reason });

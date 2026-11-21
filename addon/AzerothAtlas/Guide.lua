@@ -1710,6 +1710,12 @@ do
       Check("Keep the game's combat log: the 3D map learns from it", 216, -234,
         function() return shared.FightsKept() end, function(on) shared.SetFights(on) end)
     end)
+    -- how often a creature drops what your quest wants, after that line of the game's own tooltip (Drops.lua)
+    piece(function()
+      if not (shared.DropsOn and shared.SetDrops) then return end
+      Check("In a creature's tooltip, show how often it drops what your quest wants", 14, -256,
+        function() return shared.DropsOn() end, function(on) shared.SetDrops(on) end)
+    end)
 
     -- the routes
     piece(function()

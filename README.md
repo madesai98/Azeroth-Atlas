@@ -1753,6 +1753,66 @@ map, as it always has, and the route goes on to the next step.
 on there are two: the guide's points straight at the spot, the addon's along the route to it.
 Either can be switched off in its own settings.
 
+## Drop rates in a creature's tooltip
+
+With the mouse on a creature, the game's own tooltip lists the quests of yours it has something
+for, and under each what is still wanted of it. Where the Atlas database knows how often that
+creature drops that item, the addon puts the figure after the line:
+
+```
+Bloodscalp Hunter
+Level 35
+Humanoid
+Bloodscalp Ears
+  15/15 Bloodscalp Ear (22%)
+Where's the Key?
+- 0/1 Primitive Key
+```
+
+Where no figure is known the line is left as the game wrote it - as "Primitive Key" above, an
+item new to this game that nobody has a rate for yet. No other addon is needed for it (asked
+for on 20 November 2026, by someone about to uninstall Questie).
+
+**Where the figures come from.** The Atlas database, as this copy last fetched it: every
+creature's record has `drops`, the items quests ask for that it gives, each with a rate in per
+cent (see "The Atlas database": today they are the rates QuestieDB's tables have for the
+original game, 16,600 of them for 4,299 creatures; a rate the database learns from anywhere
+else will show the same way). The game hands an addon nothing while it runs but what the game
+itself loads, so the map writes them as a small addon of their own beside Azeroth Atlas,
+`AzerothAtlas_Drops` (`server/drops.js`: a quarter of a megabyte, a creature a line), as it does
+the boats' times: when the map starts, each time the database has been fetched, and when the
+addon is installed - and only when the figures have changed. The game takes them up when it
+starts or on `/reload`; a folder it has not seen before, only when it starts.
+
+**How a line is told.** The game's tooltip names the item and gives no number for it. So what
+is left of "0/15 Bloodscalp Ear" without its count has to be, to the letter (large or small),
+the name of an item this creature has a rate for: as the map's own item data has the name
+(read out of the game's files, and written beside the rates), or as the game itself gives it
+for the item's number. A line about anything else - a kill to make, a thing to use, an item
+this creature is not known to drop - is the name of no such item, and is not touched. The
+figure is added to the line the game has just written (`addon/AzerothAtlas/Drops.lua`), tick
+or dash and colour as they were; whole above ten in a hundred, finer the rarer the drop
+(`37%`, `5.5%`, `0.92%`).
+
+**What it does not do.**
+
+- It adds nothing the game does not show: a creature the game lists no quest of yours under
+  gets no line from this, whatever the database knows of it.
+- Nothing inside a dungeon or a raid, where the game keeps what a tooltip holds to itself, and
+  nothing with any value the game hands over as "secret": left alone, not worked around.
+- A copy that has never fetched the database (or has it switched off from the start) has no
+  figures to write: the tooltip is as the game writes it, and `/atlas drops` says so.
+
+`/atlas drops` says whether it is on and how many creatures there are figures for; `/atlas
+drops off` (and `on`) switches it, as does **In a creature's tooltip, show how often it drops
+what your quest wants** in the addon's options. It needs version 29 of the addon (**Check for
+updates**), and the game started again once: the addon has a new file, and the figures a new
+folder, and the game only looks for either when it starts.
+
+Tried against a mocked game that fills its tooltip the way this one does, with the figures as
+the map writes them from the real database; not yet seen in the game itself when this was
+written.
+
 ## Live player link
 
 The map can show where you are in real time, along with your party members.

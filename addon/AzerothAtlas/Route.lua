@@ -1298,6 +1298,7 @@ function shared.Command(word, rest)
     say("/atlas boats (when the boats, zeppelins and tram leave, as far as known)   /atlas boats listen (other players' sightings: taken or not)")
     say("/atlas guide (which guide addon the route follows: Guidelime or RestedXP)   /atlas guide auto, /atlas guide guidelime, /atlas guide restedxp (set it)")
     say("Shift-click the world map: a quick waypoint.   Ctrl-click: a pin, and you are asked which level where there are several (/atlas ask: asked, or not; /atlas level asks whenever you like).")
+    say("/atlas drops (how often a creature drops what your quest wants, after that line of its tooltip: /atlas drops off, /atlas drops on)")
   end
 end
 
