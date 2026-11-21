@@ -185,6 +185,34 @@ function readAt(digitAt, width, w) {
   return out;
 }
 
+/** The key of the first piece of who your character is, among the travel facts (the addon's Self.lua). */
+const SELF_KEY = 8;
+/**
+ * Who your character is, read out of the addon's account of it (Self.lua says how it is laid
+ * out): { class, race, skills, reps, spells } - or null where it is cut short or laid out in a
+ * way this does not read.
+ */
+export function readSelf(b) {
+  if (b.length < 3 || b[0] !== 1) return null;
+  const KNOWN = 8388608;
+  const u16 = (o) => b[o] * 256 + b[o + 1], u24 = (o) => b[o] * 65536 + b[o + 1] * 256 + b[o + 2];
+  let p = 3, short = false;
+  // (how many, then each: 255 for "how many" - the game would not say)
+  const list = (width, one) => {
+    if (short || p >= b.length) { short = true; return null; }
+    const n = b[p++];
+    if (n === 255) return null;
+    if (p + n * width > b.length) { short = true; return null; }
+    const out = [];
+    for (let i = 0; i < n; i++, p += width) out.push(one(p));
+    return out;
+  };
+  const skills = list(6, (o) => [u16(o), u16(o + 2), u16(o + 4)]);
+  const reps = list(5, (o) => [u16(o), u24(o + 2) ? u24(o + 2) - KNOWN : null]);
+  const spells = list(3, (o) => [u24(o) % KNOWN, u24(o) >= KNOWN]);
+  return short ? null : { class: b[1], race: b[2], skills, reps, spells };
+}
+
 /**
  * Reassembles what arrives a few bytes per frame through the strip's text channel: party
  * members' names, and the travel facts (speeds, hearthstone, known flight points).
@@ -248,6 +276,33 @@ export class NameCache {
       }
     }
     return { log: this.log?.list ?? null, done: this.done?.ids ?? null, sig: `${this.log?.gen ?? '-'}.${this.log?.list.length ?? '-'}.${this.done?.gen ?? '-'}.${this.done?.ids.length ?? '-'}` };
+  }
+
+  /**
+   * Who your character is, as the addon says (Self.lua; one from before version 33 does not): what
+   * the map holds a quest's requirements against. Null until all of it has arrived.
+   * { gen (the edition: another whenever anything of it changes),
+   *   class, race (the game's numbers for them; 0: not said),
+   *   skills: [[the skill's number, how far you are, how far the rank you have goes]] (0 and 0: you do
+   *     not have it), reps: [[the faction's number, your standing - null: you have not met them]],
+   *   spells: [[the spell's number, whether you know it]] - each of the three for what quests ask
+   *   after (the addon's list: QuestAsks.lua), and null where the game would not say }
+   * It comes in pieces that name the edition they belong to, as your quests do: a new one is
+   * taken only when every piece of it is in.
+   */
+  self() {
+    const first = this.raw.get(`${TEXT_KIND.STATS}:${SELF_KEY}`);
+    if (first && first.length >= 2 && first[1] > 0 && first[0] !== this.who?.gen) {
+      const gen = first[0], n = first[1], pieces = [];
+      for (let chunk = 0; chunk < n; chunk++) {
+        const b = this.raw.get(`${TEXT_KIND.STATS}:${SELF_KEY + chunk}`);
+        if (!b || b[0] !== gen || b[1] !== n) break;
+        pieces.push(b.subarray(2, 36));
+      }
+      const who = pieces.length === n ? readSelf(Buffer.concat(pieces)) : null;
+      if (who) this.who = { gen, ...who };
+    }
+    return this.who ?? null;
   }
 
   /**

@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { decodeStrip, NameCache, MAX_BLOCKS } from './strip.js';
+import { decodeStrip, NameCache, MAX_BLOCKS, TEXT_KIND } from './strip.js';
 import { note, changed } from './log.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -72,7 +72,7 @@ export class PlayerTracker {
     this.state = { status: 'off', reason: null, window: null, capture: null, player: null, party: [], target: null, travel: null, transit: null, talk: null, quests: null, mail: null };
     this.mail = opts.mail ?? null; // the route's way into the game (mail.js), told what the addon says of it
     this.talk = null; // the last NPC you met in the game (or creature you fought), with when this server first heard of it
-    this.quests = { rev: 0, log: null, done: null }; // your quest log and the quests you have done (see /api/player/quests)
+    this.quests = { rev: 0, log: null, done: null, me: null }; // your quest log, the quests you have done, and who your character is (see /api/player/quests)
     this.questSig = '';
     this.sent = '';
     this.reads = { ok: 0, bad: {}, since: Date.now(), first: true }; // how reading the strip has gone, for the notes (log.js)
@@ -233,7 +233,9 @@ export class PlayerTracker {
     if (changed('target', target)) note('game', target ? `the game heads for a waypoint (kind ${target.kind}: 1 guide, 2 journey, 3 pin, 4 quick)` : 'the game has no waypoint', target ?? undefined);
     const h = this.names.heads();
     if (changed('heads', h)) note('game', 'what you could be heading for', h ? { guide: spot(h.guide), waypoint: spot(h.waypoint), corpse: spot(h.corpse), quest: h.quest, tracked: h.tracked } : { said: false });
-    if (changed('quests', this.quests.rev)) note('game', 'your quest log', { rev: this.quests.rev, log: this.quests.log?.map((q) => `${q.id}:${q.state}`) ?? null, done: this.quests.done?.length ?? null });
+    if (changed('quests', this.quests.rev)) note('game', 'your quest log', { rev: this.quests.rev, log: this.quests.log?.map((q) => `${q.id}:${q.state}`) ?? null, done: this.quests.done?.length ?? null,
+      // (who your character is, as far as the addon says: what a quest's requirements are held against)
+      you: this.quests.me ? { class: this.quests.me.class, race: this.quests.me.race, professions: this.quests.me.skills?.filter((s) => s[1] || s[2]).map((s) => `${s[0]}:${s[1]}/${s[2]}`) ?? null, standingsKnown: this.quests.me.reps?.filter((r) => r[1] !== null).length ?? null, spellsKnown: this.quests.me.spells?.filter((s) => s[1]).length ?? null } : null });
     const t = this.names.travel();
     const travel = t ? { hearth: { has: t.hearth.has, avoid: t.hearth.avoid, ready: t.hearth.cooldown === 0, known: t.hearth.cooldown !== null, name: t.hearth.name, spot: t.hearth.x === null ? null : [t.hearth.map, round(t.hearth.x), round(t.hearth.y)] }, flights: t.flights ? t.flights.length : null } : null;
     if (changed('travel', travel)) note('game', 'how you can travel', travel ? { ...travel, run: t.run, swim: t.swim, cooldown: t.hearth.cooldown, flightPoints: t.flights } : { said: false });
@@ -282,10 +284,15 @@ export class PlayerTracker {
     }
     this.lastGood = Date.now();
     this.names.add(d.text);
-    if (d.text && d.text.kind <= 1 && d.text.last) {
-      // a piece of your quests has come in: is a whole new list there now?
-      const q = this.names.quests();
-      if (q.sig !== this.questSig) { this.questSig = q.sig; this.quests = { rev: this.quests.rev + 1, log: q.log, done: q.done }; }
+    if (d.text && d.text.last && (d.text.kind <= 1 || (d.text.kind === TEXT_KIND.STATS && d.text.key >= 8))) {
+      // a piece of your quests has come in, or of who your character is: is a whole new list there now?
+      // (who you are goes with your quests: the two together say which quests are open to you)
+      const q = this.names.quests(), who = this.names.self();
+      const sig = `${q.sig}/${who?.gen ?? '-'}`;
+      if (sig !== this.questSig) {
+        this.questSig = sig;
+        this.quests = { rev: this.quests.rev + 1, log: q.log, done: q.done, me: who ? { class: who.class, race: who.race, skills: who.skills, reps: who.reps, spells: who.spells } : null };
+      }
     }
     const player = {
       map: d.map, mode: d.mode, x: d.x, y: d.y, z: d.z, facing: d.facing, zone: d.zone, level: d.level, inInstance: d.inInstance, dead: d.dead, taxi: d.taxi, indoors: d.indoors, faction: d.faction,

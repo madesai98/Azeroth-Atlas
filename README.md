@@ -459,7 +459,7 @@ hill is in the way.
 
 | Sign | Who |
 | --- | --- |
-| yellow **!** / **?** | starts a quest that is open to you / takes one in (grey **?**: a quest in your log that is not finished yet) |
+| yellow **!** / **?** | starts a quest that is open to you / takes one in (grey **?**: a quest in your log that is not finished yet; grey **!**: gives quests, and none of them is open to you now - shown only with **Available quests only** unticked) |
 | red crossed swords | what the unfinished quests in your log have you kill, use or collect |
 | blue plane, tan house | flight master, innkeeper |
 | green **$**, grey hammers | vendor, repairs |
@@ -487,11 +487,14 @@ is read from the title under their name ("Hunter Trainer", "Trade Supplies", "Bo
 all the data has; the few whose title does not say are under **Other vendors** and **Other
 trainers** rather than guessed at. On top of the kinds:
 
-- **Only quests open to me now** leaves out quests you are not yet high enough for, ones that
-  need another quest first, and ones you have outgrown. (Quests of the other side are always
-  left out, and so, once the game has said, are the ones you have done or already have.) Your
-  side and level are the ones in the Spawn zones section, which come from the game while the
-  live link is connected.
+- **Quest givers** has a switch of its own under it, **Available quests only** (ticked unless
+  you untick it; greyed out while Quest givers is off, having nothing to say then).
+  **Ticked**, a quest giver is shown only if it has a quest you can take now: the gold **!**.
+  **Unticked**, every quest giver is shown, whoever its quests are for - with the gold **!**
+  where one of them is open to you now, and a grey **!** where none is. What makes a quest
+  open to you is under "Your quests" below: not your level alone, but everything the quest
+  data says a quest asks for. Your side and level are the ones in the Spawn zones section,
+  which come from the game while the live link is connected.
 - **Creature levels**, their **rank** (ordinary, elite, rare, rare elite, boss) and their **kind**
   (beast, humanoid, undead, demon, elemental, dragonkin, giant, mechanical, critter) narrow the
   four creature kinds, so "hostile rare beasts of level 30 to 35" is a filter. Rank and level
@@ -521,6 +524,7 @@ glance:
 | Mark | Over |
 | --- | --- |
 | a big gold **!** | whoever gives a quest open to you |
+| a smaller grey **!** | whoever gives quests of which none is open to you now (with **Available quests only** unticked) |
 | a big gold **?** | whoever takes a quest of yours that is finished - grey while it is not |
 | crossed swords, steel with red hilts | what a quest of yours has you kill, use or collect |
 | a blue gem | a quest object (when **Quest objects** is switched on) |
@@ -554,7 +558,8 @@ While the live link is connected the addon tells the map which quests are in you
 each is ready to hand in, and every quest you have ever done. From then on:
 
 - a **quest giver** is someone with a quest you can actually take: not one you have done or
-  have, not one that needs another first (the card says which: "after The Fargodeep Mine");
+  have, not one that needs another first (the card says which: "after The Fargodeep Mine"),
+  not one for another class, or that asks for a profession you do not have (see below);
 - a **turn-in** is where one of the quests in YOUR log goes, bright when it is ready and grey
   until then;
 - **My quest targets** marks what your unfinished quests have you kill, use or collect, and what
@@ -568,6 +573,52 @@ several (packed as the steps between their numbers), and again after you hand on
 only believes a list once every piece of one edition of it has arrived. The line under the
 switches says what it knows ("Your quests, from the game: 14 in your log, 312 done"). Until it
 knows, quests go by side and level as before.
+
+**What makes a quest open to you.** A quest giver in the game shows its "!" only for a quest
+your character can be given at that moment. The map goes by the same things: what QuestieDB
+says each quest asks for, held against what the game says of your character. A quest is open
+when nothing here speaks against it (`viewer/js/questopen.js` is all of it):
+
+| | A quest is closed when |
+| --- | --- |
+| Your side, race and class | it is for the other side, for other races of yours, or for another class ("for warlocks") |
+| Your level | you are under the level it asks for, over the one it stops at, or it is seven levels and more under you (the game no longer shows its "!" then) |
+| Your log | it is in it; a quest that rules it out is; one that only leads to it is, not handed in yet; one that closes it while you carry it is; or it is a part of a quest you do not have |
+| What you have done | this one (one that can be done again counts as done once it has been done once: the game shows no gold "!" for it either); a quest that rules it out; the one it only leads to, or the one after it; the one that ends its being offered. Or not yet: one of the quests before it - or, where it needs several, all of them (for each of those, a quest that rules it out will do as well) |
+| Your professions | you do not have the one it asks for, or not far enough ("needs Cooking 50"); it asks for a rank you have not learned; it is for choosing a specialisation and you have chosen, or for a specialisation that is not yours |
+| Your standing with a faction | too low ("needs more standing with Bloodsail Buccaneers") or, where a quest is for those a faction dislikes, too high |
+| What you have learned | it asks for a spell you do not know - or is offered only to those who do not, and you do |
+| The time of year | it belongs to a festival or a world event (Lunar Festival, Midsummer, the Darkmoon Faire, the war effort...): whether its event is on is not known to the map, so it is taken to be closed |
+
+The card of a quest giver says of each of its quests which of these it is.
+
+**Who your character is** comes from the game, with your quests, from version 33 of the addon
+on (`Self.lua`): your class and race, and - of each profession, faction and spell that some
+quest asks after - how far you are in it, where you stand with them, whether you know it.
+That is some 300 bytes, sent through the strip in pieces like your quests, looked at again
+every half minute and at once when the game says a skill, a standing or what you know has
+changed. Nothing else of you is said: no name, no realm, nothing of what you carry.
+`/atlas me` in the game says what is told. Which professions, factions and spells quests ask
+after is a list the addon carries (`QuestAsks.lua`: 12, 27 and 28 of them, made from QuestieDB
+by `tools/make-quest-asks.mjs`); the game answers such questions one at a time, by number.
+
+**What is not known is not held against a quest.** Without the live link nothing of your log or
+of what you have done is known, and a quest is judged by side and level. With an addon from
+before version 33 your race, class, professions, standings and spells are not known: a quest
+for another class then counts as open to you, as every one did until 0.6.14 (which is why the
+map seemed to show every quest giver: 998 quests are for one class or a few, 416 for some
+races of a side, 224 ask for a profession, 277 for a standing, and 619 can be done again and
+so never went away). The line under the switches says what a quest is held against, and what
+the game has not said.
+
+For scale, of the 2,265 quest givers in the data: a character of level 30 on the Alliance has
+something open at 418 of them by side and level alone, at 251 once the quest log is known
+(empty, with nothing done), and at 224 as a night elf hunter with skinning and leatherworking.
+
+The map data carries what each quest asks for (`quests.json`: the races it is for, the quest
+it is a part of, the profession and how far, the standing, the spell, the quests that lead to
+it and that close it; and what each faction is called). A map built before 0.6.14 does not
+have them: **Update map** turns orange, and builds that one file again.
 
 ### Dungeons
 
@@ -3687,6 +3738,11 @@ The 3D map shows them, the game does not. In the order worth looking:
 - With the continents and Zephras Isle on one picture, NPC markers are those of the map in
   hand; each of the others shows them once it is taken in hand (look at it closely, or choose
   it from the list). The route is drawn on all of them.
+- A quest that is in QuestieDB and not in the game (a duplicate, one that was never finished)
+  is not told apart from one that is: its giver has the gold "!" if nothing else speaks
+  against it. Questie keeps a list of those by hand, which is Questie's own and not part of
+  QuestieDB. And a quest of a festival or a world event is taken to be closed all year: the
+  map does not know when its event is on.
 - The stand-ins for Questie and Auctionator answer what the addons installed here were seen to
   ask (OpenMap, RestedXP, WhatsItFor, OneForAll, TradeSkillMaster, EllesmereUI, Forever Leveling
   Guide). An addon that asks them something else gets no answer. They, the Atlas layer over

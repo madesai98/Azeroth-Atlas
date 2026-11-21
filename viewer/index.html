@@ -132,6 +132,8 @@
   .kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px; }
   .kinds label { display: flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .kinds input { margin: 0; accent-color: var(--accent); flex: none; }
+  .kinds label.under { grid-column: 1 / -1; padding-left: 18px; }
+  .kinds label.off { opacity: 0.45; cursor: default; }
   #npcNote:empty, #npcSeen:empty, #npcFocus:empty, #npcLine:empty, #npcQuests:empty { display: none; }
   #npcFocus { color: var(--accent); }
   /* searching: said under the box, with the way out of it */
@@ -417,7 +419,6 @@
           <div id="npcSearching" class="small" hidden><span id="npcSearchingText" class="grow"></span><button id="npcSearchClear" title="Take the search away (Esc in the box does the same)">Clear</button></div>
           <div id="npcFocus" class="small"></div>
           <div id="npcKinds"></div>
-          <label class="row" title="Leave out quests you are not yet high enough for, ones that need another quest first, and ones you have outgrown. (Quests of the other side, and with the live link the ones you have done or already have, are always left out.)"><input type="checkbox" id="npcMyQuests" checked><span class="grow">Only quests open to me now</span></label>
           <div class="row" title="For creatures (friendly, neutral, hostile, side not recorded): only these levels. Empty = any."><span class="grow">Creature levels</span><input type="number" id="npcMin" min="1" max="63" placeholder="any">–<input type="number" id="npcMax" min="1" max="63" placeholder="any"></div>
           <label class="row" title="Show only the ones whose height is a guess: the ones worth walking up to"><input type="checkbox" id="npcUnsure"><span class="grow">Only heights that are a guess</span></label>
           <label class="row"><input type="checkbox" id="npcNames" checked><span class="grow">Names when close</span></label>

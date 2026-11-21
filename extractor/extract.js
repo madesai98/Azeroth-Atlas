@@ -24,11 +24,11 @@ import { PLACEMENTS_VERSION } from './jobs/placements.js';
 import { MODEL_VERSION, COLLISION_VERSION } from './jobs/model.js';
 import { TREES_VERSION, isTree } from './trees.js';
 import { CREATURES_VERSION, placeCreatures, placeInns, placeDungeons, writeCreatures } from './jobs/creatures.js';
-import { readQuestieDungeons } from './questie-extras.js';
+import { readQuestieDungeons, readQuestieFactions } from './questie-extras.js';
 import { findQuestieDb, readQuestie, questieStamp, questieFrom } from './questie.js';
 import { fetchQuestie } from '../atlasdb/questiedb.js';
 import { ATLAS_VERSION, readAtlas, layOver } from './atlas.js';
-import { NPCS_VERSION, placeNpcs, resolveHeights, writeNpcs, buildQuests } from './jobs/npcs.js';
+import { NPCS_VERSION, QUESTS_VERSION, placeNpcs, resolveHeights, writeNpcs, buildQuests } from './jobs/npcs.js';
 import { fetchReference, readReference } from './reference.js';
 import { NavReader } from './navread.js';
 import { NAV_VERSION, BUILDING_NAV_VERSION } from './jobs/nav.js';
@@ -536,9 +536,9 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
         e.meta.heights.forEach((c, i) => { heights[i] = (heights[i] ?? 0) + c; });
       }
       // the quests (who gives and takes each, what it asks for)
-      const qs = sig(NPCS_VERSION, db.hash, laid, sig(world.data.zones), reference?.sha ?? null);
+      const qs = sig(NPCS_VERSION, QUESTS_VERSION, db.hash, laid, sig(world.data.zones), reference?.sha ?? null);
       if (fresh('quests.json', qs)) stats.reused++;
-      else { writeFileAtomic(abs('quests.json'), JSON.stringify({ source, reference: ref ? reference.name : null, ...buildQuests(db, world.data.zones, ref) })); stats.built++; }
+      else { writeFileAtomic(abs('quests.json'), JSON.stringify({ source, reference: ref ? reference.name : null, ...buildQuests(db, world.data.zones, ref, { factionNames: readQuestieFactions(db.file) }) })); stats.built++; }
       next.artifacts['quests.json'] = { sig: qs };
       npcInfo = { source, reference: reference?.name ?? null, spawns, heights, quests: db.quests.length };
       const pct = (c) => `${((c / Math.max(1, spawns)) * 100).toFixed(0)}%`;

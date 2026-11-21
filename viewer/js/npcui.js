@@ -2,6 +2,7 @@
 // that says what was learned when you talk to someone in the game. (The data and the drawing
 // are in npcs.js.)
 import { KINDS, GROUPS, RANKS, TYPES, HEIGHT_HOW, SEEN, FOUGHT, SHARED, FOUGHT_SHARED, iconStyle, kindIcon, searchText } from './npcs.js';
+import { knownOf } from './questopen.js';
 
 /** An amount of copper as the game writes money: "1g 20s 5c". */
 const coins = (c) => { c = Math.max(0, Math.round(c)); const g = Math.floor(c / 10000), si = Math.floor((c % 10000) / 100), co = c % 100; return [g ? `${g}g` : '', si ? `${si}s` : '', co || (!g && !si) ? `${co}c` : ''].filter(Boolean).join(' '); };
@@ -28,21 +29,31 @@ export function bindNpcs(app, sheet) {
   // One for every kind of NPC, in groups; each group can be switched on or off as a whole.
   const kinds = $('npcKinds');
   const boxes = new Map();
+  // Under "Quest givers": only the ones with a quest you can take now (questopen.js says what
+  // decides that). It belongs to that switch: with quest givers off it has nothing to say, and
+  // is greyed out.
+  const onlyOpen = el('input', { type: 'checkbox', id: 'npcMyQuests' });
+  const onlyOpenRow = el('label', { class: 'under', title: 'Only whoever has a quest you can take now: of your side, race and class, at your level (and not outgrown), with the quests before it done, and with the profession, the standing with a faction or the spell it asks for - everything the quest data says a quest asks, held against what the game says of your character over the live link. A quest of a festival or a world event is left out. Unticked: everybody who gives any quest at all, with a grey ! where there is none for you now.' },
+    onlyOpen, document.createTextNode('Available quests only'));
+  const greyOut = () => { const on = !!s.kinds.quest; onlyOpen.disabled = !on; onlyOpenRow.classList.toggle('off', !on); };
   for (const g of GROUPS) {
     const mine = KINDS.filter((k) => k.group === g.key);
     const all = (on) => (e) => {
       e.preventDefault();
       for (const k of mine) boxes.get(k.key).checked = on;
       layer.set({ kinds: { ...s.kinds, ...Object.fromEntries(mine.map((k) => [k.key, on])) } });
+      greyOut();
     };
     const grid = el('div', { class: 'kinds' });
     for (const k of mine) {
       const box = el('input', { type: 'checkbox', id: `npcKind_${k.key}` });
       box.checked = !!s.kinds[k.key];
-      box.addEventListener('change', () => layer.set({ kinds: { ...s.kinds, [k.key]: box.checked } }));
+      box.addEventListener('change', () => { layer.set({ kinds: { ...s.kinds, [k.key]: box.checked } }); greyOut(); });
       boxes.set(k.key, box);
       grid.append(el('label', { title: k.hint ?? k.label }, box, el('span', { style: iconStyle(sheetUrl, kindIcon(k.key)) }), document.createTextNode(k.label)));
     }
+    // (in a row of its own, set in under "Quest givers": after that switch and the one beside it)
+    if (g.key === 'quests') grid.insertBefore(onlyOpenRow, grid.children[2] ?? null);
     const group = el('div', { class: 'kindGroup' },
       el('div', { class: 'head' }, el('span', { class: 'grow', style: 'flex:1', text: g.label }),
         mine.length > 1 ? el('a', { href: '#', text: 'all', onclick: all(true) }) : null, mine.length > 1 ? el('a', { href: '#', text: 'none', onclick: all(false) }) : null),
@@ -74,6 +85,7 @@ export function bindNpcs(app, sheet) {
   };
   bind('optNpcs', 'enabled', (i) => i.checked);
   bind('npcMyQuests', 'myQuests', (i) => i.checked);
+  greyOut();
   bind('npcUnsure', 'unsure', (i) => i.checked);
   bind('npcNames', 'names', (i) => i.checked);
   bind('npcMarks', 'marks', (i) => i.checked);
@@ -129,7 +141,11 @@ export function bindNpcs(app, sheet) {
     }
     $('npcNote').title = layer.data?.unplaced.length ? `Known to be here, but not where: ${layer.data.unplaced.join(', ')}` : '';
     const me = layer.mine;
-    $('npcQuests').textContent = !layer.data ? '' : me ? `Your quests, from the game: ${me.log.size} in your log${me.done ? `, ${me.done.size.toLocaleString()} done` : ' (the ones done are still arriving)'}.` : 'Which quests you have and have done is not known: it comes from the game (live link, addon version 5). Until then quests go by side and level.';
+    // (what a quest is held against to tell whether it is open to you: said, with what is not known yet)
+    const you = knownOf(layer.you());
+    const held = !me ? '' : me.who ? ` A quest is held against your character as the game says it (${you.who})${you.missing.length ? `; not said by the game: ${you.missing.join(', ')}` : ''}.`
+      : ' Your race, class, professions and standings are not known (the addon says them from version 33 on: Check for updates, then restart the game): until then a quest for another class, or one that asks for a profession, counts as open to you.';
+    $('npcQuests').textContent = !layer.data ? '' : me ? `Your quests, from the game: ${me.log.size} in your log${me.done ? `, ${me.done.size.toLocaleString()} done` : ' (the ones done are still arriving)'}.${held}` : 'Which quests you have and have done is not known: it comes from the game (live link, addon version 5). Until then quests go by side and level.';
     $('npcNote').textContent = text;
     $('npcCount').textContent = s.enabled && layer.data ? layer.count.toLocaleString() : '';
     const f = $('npcFocus');

@@ -17,6 +17,7 @@
 import { GLOBALS_WGSL, targets } from './gpu.js';
 import { unpackContainer, sectionView } from './formats.js';
 import { project } from './math.js';
+import { closedWhy } from './questopen.js';
 
 /** How a height is known, by the source number stored with each spawn point. */
 export const HEIGHT_HOW = [
@@ -84,7 +85,7 @@ export const GROUPS = [
 const kind = (key, label, group, icon, on, hint) => ({ key, label, group, icon, on, hint });
 /** The kinds you can switch on and off, most important first (an NPC that is several shows as the first that is on). */
 export const KINDS = [
-  kind('quest', 'Quest givers', 'quests', 0, true, 'Starts a quest that is open to you'),
+  kind('quest', 'Quest givers', 'quests', 0, true, 'Whoever starts a quest. With "Available quests only": only who has one you can take now. Without: every one of them - a gold ! where there is a quest for you now, a grey one where there is none'),
   kind('turnin', 'Quest turn-ins', 'quests', 1, true, 'Where a quest is handed in. With the live link: the quests in your log, grey until they are finished'),
   kind('target', 'My quest targets', 'quests', 13, true, 'What the unfinished quests in your log have you kill, use or collect (needs the live link)'),
   kind('flight', 'Flight masters', 'services', 2, true),
@@ -125,7 +126,7 @@ export const TYPES = [[1, 'Beast'], [7, 'Humanoid'], [6, 'Undead'], [3, 'Demon']
 const TYPE_NAME = Object.fromEntries(TYPES);
 const ICON_TARGET = 13;  // what a quest has you kill or collect
 const ICON_WAITING = 14; // where a quest in your log is handed in, once it is finished
-const GREY = 7;          // a quest this many levels under you is no longer worth doing
+const ICON_CLOSED = 15;  // gives quests, and none of them is open to you now (shown with "Available quests only" off)
 const RANK = ['', 'elite', 'rare elite', 'boss', 'rare'];
 const SAME = 40;         // yards: the spawn point of an NPC this close to where you met it is the one you met
 const FIGHT_REACH = 30;  // yards: a creature you fought has its spawn point within this far of where you stood
@@ -147,6 +148,7 @@ export const MARKS = {
   0: { model: 'bang', scale: 1, wide: 0.32, color: '#ffd02a' },      // gives a quest open to you
   1: { model: 'hook', scale: 1, wide: 0.6, color: '#ffd02a' },       // takes a quest of yours, finished
   14: { model: 'hook', scale: 0.82, wide: 0.6, color: '#b6bec8' },   // takes a quest of yours not finished yet
+  15: { model: 'bang', scale: 0.82, wide: 0.32, color: '#b6bec8' },  // gives quests, none of them open to you now
   13: { model: 'swords', scale: 0.85, wide: 1.05, color: '#ff4b3a' }, // what a quest of yours has you kill, use or collect
   12: { model: 'gem', scale: 0.58, wide: 0.64, color: '#5aa8ff' },    // a quest object (switched off unless asked for: there are many)
 };
@@ -192,7 +194,7 @@ export class NpcLayer {
     this.quests = null;    // quests.json, once it has been fetched
     this.seen = null;      // every sighting (all maps), once fetched
     this.focus = null;     // a quest id: show only who and what that quest involves
-    this.mine = null;      // your quests as the game reports them: { log: Map<id, state>, done: Set<id> | null } (null = not known)
+    this.mine = null;      // your quests as the game reports them: { log: Map<id, state>, done: Set<id> | null, who: your character (see setQuestState) | null } (null = not known)
     this.rev = 0;          // changes whenever the markers do
     this.count = 0;        // markers the filters leave
     this.inst = new Float32Array(0);
@@ -222,13 +224,26 @@ export class NpcLayer {
 
   /**
    * What the game says about your quests: { log: [{ id, state (0 in progress, 1 ready to hand in,
-   * 2 failed) }] | null, done: [ids] | null }. From then on a quest giver is someone with a quest
-   * you can actually take, and a turn-in is where one of YOUR quests goes.
+   * 2 failed) }] | null, done: [ids] | null, me: who your character is | null }. From then on a
+   * quest giver is someone with a quest you can actually take, and a turn-in is where one of
+   * YOUR quests goes.
+   * me (an addon of version 33 or later says it): { class, race (the game's numbers), skills:
+   * [[skill, how far you are, how far it goes]] | null, reps: [[faction, standing | null]] | null,
+   * spells: [[spell, you know it]] | null } - what a quest's requirements are held against (questopen.js).
    */
   setQuestState(d) {
-    this.mine = d && Array.isArray(d.log) ? { log: new Map(d.log.map((q) => [q.id, q.state])), done: Array.isArray(d.done) ? new Set(d.done) : null } : null;
+    const me = d?.me && typeof d.me === 'object' ? d.me : null;
+    const pairs = (list, value) => (Array.isArray(list) ? new Map(list.filter(Array.isArray).map((r) => [r[0], value(r)])) : null);
+    const who = me ? { class: me.class || 0, race: me.race || 0, skills: pairs(me.skills, (r) => [r[1] || 0, r[2] || 0]), reps: pairs(me.reps, (r) => r[1] ?? null), spells: pairs(me.spells, (r) => r[1] === true) } : null;
+    this.mine = d && Array.isArray(d.log) ? { log: new Map(d.log.map((q) => [q.id, q.state])), done: Array.isArray(d.done) ? new Set(d.done) : null, who } : null;
     this.#classify();
     this.rebuild();
+  }
+
+  /** What is known of your character, for telling which quests are open to you (questopen.js: closedWhy). */
+  you() {
+    const s = this.app.danger.settings, me = this.mine, who = me?.who;
+    return { side: s.faction === 'horde' ? 2 : 1, level: s.level, log: me?.log ?? null, done: me?.done ?? null, race: who?.race ?? 0, class: who?.class ?? 0, skills: who?.skills ?? null, reps: who?.reps ?? null, spells: who?.spells ?? null };
   }
 
   async #shared() {
@@ -363,46 +378,27 @@ export class NpcLayer {
 
   /**
    * Why a quest is not one you can take now ('' if you can): the other side's, one you have or
-   * have done, one that needs another first, or the wrong level for you.
+   * have done, one that needs another first, one for another race or class, one that asks for a
+   * profession or a standing you do not have... - everything the quest data says of it, held
+   * against everything that is known of your character (questopen.js has the whole of it).
    */
   closed(id) {
-    const Q = this.quests?.quests, q = Q?.[id];
-    if (!q) return '';
-    const s = this.app.danger.settings, me = this.mine;
-    if (!(q.side & (s.faction === 'horde' ? 2 : 1))) return 'other side';
-    if (me) {
-      const state = me.log.get(id);
-      if (state !== undefined) return state === 1 ? 'ready to hand in' : state === 2 ? 'failed' : 'in your log';
-      if (me.done) {
-        if (me.done.has(id) && !q.rep) return 'done';
-        if (q.ex?.some((x) => me.done.has(x) || me.log.has(x))) return 'you took another instead';
-      }
-    }
-    if (q.m > s.level) return `from level ${q.m}`;
-    if (q.x && s.level > q.x) return 'outgrown';
-    if (me?.done) {
-      // one of these first / all of these first
-      if (q.pre && !q.pre.some((p) => me.done.has(p))) return `after ${Q[q.pre[0]]?.n ?? 'another quest'}`;
-      const missing = q.pa?.find((p) => !me.done.has(p));
-      if (missing !== undefined) return `after ${Q[missing]?.n ?? 'another quest'}`;
-    }
-    if (q.l > 0 && q.l < s.level - GREY) return 'outgrown';
-    return '';
+    return closedWhy(id, this.quests?.quests, this.you(), { factions: this.quests?.factions });
   }
 
-  /** Is this quest one for you to pick up? With "open to me now" off, anything of your side you have not done or taken. */
+  /** Is this quest open to you now? (With no quest data at all, every quest counts.) */
   wanted(id) {
-    if (!this.quests?.quests?.[id]) return !this.quests; // (no quest data at all: every quest giver counts)
-    const why = this.closed(id);
-    if (why === '') return true;
-    return !this.settings.myQuests && (why.startsWith('from level') || why.startsWith('after') || why === 'outgrown');
+    if (!this.quests?.quests?.[id]) return !this.quests;
+    return this.closed(id) === '';
   }
 
   /** Is this quest one to hand in? 0 no; 1 it is in your log but not finished; 2 yes. */
   #handIn(id) {
     const me = this.mine;
     if (me) { const state = me.log.get(id); return state === undefined ? 0 : state === 1 ? 2 : 1; }
-    return this.wanted(id) ? 2 : 0; // (not known what is in your log: every quest of your side and level)
+    // (not known what is in your log: every quest open to you - or, where every quest giver is shown, every quest of your side)
+    if (this.wanted(id)) return 2;
+    return !this.settings.myQuests && this.closed(id) !== 'other side' ? 2 : 0;
   }
 
   /**
@@ -618,16 +614,25 @@ export class NpcLayer {
     const s = this.app.danger.settings, side = s.faction === 'horde' ? 'h' : 'a';
     this.context = `${s.faction}/${s.level}`;
     d.ready ??= new Uint8Array(d.mask.length);
+    d.open ??= new Uint8Array(d.mask.length); // has a quest that is open to you now
+    // (every quest giver, where "Available quests only" is off)
+    const everyGiver = !this.settings.myQuests;
+    // (each quest is asked about once: many are given by several)
+    const you = this.you(), Q = this.quests?.quests, why = new Map(), names = { factions: this.quests?.factions };
+    const open = (id) => { if (!Q?.[id]) return !this.quests; let w = why.get(id); if (w === undefined) why.set(id, (w = closedWhy(id, Q, you, names))); return w === ''; };
     // what the unfinished quests in your log are after
     const after = new Set();
     if (this.mine) for (const [id, state] of this.mine.log) if (state === 0) this.#targets(id, after);
     d.entries.forEach((e, i) => {
       let m = 0n;
       d.ready[i] = 0;
+      d.open[i] = 0;
       const hostile = !e.k && e[side] === 2 && !unsure(e, side);
       if (e.k) m |= BIT.object;
       if (!hostile) {
-        if (e.qs?.some((id) => this.wanted(id))) m |= BIT.quest;
+        if (e.qs?.length) {
+          if (e.qs.some(open)) { d.open[i] = 1; m |= BIT.quest; } else if (everyGiver) m |= BIT.quest;
+        }
         let hand = 0;
         for (const id of e.qe ?? []) hand = Math.max(hand, this.#handIn(id));
         if (hand) { m |= BIT.turnin; d.ready[i] = hand === 2 ? 1 : 0; }
@@ -665,11 +670,12 @@ export class NpcLayer {
     if (!d) return null;
     if (this.spotsOf?.data === d && this.spotsOf.rev === this.rev) return this.spotsOf;
     const JOB = FLAG.VENDOR | FLAG.FLIGHT | FLAG.TRAINER | FLAG.INN | FLAG.BANK | FLAG.AUCTION | FLAG.STABLE | FLAG.REPAIR;
-    const QUEST = BIT.quest | BIT.turnin | BIT.target;
+    const QUEST = BIT.turnin | BIT.target;
     const bits = new Uint8Array(d.entries.length);
     d.entries.forEach((e, i) => {
       const f = e.k ? 0 : e.f ?? 0;
-      bits[i] = (f & JOB ? 1 : 0) | (f & FLAG.INN ? 2 : 0) | (d.mask[i] & QUEST ? 4 : 0);
+      // (a quest giver only where it has a quest open to you: with every quest giver shown, the others are not your business)
+      bits[i] = (f & JOB ? 1 : 0) | (f & FLAG.INN ? 2 : 0) | (d.mask[i] & QUEST || (d.mask[i] & BIT.quest && d.open?.[i]) ? 4 : 0);
     });
     const at = [];
     for (let i = 0; i < d.n; i++) if (bits[d.owner[i]]) at.push(i);
@@ -711,7 +717,8 @@ export class NpcLayer {
     const icon = new Int8Array(d.entries.length).fill(-1), far = new Uint8Array(d.entries.length);
     const first = (mask) => { if (mask) for (let k = 0; k < KINDS.length; k++) if (mask & (1n << BigInt(k))) return k; return -1; };
     // (a turn-in for a quest of yours that is not finished yet is the grey question mark)
-    const sign = (i, k) => (k < 0 ? 8 : KINDS[k].key === 'turnin' && this.mine && !d.ready[i] ? ICON_WAITING : KINDS[k].icon);
+    // (and a quest giver with nothing for you now, shown because every quest giver is, has the grey "!")
+    const sign = (i, k) => (k < 0 ? 8 : KINDS[k].key === 'turnin' && this.mine && !d.ready[i] ? ICON_WAITING : KINDS[k].key === 'quest' && !d.open?.[i] ? ICON_CLOSED : KINDS[k].icon);
     if (this.focus !== null) {
       for (const [e, ic] of this.#cast(this.focus)) { icon[e] = ic; far[e] = 1; }
     } else {
@@ -1045,7 +1052,7 @@ const ICONS = [
   ['#f5c542', '!', 1], ['#f5c542', '?', 1], ['#63b8ff', '✈', 1], ['#d8a86b', '⌂', 1],
   ['#6fd07c', '$', 1], ['#aeb7c4', '⚒', 1], ['#c59bff', 'T', 1], ['#e3d27a', 'B', 1],
   ['#7fdc8c', '', 0.5], ['#f0d870', '', 0.5], ['#ff6a5a', '', 0.5], ['#aab2be', '', 0.5],
-  ['#6fb3ff', '◆', 0.8], ['#ff5a4d', '⚔', 1], ['#9aa3ae', '?', 1], ['#ffffff', '', 0.5],
+  ['#6fb3ff', '◆', 0.8], ['#ff5a4d', '⚔', 1], ['#9aa3ae', '?', 1], ['#9aa3ae', '!', 1],
 ];
 
 const linear = (c) => { const s = c / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };

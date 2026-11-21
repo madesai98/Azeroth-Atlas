@@ -72,7 +72,8 @@ local L_PARTY, L_TEXT, L_TARGET, L_FIX = 1, 2, 4, 8
 -- the layout for the four above and nothing else - simply does not see it. Said for the map's
 -- overlays over the game, which fade and let clicks through while you fight.)
 local L_COMBAT = 16
--- text kinds: a party member's name; your speeds and hearthstone; where your hearthstone is set
+-- text kinds: a party member's name; your speeds and hearthstone (and, from key 8 of that kind
+-- on, who your character is - class, race, professions, standings: Self.lua); where your hearthstone is set
 -- (its name, and the spot if this addon saw you bind there); the flight points you know;
 -- the NPC whose window you last opened; and, a little at a time, your quests: the ones in your
 -- log (kind 0) and the ones you have done (kind 1, running on into kind 0 from key 8)
@@ -1181,6 +1182,13 @@ local function BuildMessages()
     quests.at = quests.at % #bulk + 1
     list[#list + 1] = bulk[quests.at]
   end
+  -- who your character is, for the 3D map to tell which quests are open to you (Self.lua): two pieces a round, in turn
+  if shared.SelfReport then
+    local ok, reports = shared.Try("self report", shared.SelfReport)
+    if ok and type(reports) == "table" then
+      for _, r in ipairs(reports) do list[#list + 1] = { T_STATS, r[1], r[2] } end
+    end
+  end
   messages = list
 end
 
@@ -1653,6 +1661,11 @@ SlashCmdList["AZEROTHATLAS"] = function(msg)
   if word == "met" then
     -- /atlas met: how many creatures' level, health and side are noted for the 3D map (Met.lua)
     if shared.MetSay then shared.MetSay() else say("this copy of the addon does not note who you meet: update it from the 3D map, and start the game again.") end
+    return
+  end
+  if word == "me" or word == "self" then
+    -- /atlas me: what the 3D map is told of your character, to tell which quests are open to you (Self.lua)
+    if shared.SelfSay then shared.SelfSay() else say("this copy of the addon does not say who your character is: update it from the 3D map, and start the game again.") end
     return
   end
   if word == "learned" then

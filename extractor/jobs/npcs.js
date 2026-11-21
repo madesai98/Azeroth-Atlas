@@ -67,6 +67,8 @@ import { objectNeeds } from '../world.js';
 import { reactions } from './creatures.js';
 
 export const NPCS_VERSION = 12; // (12: someone the databases put in one place, met only elsewhere, is moved to where they were met - and the file says which spots are the databases'; 11: another player's sighting leaves alone whom the reference database places; 10: what a vendor sells, how much a trainer teaches, the game's own quest pins; 8: what the Atlas database adds - atlas.js - and the game's own list of bosses; 9: what an object asks of whoever opens it)
+/** Of quests.json alone: raise when it is to hold something else. (1: what a quest asks of whoever takes it - race, profession, standing, spell, and how it hangs together with other quests.) */
+export const QUESTS_VERSION = 1;
 export const NSEC = { META: 1, SPAWNS: 2, OWNER: 3, SOURCE: 4 };
 // (5 and 6 are the page's own: someone you talked to, a creature you fought - viewer/js/npcs.js)
 export const HEIGHT = { NONE: 0, GUESS: 1, ONLY: 2, REFERENCE: 3, AGREED: 4, SHARED: 7, FOUGHT: 8 };
@@ -512,7 +514,7 @@ function dropChance(tables, id, item, shared, depth = 0) {
  * how many of each thing a quest asks for, how often each creature or chest gives an item a
  * quest wants, and how tough each creature involved is and how soon it is back.
  */
-export function buildQuests(db, zones, ref = null) {
+export function buildQuests(db, zones, ref = null, { factionNames = null } = {}) {
   const zoneByArea = new Map();
   for (const z of [...zones].sort((a, b) => (a.type === 3 ? 0 : 1) - (b.type === 3 ? 0 : 1) || a.order - b.order)) {
     if (z.area && !zoneByArea.has(z.area)) zoneByArea.set(z.area, z);
@@ -530,7 +532,9 @@ export function buildQuests(db, zones, ref = null) {
     return null;
   };
   const npcById = new Map(db.npcs.map((n) => [n.id, n])), objById = new Map(db.objects.map((o) => [o.id, o]));
-  const quests = {}, items = {}, npcs = {}, objects = {}, mobs = {};
+  const quests = {}, items = {}, npcs = {}, objects = {}, mobs = {}, factions = {};
+  // (a faction a quest asks about: what it is called, where QuestieDB names it)
+  const needFaction = (id) => { const name = factionNames?.get(id); if (name) factions[id] = name; };
   const spawnCount = (thing) => { let n = 0; for (const points of thing.spawns?.values() ?? []) n += points.length; return n; };
   // A creature a quest has you kill, or that carries what one wants: its levels, rank and how
   // many places it stands in (QuestieDB), and its health, kind and time to come back (the reference database, where it has it).
@@ -625,6 +629,21 @@ export function buildQuests(db, zones, ref = null) {
     if (q.next) o.nx = q.next;
     if (q.zoneOrSort) o.z = q.zoneOrSort;
     if (q.special & 1) o.rep = 1; // repeatable
+    // What it takes to be offered the quest, beyond side, level and the quests before it (the page
+    // holds them against your character: viewer/js/questopen.js says what each means).
+    if (q.races) o.rc = q.races;                 // the races it is for, as QuestieDB marks them (none: any)
+    if (q.parent) o.par = q.parent;              // the quest it is a part of
+    if (q.requiredSkill) o.sk = q.requiredSkill; // [profession, how far]
+    if (q.requiredRanks?.length) o.rk = q.requiredRanks;
+    if (q.requiredMinRep) { o.rn = q.requiredMinRep; needFaction(o.rn[0]); } // [faction, standing at least]
+    if (q.requiredMaxRep) { o.rx = q.requiredMaxRep; needFaction(o.rx[0]); } // [faction, standing under]
+    if (q.requiredSpell) o.sp = q.requiredSpell; // a spell you must know (below zero: must not)
+    if (q.requiredSpecialization) o.spz = q.requiredSpecialization;
+    if (q.breadcrumbFor) o.bf = q.breadcrumbFor; // the quest this one only leads to
+    if (q.breadcrumbs?.length) o.bc = q.breadcrumbs; // the quests that only lead to this one
+    if (q.availableUntilCompleted) o.au = q.availableUntilCompleted;
+    if (q.availableStartingWith) o.as = q.availableStartingWith;
+    if (q.disabledByQuest) o.dq = q.disabledByQuest;
     if (q.objectives.creatures.length) { o.oc = q.objectives.creatures; o.oc.forEach(needNpc); o.oc.forEach(needMob); }
     if (q.objectives.killCredit.length) { o.ok = q.objectives.killCredit; o.ok.forEach(needNpc); o.ok.forEach(needMob); }
     // how many of each thing it asks for, and what kind of quest it is (the reference database's, for the quests it has)
@@ -671,5 +690,5 @@ export function buildQuests(db, zones, ref = null) {
     }
     quests[q.id] = o;
   }
-  return { quests, items, npcs, objects, mobs };
+  return { quests, items, npcs, objects, mobs, factions };
 }

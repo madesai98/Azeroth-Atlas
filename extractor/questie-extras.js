@@ -102,6 +102,22 @@ const pairsIn = (table) => { let n = 0; for (const row of table.values()) n += r
  * map each dungeon is: Zones/instanceIdToAreaId.lua), hash (of the files: '' where there are none) }.
  * A dungeon whose door depends on your side (the battlegrounds) is left out.
  */
+/**
+ * What each faction is called, as far as QuestieDB names them (src/corrections/enum/factions.lua:
+ * BOOTY_BAY = 21): Map<the faction's number, 'Booty Bay'>. Empty where the file is not there.
+ * (For saying which faction a quest wants you to stand well with: jobs/npcs.js, buildQuests.)
+ */
+export function readQuestieFactions(tocFile) {
+  const out = new Map();
+  if (typeof tocFile !== 'string' || !tocFile) return out;
+  const small = new Set(['of', 'the', 'and', 'in', 'for']);
+  for (const m of uncommented(read(path.join(path.dirname(tocFile), 'src', 'corrections', 'enum', 'factions.lua'))).matchAll(/^[ \t]*([A-Z][A-Z0-9_]*)[ \t]*=[ \t]*(\d+)[ \t]*,/gm)) {
+    const name = m[1].toLowerCase().split('_').filter(Boolean).map((w, i) => (i > 0 && small.has(w) ? w : w[0].toUpperCase() + w.slice(1))).join(' ');
+    if (!out.has(+m[2])) out.set(+m[2], name);
+  }
+  return out;
+}
+
 export function readQuestieDungeons(tocFile) {
   const src = typeof tocFile === 'string' && tocFile ? read(path.join(path.dirname(tocFile), 'support', FLAVOUR, 'Zones', 'dungeons.lua')) : '';
   const list = [];
