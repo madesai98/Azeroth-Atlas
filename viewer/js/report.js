@@ -77,6 +77,8 @@ export function snapshot(app) {
       };
     }),
     boats: part(() => (app.transit ? { known: !!app.transit.timed, clock: app.transit.now?.() ?? null, heard: app.transit.clock !== null, live: lean(app.transit.live ?? null) } : null)),
+    // (the overlays over the game - overlay.js: what is set, where the game's window is, whether the page is over it just now, and how you are taken to be doing)
+    overlays: part(() => { const o = app.overlays?.state; return o ? { asTheApplicationSaid: lean(o.told ?? null), youAre: o.how, clickable: o.rects, inTheApplication: !!window.azerothAtlas?.overlay } : null; }),
     remembered: part(() => { const out = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k?.startsWith('wfmap.')) { try { out[k] = JSON.parse(localStorage.getItem(k)); } catch { out[k] = localStorage.getItem(k); } } } return out; }),
   };
 }

@@ -21,6 +21,8 @@ const lines = [];
 let unsent = [];
 const sizes = new WeakMap(); // line -> the characters it takes up when sent
 const before = new Map();
+// (the minimap over the game - a second, light copy of the page: role.js - notes under one word, "mini", so that its lines can be told from the map's)
+const MINI = typeof location !== 'undefined' && new URLSearchParams(location.search).get('overlay') === 'mini';
 
 /** Anything, as something that can be written down and read: long lists and rows of numbers are counted, not listed. */
 export function lean(v, depth = 0) {
@@ -54,7 +56,7 @@ export function lean(v, depth = 0) {
  * @param data   the particulars, or nothing
  */
 export function note(about, text, data) {
-  const l = { t: Date.now(), k: String(about), m: String(text).slice(0, 4000) };
+  const l = MINI ? { t: Date.now(), k: 'mini', m: `${about}: ${text}`.slice(0, 4000) } : { t: Date.now(), k: String(about), m: String(text).slice(0, 4000) };
   if (data !== undefined) { try { l.d = lean(data); } catch { l.d = '(particulars that could not be written down)'; } }
   // (how much room it takes when sent; particulars too long to send with the rest are cut short,
   // and say so: one line of a hundred kilobytes once held back every line after it - see send)

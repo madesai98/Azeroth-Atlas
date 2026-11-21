@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Azeroth Atlas</title>
+<!-- What the application's own window shows while its page is over the game (app/overlay.cjs). -->
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0e14; color: #e8ecf2; font: 14px/1.5 "Segoe UI", system-ui, sans-serif; }
+  body { display: flex; align-items: center; justify-content: center; text-align: center; }
+  div { max-width: 460px; padding: 24px; }
+  h2 { margin: 0 0 10px; font-size: 18px; }
+  p { margin: 0 0 14px; color: #9aa5b5; }
+  button { font: inherit; color: #e8ecf2; background: #2f6fd0; border: 1px solid #4a86e0; border-radius: 6px; padding: 7px 22px; cursor: pointer; }
+  button:hover { background: #3a7be0; }
+  #keys { font-size: 12px; }
+</style>
+</head>
+<body>
+<div>
+  <h2>The map is over the game</h2>
+  <p>The sidebar and the map are shown as overlays on the game's window just now. It is the same map: nothing was started twice.</p>
+  <button id="back">Bring it back to this window</button>
+  <p id="keys" style="margin-top:14px"></p>
+</div>
+<script>
+  const api = window.azerothAtlas && window.azerothAtlas.overlay;
+  const say = (t) => {
+    if (!t) return;
+    const names = { side: 'the sidebar', map: 'the map', mini: 'the minimap' };
+    const parts = Object.keys(names).filter((id) => t.keys && typeof t.keys[id] === 'string').map((id) => names[id] + ': ' + t.keys[id].replace(/Control/g, 'Ctrl').replace(/\+/g, ' + '));
+    document.getElementById('keys').textContent = (t.game && t.game.minimized ? 'The game is minimized: the overlays are put away until it is back. ' : '') + (parts.length ? 'Keys: ' + parts.join(', ') + '.' : '');
+  };
+  document.getElementById('back').addEventListener('click', () => { if (api) api.dock(); });
+  if (api) { api.get().then(say, () => {}); api.on(say); }
+</script>
+</body>
+</html>

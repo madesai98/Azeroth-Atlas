@@ -28,6 +28,8 @@ import { Cutaway } from './cutaway.js';
 import { worldLayout, Ground, shareSea } from './joined.js';
 import { viewProj, frustumPlanes, DEG, clamp } from './math.js';
 import { note, changed } from './log.js';
+import { MINI, talk, say } from './role.js';
+import { bindOverlays } from './overlay.js';
 
 const $ = (id) => document.getElementById(id);
 const lin = (c) => c.map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); // sRGB -> linear
@@ -55,6 +57,8 @@ const app = {
   open: new Map(), here: null, beside: [], offs: new Map(), layout: new Map(), opening: 0,
 };
 window.__app = app; // handy for debugging from the console
+// (the minimap over the game - a second, light copy of the page: nothing of it but the map, from the first moment)
+if (MINI) { document.documentElement.classList.add('mini'); document.body.classList.add('mini'); }
 const ZERO = [0, 0];
 /** Where a map's origin lies on the picture, in the coordinates of the map in hand: [x, y], or null for a map not shown. */
 app.offsetOf = (id) => app.offs.get(id) ?? null;
@@ -128,12 +132,15 @@ function recall() {
   for (const id of REMEMBERED) {
     const input = $(id), v = saved[id];
     if (!input || v === undefined || v === null) continue;
+    // (the minimap follows you always, and turns and zooms as is set for it alone: overlay.js)
+    if (MINI && ['optFollow', 'optTurn', 'optAuto'].includes(id)) continue;
     if (input.type === 'checkbox') input.checked = !!v;
     else if (Number.isFinite(+v) && v !== '') input.value = v;
   }
 }
 /** Note how the page's switches stand now. */
 function remember() {
+  if (MINI) return; // (the minimap changes nothing of what the map has set: it goes by it)
   const out = {};
   for (const id of REMEMBERED) { const input = $(id); if (input) out[id] = input.type === 'checkbox' ? input.checked : input.value; }
   store.set(UI_KEY, out);
@@ -150,6 +157,7 @@ function readHash() {
 }
 let hashTimer = 0;
 function writeHash() {
+  if (MINI) return; // (where the minimap looks is no place to come back to)
   // (noted a moment after the picture was drawn, and no more often than that - not "once the
   // picture has stood still": with the game running it is drawn several times a second, for as
   // long as you play)
@@ -685,12 +693,14 @@ function step(now, seen) {
     app.trips.update(me, leadKind, want, P?.speeds, app.routesOn !== false);
     app.questUi.frame(P?.speeds);
     if (now - (app.routesShownAt ?? 0) > 1000) { app.routesShownAt = now; showRoutes(); }
-    // the same route, for the game's own map and minimap
-    app.ingame?.update();
+    // the same route, for the game's own map and minimap (the one map sends it: not the minimap over the game)
+    if (!MINI) app.ingame?.update();
+    // (and the marker dropped here, for that minimap to lead to as well)
+    if (!MINI && changed('pinSaid', app.pin?.stamp ?? null)) say({ t: 'pin', pin: pinSaid() });
   }
   if (!seen) {
     // not on show: a picture now and then, and nothing of what only a look at it is for
-    if (app.dirty && now - unseenDrawn >= UNSEEN_DRAW && mayDraw(now)) {
+    if (app.dirty && !app.noDraw && now - unseenDrawn >= UNSEEN_DRAW && mayDraw(now)) {
       unseenDrawn = now;
       app.dirty = false;
       pace.last = now;
@@ -699,7 +709,8 @@ function step(now, seen) {
     }
     return;
   }
-  if (app.dirty && mayDraw(now)) {
+  // (noDraw: over the game with the map put away - only the sidebar is up: overlay.js)
+  if (app.dirty && !app.noDraw && mayDraw(now)) {
     app.dirty = false;
     pace.last = now;
     try { render(); } catch (err) { console.error(err); fatal('Rendering failed', err.message); return; }
@@ -807,6 +818,8 @@ function updateReadout() {
  */
 // p: [x, y, z] on the map `on` (one of the open maps; the one in hand unless said), or null to take the marker away
 /** Is this the same place, to within a step? ({ map, x, y } each) */
+/** The marker dropped here, as the minimap over the game is told of it. */
+const pinSaid = () => (app.pin ? { map: app.pin.map, x: app.pin.x, y: app.pin.y, z: app.pin.z, hit: app.pin.hit, exact: app.pin.exact, name: app.pin.name, quick: app.pin.quick, at: app.pin.at, stamp: app.pin.stamp } : null);
 const samePlace = (a, b) => !!a && !!b && a.map === b.map && Math.hypot(a.x - b.x, a.y - b.y) < 1.5;
 
 /**
@@ -1730,7 +1743,7 @@ async function main() {
   showStatus(st);
   $('checkAll').addEventListener('click', () => checkAll());
   if (st.setup) { showSetup(st); resumeCheck(); return; } // (the game has not been found on this computer: asked for, and nothing else until then)
-  pollStatus();
+  if (!MINI) pollStatus();
   try {
     app.gpu = await initGPU($('gl'), (i, of) => { $('loading').style.display = 'block'; $('loading').textContent = `The graphics card is busy: asking again (${i} of ${of})…`; });
   } catch (err) { console.error(err); const [title, words] = gpuWords(err); if (err?.none) fatal(title, words); else gpuTrouble(title, words, err.message); return; }
@@ -1761,6 +1774,8 @@ async function main() {
   app.onInGame = showInGame;
   // (the server has been started again - after an update of the map, see reload.js: it is sent the route once more)
   window.addEventListener('wfmap-server', () => { app.ingame.sig = ''; });
+  // (the map loading itself again - an update of the page, a map built anew: the minimap over the game, which goes by the same data, does too)
+  if (!MINI) window.addEventListener('pagehide', () => say({ t: 'reload' }));
   app.routeRenderer = new RouteRenderer(app.gpu);
   // a route to each of the other places you could be heading for, each in its own colour
   app.trips = new Trips(app, app.route, app.routeRenderer);
@@ -1778,7 +1793,7 @@ async function main() {
   // every quest there is, to search and look into (the Quests section)
   app.questUi = bindQuests(app);
   // what things cost at the auction house, and how that has moved (the Auction prices section)
-  app.priceUi = bindPrices();
+  app.priceUi = MINI ? null : bindPrices();
   { const told = app.npcs.onChange; app.npcs.onChange = () => { told(); app.questUi.update(); }; }
   app.setPin = setPin;
   app.clearWaypoint = clearWaypoint;
@@ -1852,11 +1867,21 @@ async function main() {
   app.layout = worldLayout(app.world, new Set(app.manifest.maps.filter((m) => m.kind === 'terrain').map((m) => m.id)));
   app.transit.setLayout(app.layout);
   app.player = new PlayerLink(app);
-  app.player.onChange = showPlayer;
+  app.player.onChange = () => { showPlayer(); app.overlays?.heard(); };
   // The following camera, as it was left: it takes hold when your character is first seen.
   app.player.onFollow = () => { showFollow(); remember(); };
-  app.player.follow = $('optFollow').checked;
+  app.player.follow = MINI ? true : $('optFollow').checked;
   applyFollow();
+  // The overlays over the game (overlay.js): what is set for them, in the sidebar; the page as two
+  // panels while the application has it over the game; and, in the minimap, how it turns and zooms.
+  app.applyFollow = applyFollow;
+  app.reapply = () => { recall(); app.applyTools(); app.applyCut(); applyFollow(); };
+  app.overlays = bindOverlays(app);
+  if (MINI) {
+    // (the marker dropped on the map: the minimap leads to it too)
+    talk?.addEventListener('message', (e) => { if (e.data?.t === 'pin') { app.pin = e.data.pin ?? null; app.dirty = true; } });
+    say({ t: 'hello' });
+  } else talk?.addEventListener('message', (e) => { if (e.data?.t === 'hello') { say({ t: 'pin', pin: pinSaid() }); app.player.tell(); } });
   requestAnimationFrame(frame);
   startTicking(); // (the same steps while the page is not on show: see step)
   // Where to begin: where the page's address says, else where you were looking last time.
@@ -1867,12 +1892,15 @@ async function main() {
   try { await openMap(startMap, view); } catch (err) { fatal('Could not open map', err.message); return; }
   try { sessionStorage.removeItem(GPU_TRIES_KEY); } catch { /* nothing to forget */ }
   // Start listening for the game only once a map is up.
-  refreshAddon(false);
-  resumeCheck();
-  // (a guide addon installed or updated since is seen without reloading the page)
-  setInterval(() => { if (!document.hidden) refreshAddon(false); }, 30000);
-  refreshDatabase();
-  setInterval(() => { if (!document.hidden) refreshDatabase(); }, 60000);
+  // (the minimap over the game has no sidebar to show any of this in, and asks the server nothing)
+  if (!MINI) {
+    refreshAddon(false);
+    resumeCheck();
+    // (a guide addon installed or updated since is seen without reloading the page)
+    setInterval(() => { if (!document.hidden) refreshAddon(false); }, 30000);
+    refreshDatabase();
+    setInterval(() => { if (!document.hidden) refreshDatabase(); }, 60000);
+  }
   app.player.connect();
 }
 

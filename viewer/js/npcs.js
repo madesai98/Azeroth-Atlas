@@ -15,6 +15,10 @@
 import { GLOBALS_WGSL, targets } from './gpu.js';
 import { unpackContainer, sectionView } from './formats.js';
 import { project } from './math.js';
+import { MINI } from './role.js';
+
+/** A sighting, handed to the map's server to keep - by the map; the minimap over the game is a second copy of the page, and notes nothing of its own. */
+const posted = (rec) => (MINI ? Promise.resolve() : fetch('/api/npcs/seen', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(rec) }));
 
 /** How a height is known, by the source number stored with each spawn point. */
 export const HEIGHT_HOW = [
@@ -881,7 +885,7 @@ export class NpcLayer {
       const rec = { map: d.map, id: m.id, object: m.object, x: sx, y: sy, z: Math.round(was * 100) / 100, px: m.x, py: m.y, was, sure: true };
       d.src[i] = SEEN;
       (this.seen ??= []).push(rec);
-      fetch('/api/npcs/seen', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(rec) }).catch(() => { /* kept for this session only */ });
+      posted(rec).catch(() => { /* kept for this session only */ });
       this.rebuild();
       this.onNote(`${d.entries[d.owner[i]].n} stands at ${was.toFixed(1)} yd, so that is where you are: the map had you at ${before.toFixed(1)} and has put that right (now ${now.toFixed(1)}).`, { spawn: i, corrected: true });
       return;
@@ -902,7 +906,7 @@ export class NpcLayer {
     const at = this.#overlay(rec);
     if (at < 0) return;
     (this.seen ??= []).push(rec);
-    fetch('/api/npcs/seen', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(rec) }).catch(() => { /* kept for this session only */ });
+    posted(rec).catch(() => { /* kept for this session only */ });
     if (e === undefined) this.#classify();
     this.rebuild();
     const name = d.entries[d.owner[at]].n;
@@ -950,7 +954,7 @@ export class NpcLayer {
     const rec = { map: d.map, id: m.id, object: false, fight: true, x: d.x[pick], y: d.y[pick], z: Math.round(pickZ * 100) / 100, px: m.x, py: m.y, was, sure: true };
     if (this.#overlay(rec) < 0) return;
     (this.seen ??= []).push(rec);
-    fetch('/api/npcs/seen', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(rec) }).catch(() => { /* kept for this session only */ });
+    posted(rec).catch(() => { /* kept for this session only */ });
     this.rebuild();
     const name = d.entries[e].n;
     this.onNote(was === null ? `${name}: you fought them on this level. Height noted, ${pickZ.toFixed(1)} yd.`

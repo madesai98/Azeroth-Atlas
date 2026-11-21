@@ -19,6 +19,7 @@
 --                                                   Shortest Path Forever, 3 a pin on the game's map,
 --                                                   4 a quick waypoint: a Shift-click on that map)
 --   [text]    kind(1) key(2) part(1) 9 bytes(24)    when layout has 2 (names and travel facts, a piece per frame)
+--   (layout has 16: you are in a fight - nothing follows for it)
 --   [fix]     seq(1) 2 x ( kind(1) id(5) h(5) d(4) ) when layout has 8 (your height as the game measured it:
 --                                                   Height.lua. For each of two places - kind 1 a flight
 --                                                   master, 2 a landmark, 0 none, and 4 more where your
@@ -66,6 +67,11 @@ local F_DESCEND = 65536  -- the key that takes you down is held down (in water: 
 local F_SPEED = 131072   -- speed is valid: the game says how fast you are moving
 -- layout
 local L_PARTY, L_TEXT, L_TARGET, L_FIX = 1, 2, 4, 8
+-- (One thing in the layout is not about what follows: you are in a fight. The eighteen flags are
+-- all taken, the layout's second digit has room, and a map from before this - which looks in
+-- the layout for the four above and nothing else - simply does not see it. Said for the map's
+-- overlays over the game, which fade and let clicks through while you fight.)
+local L_COMBAT = 16
 -- text kinds: a party member's name; your speeds and hearthstone; where your hearthstone is set
 -- (its name, and the spot if this addon saw you bind there); the flight points you know;
 -- the NPC whose window you last opened; and, a little at a time, your quests: the ones in your
@@ -1346,6 +1352,8 @@ local function Update(scan)
   -- (your height as the game measured it, for three seconds after each time it has: Height.lua)
   local fix = shared.FixNow and shared.FixNow(GetTime()) or nil
   if fix then layout = layout + L_FIX end
+  -- (in a fight, as the game itself counts it)
+  if UnitAffectingCombat and yes(UnitAffectingCombat("player")) then layout = layout + L_COMBAT end
 
   local p = player
   local n = 0

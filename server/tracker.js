@@ -294,6 +294,8 @@ export class PlayerTracker {
       // (addon version 6) a time in the air that began with a jump; the keys that take you up and down in water; how fast
       // the game says you move; the number of what it calls the place (strip.js, placeNumber)
       jumped: d.jumped, ascend: d.ascend, descend: d.descend, speed: d.speed, place: d.place,
+      // (addon version 31) you are in a fight, as the game counts it - for the overlays over the game
+      combat: d.combat ?? null,
     };
     // Your height as the game measured it (strip.js: the fix). It is drawn in the strip for a
     // few seconds; each one is numbered when it first comes, and kept with where and when that

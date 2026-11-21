@@ -249,7 +249,7 @@ export function bindPrices() {
 
   // -- over the map: the list, or one item
   const panel = el('div', { id: 'prices', class: 'panel', style: 'display:none' });
-  document.body.append(panel);
+  (document.getElementById('mapBox') ?? document.body).append(panel); // (over the map: with it wherever the map is - main.js, overlay.js)
   const title = el('div', { class: 'title grow' });
   const when = el('div', { class: 'dim small' });
   const close = el('button', { class: 'x', title: 'Close (Esc)', text: '×', onclick: () => show(false) });

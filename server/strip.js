@@ -33,6 +33,7 @@ const HEADER = [7, 0, 7, 0, 4, 2, 1];
 const TRAILER = [0, 7];
 const FLAG_DIGITS = { 3: 3, 4: 5, 5: 5, 6: 6 }; // by version
 const LAYOUT_DIGITS = { 3: 1, 4: 1, 5: 1, 6: 2 };
+const LAYOUT_COMBAT = 16; // (in the layout, and nothing follows for it: you are in a fight)
 const BASE = { 3: 41, 4: 41, 5: 41, 6: 51 }, PARTY = 4 * 15, TARGET = 22, TEXT = 28, FIX = 31, CHECK = 4; // BASE excludes the flags
 export const MAX_BLOCKS = HEADER.length + BASE[PROTOCOL] + FLAG_DIGITS[PROTOCOL] + PARTY + TARGET + TEXT + FIX + CHECK + TRAILER.length;
 export const FIX_KIND = { 1: 'taxi', 2: 'poi' };
@@ -147,6 +148,9 @@ function readAt(digitAt, width, w) {
     z: flags & FLAGS.HEIGHT ? rz / 8 - 8192 : null, // null when the game does not report a height
     facing: flags & FLAGS.FACING ? (rf / 4096) * 2 * Math.PI : null, // radians, 0 = north, counter-clockwise
     inInstance: !!(flags & FLAGS.INSTANCE), dead: !!(flags & FLAGS.DEAD), taxi: !!(flags & FLAGS.TAXI), indoors: !!(flags & FLAGS.INDOORS),
+    // (you are in a fight: said in the layout, whose second digit has room - the flags have none. An
+    // addon from before version 31 never says so; one from before the second digit cannot: null)
+    combat: LAYOUT_DIGITS[version] === 2 ? !!(layout & LAYOUT_COMBAT) : null,
     faction: flags & FLAGS.HORDE ? 'horde' : 'alliance',
     party: [], target: null, text: null, fix: null,
   };

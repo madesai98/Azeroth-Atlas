@@ -21,7 +21,9 @@
   body.side-shut { --side-w: 0px; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #0c0f14; color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
-  canvas { position: absolute; top: 0; left: var(--side-w); width: calc(100% - var(--side-w)); height: 100%; display: block; }
+  /* the map, and what lies over it: one box, beside the sidebar - or, over the game, a panel of its own (overlay.js) */
+  #mapBox { position: absolute; left: var(--side-w); top: 0; right: 0; bottom: 0; overflow: hidden; }
+  canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
   #gl { outline: none; cursor: grab; touch-action: none; }
   #gl.dragging { cursor: grabbing; }
   #labels { pointer-events: none; }
@@ -146,7 +148,7 @@
 
   /* ---- over the map: what the pointer is on, the way back to you, and passing notes ---- */
   .panel { position: absolute; background: rgba(16, 19, 26, 0.86); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; backdrop-filter: blur(6px); }
-  #readout { left: calc(var(--side-w) + 10px); bottom: 10px; min-width: 200px; max-width: calc(100vw - var(--side-w) - 90px); font-variant-numeric: tabular-nums; pointer-events: none; display: none; }
+  #readout { left: 10px; bottom: 10px; min-width: 200px; max-width: calc(100% - 90px); font-variant-numeric: tabular-nums; pointer-events: none; display: none; }
   #readout.on { display: block; }
   #place { font-weight: 600; color: var(--accent); }
   #npcLine { color: #cfe6ff; }
@@ -154,7 +156,7 @@
   #btnFind svg { width: 24px; height: 24px; }
   #btnFind:not(:disabled) { border-color: rgba(53, 200, 255, 0.55); color: #35c8ff; }
   #btnFind.following:not(:disabled) { background: rgba(53, 200, 255, 0.2); }
-  #help { left: calc(var(--side-w) + (100% - var(--side-w)) / 2); top: 50%; transform: translate(-50%, -50%); width: min(430px, calc(100vw - var(--side-w) - 24px)); display: none; padding: 14px 16px; z-index: 7; }
+  #help { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(430px, calc(100% - 24px)); display: none; padding: 14px 16px; z-index: 7; }
   #help h3 { margin: 0 0 8px; font-size: 14px; }
   #help table { border-collapse: collapse; width: 100%; }
   #help td { padding: 3px 0; vertical-align: top; }
@@ -162,13 +164,13 @@
   #fatal { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(8, 10, 14, 0.92); padding: 24px; text-align: center; z-index: 9; }
   #fatal div { max-width: 520px; }
   #fatal h2 { margin: 0 0 10px; }
-  #loading, #flyhint { left: calc(var(--side-w) + (100% - var(--side-w)) / 2); transform: translateX(-50%); padding: 4px 12px; pointer-events: none; display: none; }
+  #loading, #flyhint { left: 50%; transform: translateX(-50%); padding: 4px 12px; pointer-events: none; display: none; }
   #loading { bottom: 64px; }
   #flyhint { top: 14px; }
-  #crosshair { position: absolute; left: calc(var(--side-w) + (100% - var(--side-w)) / 2); top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 1.5px solid rgba(255,255,255,.8); border-radius: 50%; pointer-events: none; display: none; }
+  #crosshair { position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 1.5px solid rgba(255,255,255,.8); border-radius: 50%; pointer-events: none; display: none; }
 
   /* ---- auction prices: the list, or one item with its charts, over the map ---- */
-  #prices { left: calc(var(--side-w) + 10px); top: 10px; bottom: 10px; width: min(880px, calc(100vw - var(--side-w) - 20px)); flex-direction: column; gap: 8px; padding: 10px 12px; z-index: 6; background: rgba(16, 19, 26, 0.97); }
+  #prices { left: 10px; top: 10px; bottom: 10px; width: min(880px, calc(100% - 20px)); flex-direction: column; gap: 8px; padding: 10px 12px; z-index: 6; background: rgba(16, 19, 26, 0.97); }
   #prices .phead { display: flex; align-items: flex-start; gap: 8px; flex: none; }
   #prices .phead .grow { flex: 1; }
   #prices button.x { width: 28px; height: 28px; padding: 0; font-size: 17px; line-height: 1; flex: none; }
@@ -247,12 +249,100 @@
   #reportDoneLeft { white-space: pre-line; }
   #btnReport { color: var(--dim); }
   @media (max-width: 700px) { :root { --side-w: 0px; } #side { box-shadow: 8px 0 30px rgba(0,0,0,.5); } }
+
+  /* ---- the overlays: what is set for them (the sidebar's section; overlay.js) ---- */
+  #ovBody .tabs button.chosen, #ovBody .shapes button.chosen { border-color: var(--accent); color: var(--accent); background: rgba(243, 201, 105, 0.12); }
+  #ovBody .ovkey { width: auto; min-width: 118px; flex: none; padding: 2px 8px; }
+  #ovBody .ovkey.asking { border-color: var(--accent); color: var(--accent); }
+  #ovBody .btnrow label.row { flex: 1; }
+  #ovBody .grid9 { display: inline-grid; grid-template-columns: repeat(3, 15px); gap: 2px; flex: none; }
+  #ovBody .grid9 button { width: 15px; height: 15px; padding: 0; border-radius: 3px; }
+  #ovBody .grid9 button.chosen { background: var(--accent); border-color: var(--accent); }
+  #ovBody input[type=number] { width: 58px; }
+  #ovBody .pct input[type=number] { width: 46px; }
+  #ovNote:empty { display: none; }
+
+  /* ---- over the game: the sidebar and the map as two panels of a see-through page (overlay.js) ---- */
+  html.ov, html.ov body { background: transparent; }
+  body.ov #sideToggle, body.ov #fatal, body.ov #report { display: none !important; }
+  body.ov #side { left: var(--ov-side-x, 0px); top: var(--ov-side-y, 0px); bottom: auto; width: var(--ov-side-w, 344px); height: var(--ov-side-h, 600px); transform: none; transition: opacity 0.25s; opacity: var(--ov-side-o, 1); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  body.ov #mapBox { left: var(--ov-map-x, 0px); top: var(--ov-map-y, 0px); right: auto; bottom: auto; width: var(--ov-map-w, 800px); height: var(--ov-map-h, 600px); transition: opacity 0.25s; opacity: var(--ov-map-o, 1); border: 1px solid var(--line); border-radius: 9px; background: #0c0f14; }
+  body.ov.ov-noside #side, body.ov.ov-nomap #mapBox { display: none; }
+  body.ov #sideHead { padding-left: 12px; padding-right: 64px; }
+  body.ov:not(.ov-pin-side) #sideHead { cursor: move; }
+  /* a panel's own handles: to move it by, to pin it, to put it away, to resize it */
+  .ovtools { position: absolute; top: 5px; right: 6px; display: none; gap: 3px; z-index: 8; }
+  body.ov .ovtools, body.mini .ovtools { display: flex; }
+  .ovtools button { width: 22px; height: 22px; padding: 0; line-height: 1; font-size: 13px; border-radius: 5px; background: rgba(16, 19, 26, 0.86); }
+  .ovtools button.on { border-color: var(--accent); color: var(--accent); }
+  .ovgrip { position: absolute; left: 50%; top: 4px; width: 90px; height: 16px; margin-left: -45px; border-radius: 8px; background: rgba(16, 19, 26, 0.86); border: 1px solid var(--line); cursor: move; display: none; z-index: 8; touch-action: none; }
+  .ovgrip::after { content: ''; position: absolute; left: 30px; right: 30px; top: 6px; height: 2px; border-radius: 1px; background: var(--dim); }
+  .ovsize { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; display: none; z-index: 8; touch-action: none; background: linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.45) 50%, rgba(255, 255, 255, 0.45) 60%, transparent 60%, transparent 72%, rgba(255, 255, 255, 0.45) 72%, rgba(255, 255, 255, 0.45) 82%, transparent 82%); }
+  #mapBox .ovtools, #mapBox .ovgrip, #mapBox .ovsize { opacity: 0; transition: opacity 0.15s; }
+  #mapBox:hover .ovtools, #mapBox:hover .ovgrip, #mapBox:hover .ovsize, body.ov-dragging .ovtools, body.ov-dragging .ovgrip, body.ov-dragging .ovsize { opacity: 1; }
+  body.ov:not(.ov-pin-map) #mapBox .ovgrip, body.ov:not(.ov-pin-map) #mapBox .ovsize, body.ov:not(.ov-pin-side) #side .ovsize { display: block; }
+  body.mini:not(.ov-pin-mini) #mapBox .ovgrip, body.mini:not(.ov-pin-mini) #mapBox .ovsize { display: block; }
+
+  /* ---- the minimap: a second, light copy of the page, nothing of it but the map (role.js, overlay.js) ---- */
+  html.mini, html.mini body { background: transparent; }
+  body.mini #side, body.mini #sideToggle, body.mini #readout, body.mini #btnFind, body.mini #help, body.mini #flyhint, body.mini #crosshair, body.mini #report, body.mini #prices { display: none !important; }
+  body.mini #mapBox { left: 0; top: 0; right: 0; bottom: 0; transition: opacity 0.25s; opacity: var(--ov-mini-o, 1); border: 2px solid rgba(255, 255, 255, 0.4); background: #0c0f14; }
+  body.mini.shape-circle #mapBox { border-radius: 50%; }
+  body.mini.shape-rounded #mapBox { border-radius: 16%; }
+  body.mini #loading { bottom: 42%; font-size: 11px; padding: 2px 8px; }
+  body.mini #fatal { padding: 8px; font-size: 11px; border-radius: inherit; }
+  body.mini #fatal h2 { font-size: 12px; margin: 0 0 4px; }
+  body.mini #fatal button { display: none !important; }
+  body.mini .ovtools { top: 24px; right: 50%; transform: translateX(50%); }
+  body.mini.shape-circle .ovgrip { top: 9%; }
+  body.mini.shape-circle .ovtools { top: calc(9% + 20px); }
+  body.mini.shape-circle .ovsize { right: 12%; bottom: 12%; }
 </style>
 </head>
 <body>
+<div id="mapBox">
 <canvas id="gl" tabindex="0"></canvas>
 <canvas id="labels"></canvas>
 <div id="crosshair"></div>
+<!-- what the pointer is on: there only while the pointer is on the map and on something -->
+<div id="readout" class="panel">
+  <div id="place">&nbsp;</div>
+  <div id="coords" class="dim">&nbsp;</div>
+  <div id="worldpos" class="dim">&nbsp;</div>
+  <div id="zoneInfo"></div>
+  <div id="npcLine"></div>
+</div>
+
+<button id="btnFind" disabled title="Find me: fly to your character, and follow them" aria-label="Find me">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/><path d="M12 1.5v4M12 18.5v4M1.5 12h4M18.5 12h4"/></svg>
+</button>
+
+<div id="loading" class="panel dim">Loading terrain…</div>
+<div id="flyhint" class="panel">Flying — mouse to look, WASD to move, wheel = speed, Esc to stop</div>
+
+<div id="help" class="panel">
+  <h3>Controls</h3>
+  <table>
+    <tr><td>Drag</td><td>Move the map</td></tr>
+    <tr><td>Right-drag / Alt-drag</td><td>Rotate and tilt around the point under the cursor; while moving with the keys it steers instead</td></tr>
+    <tr><td>Wheel</td><td>Zoom toward the cursor</td></tr>
+    <tr><td>Double-click</td><td>Zoom in on a point</td></tr>
+    <tr><td>Click</td><td>Drop a marker on what is under the cursor (Esc clears it); where there are several levels at that spot, you are asked which</td></tr>
+    <tr><td>Shift-click</td><td>Drop a quick marker: no question, the level nearest your own height</td></tr>
+    <tr><td>W A S D / arrows</td><td>Move &nbsp;·&nbsp; Shift = faster</td></tr>
+    <tr><td>Q / E</td><td>Turn left / right</td></tr>
+    <tr><td>R / F &nbsp;(Space / C)</td><td>Up / down</td></tr>
+    <tr><td>G</td><td>Free-look flying (mouse look, wheel changes speed)</td></tr>
+    <tr><td>N &nbsp;/&nbsp; T</td><td>Face north &nbsp;/&nbsp; top-down view</td></tr>
+    <tr><td>X</td><td>Cutaway: open up whatever hides your character (a building or a hill in the way, the ceiling of the room they are in, the ground over a city under it, the tree tops around them)</td></tr>
+    <tr><td>B</td><td>Fold the sidebar away, or bring it back</td></tr>
+    <tr><td>Following</td><td>Right-drag and Q / E look around your character, the wheel zooms on them. Dragging the map or moving with the keys stops following; the round button at the bottom right starts it again</td></tr>
+    <tr><td>/</td><td>Search</td></tr>
+  </table>
+  <div class="btnrow" style="margin-top:10px"><button id="helpClose">Close</button></div>
+</div>
+</div>
+
 
 <button id="sideToggle" title="Fold the sidebar away, or bring it back (B)">☰</button>
 <aside id="side">
@@ -371,6 +461,11 @@
       <div class="secb" id="priceBody"></div>
     </details>
 
+    <details class="sec" data-sec="overlays">
+      <summary><span class="grow">Overlay settings</span><span id="ovNow" class="dim small"></span></summary>
+      <div class="secb" id="ovBody"></div>
+    </details>
+
     <details class="sec" data-sec="layers">
       <summary><span class="grow">Layers &amp; view</span></summary>
       <div class="secb">
@@ -401,44 +496,6 @@
     <label id="dbRow" class="row small" style="display:none" title="Azeroth Atlas keeps one database of the game world that every copy of it adds to. Ticked, this copy sends what it learns: what the game's server has told your game about the creatures, objects and quests you have met (read from the game's own cache); where NPCs stand when you talk to them; what your fights and the game's own windows show of creatures, vendors, trainers and quests; when the boats leave; and, of the insides of dungeons, the doors, lifts and portals the map did not know of and how far off its reading of the minimap is. Facts about the game world only: nothing about your account, your characters, your realm or your computer, and not where you were or when (but for the moment a boat left). Unticked, this copy sends nothing and still gets what the others have found"><input type="checkbox" id="optShare"><span class="grow">Share what this copy learns</span><span id="dbNow" class="dim small"></span></label>
   </div>
 </aside>
-
-<!-- what the pointer is on: there only while the pointer is on the map and on something -->
-<div id="readout" class="panel">
-  <div id="place">&nbsp;</div>
-  <div id="coords" class="dim">&nbsp;</div>
-  <div id="worldpos" class="dim">&nbsp;</div>
-  <div id="zoneInfo"></div>
-  <div id="npcLine"></div>
-</div>
-
-<button id="btnFind" disabled title="Find me: fly to your character, and follow them" aria-label="Find me">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/><path d="M12 1.5v4M12 18.5v4M1.5 12h4M18.5 12h4"/></svg>
-</button>
-
-<div id="loading" class="panel dim">Loading terrain…</div>
-<div id="flyhint" class="panel">Flying — mouse to look, WASD to move, wheel = speed, Esc to stop</div>
-
-<div id="help" class="panel">
-  <h3>Controls</h3>
-  <table>
-    <tr><td>Drag</td><td>Move the map</td></tr>
-    <tr><td>Right-drag / Alt-drag</td><td>Rotate and tilt around the point under the cursor; while moving with the keys it steers instead</td></tr>
-    <tr><td>Wheel</td><td>Zoom toward the cursor</td></tr>
-    <tr><td>Double-click</td><td>Zoom in on a point</td></tr>
-    <tr><td>Click</td><td>Drop a marker on what is under the cursor (Esc clears it); where there are several levels at that spot, you are asked which</td></tr>
-    <tr><td>Shift-click</td><td>Drop a quick marker: no question, the level nearest your own height</td></tr>
-    <tr><td>W A S D / arrows</td><td>Move &nbsp;·&nbsp; Shift = faster</td></tr>
-    <tr><td>Q / E</td><td>Turn left / right</td></tr>
-    <tr><td>R / F &nbsp;(Space / C)</td><td>Up / down</td></tr>
-    <tr><td>G</td><td>Free-look flying (mouse look, wheel changes speed)</td></tr>
-    <tr><td>N &nbsp;/&nbsp; T</td><td>Face north &nbsp;/&nbsp; top-down view</td></tr>
-    <tr><td>X</td><td>Cutaway: open up whatever hides your character (a building or a hill in the way, the ceiling of the room they are in, the ground over a city under it, the tree tops around them)</td></tr>
-    <tr><td>B</td><td>Fold the sidebar away, or bring it back</td></tr>
-    <tr><td>Following</td><td>Right-drag and Q / E look around your character, the wheel zooms on them. Dragging the map or moving with the keys stops following; the round button at the bottom right starts it again</td></tr>
-    <tr><td>/</td><td>Search</td></tr>
-  </table>
-  <div class="btnrow" style="margin-top:10px"><button id="helpClose">Close</button></div>
-</div>
 
 <div id="fatal"><div><h2 id="fatalTitle">Something went wrong</h2><p id="fatalMsg" class="dim"></p><p id="fatalMore" class="dim small"></p><button id="fatalAgain" class="primary" style="display:none">Try again</button><button id="fatalReport">Report a problem</button></div></div>
 

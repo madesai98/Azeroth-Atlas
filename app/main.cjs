@@ -13,7 +13,9 @@
 //   - closed, it takes the server with it;
 //   - it gives the page a "Save as" window of its own for "Report a problem" (preload.cjs), and
 //     notes what only it can know: which graphics card and screens there are, a page or a
-//     helper of its own that has crashed (written beside the server's notes: server/log.js).
+//     helper of its own that has crashed (written beside the server's notes: server/log.js);
+//   - it can put the page over the game, as overlays, and bring it back (overlay.cjs). For
+//     that the page is not the window's own but a view laid into it, which can be lifted out.
 //
 // As an installed application (packaged), what is yours is kept outside the application's own
 // folder, in %LOCALAPPDATA%\Azeroth Atlas: config.json, the map data (unless config.json names
@@ -21,14 +23,16 @@
 // and nothing is lost. Run from the source (npm run app), everything is where it always was.
 //
 // The application's own files are plain files (resources/app), and the map tool keeps them up
-// to date by itself as ever (server/appupdate.js). When this file is among the ones updated,
-// the application starts itself again.
-const { app, BrowserWindow, Menu, shell, screen, dialog, ipcMain } = require('electron');
+// to date by itself as ever (server/appupdate.js). When this file is among the ones updated
+// (or another of the application's own: overlay.cjs, preload.cjs), the application starts
+// itself again.
+const { app, BaseWindow, BrowserWindow, WebContentsView, Menu, shell, screen, dialog, ipcMain, globalShortcut } = require('electron');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const { fork } = require('node:child_process');
+const { overlays } = require('./overlay.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const NAME = 'Azeroth Atlas';
@@ -148,8 +152,20 @@ function stopServer() {
 }
 
 // ---- the window -------------------------------------------------------------------------------
-let win = null;
+let win = null;          // the application's window
+let view = null;         // the page: in that window - or, while it is shown over the game, in the overlay's (overlay.cjs)
+let over = null;         // the overlays
 let showing = 'loading'; // which page the window has: 'loading' or 'map'
+const PRELOAD = path.join(__dirname, 'preload.cjs');
+const page = () => (view && !view.webContents.isDestroyed() ? view.webContents : null);
+
+/** The page fills its window (while it is over the game: what the window shows meanwhile does). */
+function fit() {
+  if (!win || win.isDestroyed() || !view) return;
+  if (over?.hosted) { over.fitAway(); return; }
+  const [w, h] = win.getContentSize();
+  view.setBounds({ x: 0, y: 0, width: w, height: h });
+}
 
 function bounds() {
   let b = { width: 1500, height: 950 };
@@ -171,43 +187,68 @@ function remember() {
 
 function open() {
   const b = bounds();
-  win = new BrowserWindow({
-    ...b, minWidth: 720, minHeight: 480, title: NAME, backgroundColor: '#0b0e14', show: false, autoHideMenuBar: true,
-    icon: path.join(__dirname, 'icon.ico'),
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, 'preload.cjs') },
-  });
+  win = new BaseWindow({ ...b, minWidth: 720, minHeight: 480, title: NAME, backgroundColor: '#0b0e14', show: false, autoHideMenuBar: true, icon: path.join(__dirname, 'icon.ico') });
+  view = new WebContentsView({ webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: PRELOAD } });
+  view.setBackgroundColor('#0b0e14');
+  win.contentView.addChildView(view);
   if (b.maximized) win.maximize();
-  // (AZEROTH_ATLAS_HIDDEN: for the tests, which run it while the game is being played on the same
-  // screen - never shown at all, or, set to "minimized", minimized from the start: the state in
-  // which the map has to go on working, and one of the tests looks at exactly that)
-  win.once('ready-to-show', () => { if (!process.env.AZEROTH_ATLAS_HIDDEN) win.show(); else if (process.env.AZEROTH_ATLAS_HIDDEN === 'minimized') win.minimize(); });
+  fit();
+  const web = view.webContents;
   // (where it is, noted whenever it changes and not only as it closes: a window can go without being asked)
   let noting = 0;
   const soon = () => { clearTimeout(noting); noting = setTimeout(remember, 500); };
-  win.once('ready-to-show', soon);
-  win.on('resize', soon);
+  // (AZEROTH_ATLAS_HIDDEN: for the tests, which run it while the game is being played on the same
+  // screen - never shown at all, or, set to "minimized", minimized from the start: the state in
+  // which the map has to go on working, and one of the tests looks at exactly that)
+  let shown = false;
+  const show = () => {
+    if (shown || !win || win.isDestroyed()) return;
+    shown = true;
+    if (!process.env.AZEROTH_ATLAS_HIDDEN) win.show(); else if (process.env.AZEROTH_ATLAS_HIDDEN === 'minimized') win.minimize();
+    soon();
+  };
+  web.once('did-finish-load', show);
+  setTimeout(show, 4000); // (whatever became of its first page)
+  for (const e of ['resize', 'maximize', 'unmaximize', 'enter-full-screen', 'leave-full-screen', 'restore']) win.on(e, () => { fit(); soon(); });
   win.on('move', soon);
   win.on('close', () => { clearTimeout(noting); remember(); });
-  win.on('closed', () => { win = null; });
-  win.on('page-title-updated', (e) => e.preventDefault()); // (the window is called what the application is)
+  win.on('closed', () => {
+    win = null;
+    // (the overlays go with it - and the page, wherever it is just then)
+    try { over?.close(); } catch { /* going anyway */ }
+    try { web.close(); } catch { /* gone */ }
+    view = null;
+  });
   // A link that leads somewhere else opens in your browser; the window itself stays on the map.
-  win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
-  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(URL_) && !url.startsWith('file:')) { e.preventDefault(); if (/^https:\/\//i.test(url)) shell.openExternal(url); } });
-  win.webContents.on('did-fail-load', (e, code, text, url, main) => { if (main) noted('the page could not be loaded', { code, text, url, showing }); if (main && showing === 'map') loading(); });
-  win.on('unresponsive', () => noted('the window has stopped answering'));
-  win.on('responsive', () => noted('the window answers again'));
-  win.webContents.on('before-input-event', (e, input) => {
+  web.setWindowOpenHandler(({ url }) => { if (/^https:\/\//i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  web.on('will-navigate', (e, url) => { if (!url.startsWith(URL_) && !url.startsWith('file:')) { e.preventDefault(); if (/^https:\/\//i.test(url)) shell.openExternal(url); } });
+  web.on('did-fail-load', (e, code, text, url, main) => { if (main) noted('the page could not be loaded', { code, text, url, showing }); if (main && showing === 'map') loading(); });
+  // (the page is up, or up again: the overlays are put as they were left)
+  web.on('did-finish-load', () => { try { over?.arrange(); } catch (err) { noted('the overlays could not be put as they were', { error: err.message }); } });
+  // (the page has closed itself, or is gone for good: its window goes with it, as it did when the page was the window's own)
+  web.on('destroyed', () => { if (win && !win.isDestroyed()) win.close(); });
+  web.on('unresponsive', () => noted('the window has stopped answering'));
+  web.on('responsive', () => noted('the window answers again'));
+  web.on('before-input-event', (e, input) => {
     if (input.type !== 'keyDown') return;
-    if (input.key === 'F5' || (input.control && input.key.toLowerCase() === 'r')) { e.preventDefault(); if (showing === 'map') win.webContents.reload(); }
-    else if (input.key === 'F11') { e.preventDefault(); win.setFullScreen(!win.isFullScreen()); }
-    else if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) { e.preventDefault(); win.webContents.toggleDevTools(); }
+    if (input.key === 'F5' || (input.control && input.key.toLowerCase() === 'r')) { e.preventDefault(); if (showing === 'map') web.reload(); }
+    else if (input.key === 'F11') { e.preventDefault(); if (!over?.hosted) win.setFullScreen(!win.isFullScreen()); }
+    else if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) { e.preventDefault(); web.toggleDevTools(); }
+  });
+  over = overlays({
+    electron: { BaseWindow, BrowserWindow, WebContentsView, screen, globalShortcut, ipcMain },
+    home: win, view, address: URL_, preload: PRELOAD, file: path.join(app.getPath('userData'), 'overlays.json'),
+    // (the tests: nothing of the overlays is put on the screen either - unless one of them asks to look at exactly that)
+    noted, fit, unseen: !!process.env.AZEROTH_ATLAS_HIDDEN && !process.env.AZEROTH_ATLAS_OVERLAYS_SEEN, ready: () => showing === 'map' && !quitting,
   });
   loading();
 }
 
 function loading() {
   showing = 'loading';
-  if (win && !win.isDestroyed()) win.loadFile(path.join(__dirname, 'loading.html'));
+  // (no map to show over the game just now: the page is back in its window, to say what is the matter)
+  try { over?.arrange(); } catch { /* as it is */ }
+  page()?.loadFile(path.join(__dirname, 'loading.html')).catch(() => {});
 }
 
 /** Kept an eye on: the window shows the map as soon as the server answers, and the server is (re)started where nobody else's is there. */
@@ -220,7 +261,7 @@ async function watch() {
     waited = 0;
     everUp = true;
     failed = 0;
-    if (showing !== 'map') { showing = 'map'; win.loadURL(URL_); }
+    if (showing !== 'map') { showing = 'map'; page()?.loadURL(URL_).catch(() => {}); }
   } else {
     waited++;
     // (A server that was there and is not for a moment is starting itself again after an update
@@ -229,7 +270,7 @@ async function watch() {
     if (!child && Date.now() >= notBefore && (!everUp || waited > 6)) startServer();
     // (the map was up and its server has gone - closed from outside, or stopped on an error: said so, until it is back)
     if (showing === 'map' && waited > 4) loading();
-    if (showing === 'loading' && waited > 3) win.webContents.executeJavaScript(`window.say && window.say(${JSON.stringify(said.join('\n'))}, ${JSON.stringify(LOG)})`).catch(() => {});
+    if (showing === 'loading' && waited > 3) page()?.executeJavaScript(`window.say && window.say(${JSON.stringify(said.join('\n'))}, ${JSON.stringify(LOG)})`).catch(() => {});
   }
   setTimeout(watch, up ? 4000 : 700);
 }
@@ -239,7 +280,7 @@ async function watch() {
 // to be written there. So a page can only ever write the one file you named, once.
 const places = new Map(); // token -> { file, written }
 let lastFolder = null;
-const ownPage = (e) => { const url = e.senderFrame?.url ?? ''; return !!win && e.sender === win.webContents && (url.startsWith(URL_) || url.startsWith('file:')); };
+const ownPage = (e) => { const url = e.senderFrame?.url ?? ''; return !!page() && e.sender === page() && (url.startsWith(URL_) || url.startsWith('file:')); };
 async function chooseSave(name) {
   const safe = String(name).replace(/[\\/:*?"<>|]+/g, '-').slice(0, 120) || 'Azeroth-Atlas-report.zip';
   let file = null;
@@ -334,10 +375,11 @@ else {
     try {
       // (Windows says so of a file that was only read, too - "Report a problem" reads every file
       // of the map tool: started again only where this file has been written)
-      const stamp = () => { try { const st = fs.statSync(__filename); return `${st.size}|${Math.floor(st.mtimeMs)}`; } catch { return null; } };
+      const OWN = ['main.cjs', 'overlay.cjs', 'preload.cjs'];
+      const stamp = () => { try { return OWN.map((f) => { const st = fs.statSync(path.join(__dirname, f)); return `${st.size}|${Math.floor(st.mtimeMs)}`; }).join(' '); } catch { return null; } };
       let timer = 0, made = stamp();
       fs.watch(__dirname, (event, name) => {
-        if (!name || !/^main\.cjs$/i.test(name)) return;
+        if (!name || !OWN.includes(String(name).toLowerCase())) return;
         clearTimeout(timer);
         timer = setTimeout(() => { const now = stamp(); if (!now || now === made) return; made = now; renew = true; if (!busy) again(); }, 1500);
       });
@@ -350,4 +392,5 @@ else {
     stopServer().then(() => app.quit());
   });
   app.on('before-quit', () => { quitting = true; if (child) { try { child.send({ quit: true }); } catch { /* gone */ } } });
+  app.on('will-quit', () => { try { globalShortcut.unregisterAll(); } catch { /* none were held */ } });
 }
