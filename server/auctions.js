@@ -5,6 +5,11 @@
 // one house the copy is set to from there, and only while somebody is looking at prices: a copy
 // nobody asks costs the database nothing. Nothing here goes to Blizzard.
 //
+// "Somebody" is the Prices page - or the game: where the box "Auctionator" on the page is ticked
+// (standins.js), the addons there that ask Auctionator what an item costs are answered with
+// these prices, so they are fetched while the game runs as well, and handed on each time
+// (prices.js).
+//
 // The work is done by a program of its own (auctions/cli.js auto), so the map never waits for
 // it, and nothing that goes wrong there touches the map.
 import fs from 'node:fs';
@@ -24,11 +29,18 @@ const SLACK = 240;                 // seconds after the hour is up before the At
 const ASKED_FOR = 20 * 60 * 1000;  // how long after the page last asked this goes on fetching
 
 export class Auctions {
-  /** @param hold () => true while the map is being built (the two are not run at once) */
-  constructor(cfg, configFile, { hold = () => false } = {}) {
+  /**
+   * @param hold    () => true while the map is being built (the two are not run at once)
+   * @param wanted  () => true while the prices are wanted without the page asking (the game is
+   *                running, and they are handed on to it)
+   * @param after   () => {} called each time a look has ended
+   */
+  constructor(cfg, configFile, { hold = () => false, wanted = () => false, after = () => {} } = {}) {
     this.cfg = cfg;
     this.configFile = configFile;
     this.hold = hold;
+    this.wanted = wanted;
+    this.after = after;
     this.settings = auctionSettings(cfg);
     this.store = new AuctionStore(cfg.dataDir);
     this.state = { running: false, last: null, result: null, error: null };
@@ -59,12 +71,14 @@ export class Auctions {
 
   #due() {
     if (!this.settings.on || !this.settings.house || this.state.running || this.hold()) return false;
-    if (Date.now() - this.asked > ASKED_FOR) return false; // (nobody is looking at prices)
+    if (Date.now() - this.asked > ASKED_FOR && !this.#wanted()) return false; // (nobody is looking at prices)
     const listed = this.store.state().houses?.[this.settings.house]?.t ?? 0;
     if (!listed) return !this.state.last || Date.now() - this.state.last > TICK;
     // a new list is out an hour after the last one; where the last try found none, the next tick tries again
     return Date.now() / 1000 >= listed + HOUR + SLACK && (!this.state.last || Date.now() - this.state.last >= TICK - 5000);
   }
+
+  #wanted() { try { return !!this.wanted(); } catch { return false; } }
 
   start() {
     if (!this.settings.on) return;
@@ -98,6 +112,7 @@ export class Auctions {
       this.state.result = result ? { pulled: result.pull?.fetched ?? 0, tsm: result.tsm ?? null, t: result.t ?? null } : null;
       this.state.error = result?.errors?.length ? result.errors.join('; ') : code ? (err.trim().split('\n').pop() || `ended with code ${code}`) : null;
       note('auctions', this.state.error ? 'auction prices: something went wrong' : 'auction prices: looked', { error: this.state.error ?? undefined, result: this.state.result ?? undefined, code: code || undefined, said: this.state.error ? err.slice(-800) : undefined });
+      try { this.after(); } catch { /* whoever wanted to know could not take it */ }
     };
     child.on('close', done);
     child.on('error', (e) => { err += e.message; done(1); });

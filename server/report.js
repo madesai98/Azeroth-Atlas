@@ -315,6 +315,7 @@ export async function buildReport(ctx, ask = {}) {
     if (live.tracker) ask1('game', () => ({ ...live.tracker.state, listeners: live.tracker.clients.size, helperRunning: !!live.tracker.child, lastReadAgo: live.tracker.lastGood ? Date.now() - live.tracker.lastGood : null }));
     if (live.mail) ask1('mailboxes', () => ({ status: live.mail.status(), folder: live.mail.dir, named: live.mail.prefix, found: live.mail.size, report: live.mail.report, target: live.mail.target, delivery: live.mail.written, filled: live.mail.filled, warm: live.mail.warm, olderInARow: live.mail.stale, history: live.mail.history, quest: live.mail.tracked, hearthLeftOut: live.mail.hearth, marker: live.mail.marker, route: live.mail.route && { ...live.mail.route, stretches: live.mail.route.stretches.length, also: live.mail.route.also.length, others: live.mail.route.others.length }, routes: live.mail.whole?.map((o) => ({ ...o, stretches: o.stretches.length, also: o.also.length })) ?? null }));
     if (live.addon) ask1('addon', () => live.addon());
+    if (live.standins) ask1('standins', () => live.standins());
     if (live.atlas) ask1('database', () => live.atlas.status());
     if (live.auctions) ask1('auctions', () => live.auctions.status());
     if (ctx.problem) state.gameNotFound = { message: ctx.problem.message, configured: ctx.problem.configured ?? null };

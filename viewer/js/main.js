@@ -1021,19 +1021,183 @@ function showSetup(st) {
 //   2. the map's data (built again where the game, QuestieDB or the map tool has moved on);
 //   3. the addon in the game (installed or updated - it is the one that came with this version);
 //   4. the guide addons the addon follows (each taught about floors again, where it was updated
-//      since: server/guidepatch.js).
+//      since: server/guidepatch.js);
+//   5. what your other addons ask of QuestieDB, Questie and Auctionator (server/standins.js),
+//      for each of the three whose box is ticked under "Other addons": QuestieDB brought up to
+//      date where the map put it in, a stand-in written anew, the prices and the Atlas
+//      database's rows handed on. A line may have a button, which goes on working after the
+//      run has ended.
 // An update of the map tool, and a new build of the map, load the page again: where the run has
 // got to is kept for the tab (sessionStorage), and it carries on from there when the page is back.
 const RUN_KEY = 'wfmap.checkRun';
 const RUN_MAX = 45 * 60 * 1000; // (a run left over from longer ago than this is not taken up again)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-function showRun(run) {
-  const box = $('checkLines');
-  box.replaceChildren(...run.lines.filter(Boolean).map((l) => { const d = document.createElement('div'); d.className = l.cls ?? ''; d.textContent = l.text; return d; }));
+/** Lines as they are shown: one for each, with a button for whatever it offers (see standinSwitchOn). again(): show them anew. */
+function lineNodes(lines, again) {
+  return lines.filter(Boolean).map((l) => {
+    const d = document.createElement('div');
+    d.className = l.cls ?? '';
+    d.textContent = l.text;
+    for (const [label, what] of l.ask ?? []) {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.addEventListener('click', () => standinSwitchOn(what, l, again));
+      d.append(' ', b);
+    }
+    return d;
+  });
 }
+function showRun(run) {
+  $('checkLines').replaceChildren(...lineNodes(run.lines, () => showRun(run)));
+}
+
+// ---- what other addons ask of QuestieDB, Questie and Auctionator ----------------------------
+// (server/standins.js does it; this says it.) The section "Other addons" has a box for each of
+// the three. Ticked, the map answers for it: a stand-in in the addon's own folder where you
+// have none, and where you have your own, the map's data routed into it with nothing of yours
+// changed. Unticked, whatever the map put in for it is taken out. A box acts as it is ticked;
+// "Check for updates" sees to the ticked ones again, and says how each stands in a line of its run.
+const STANDINS = ['QuestieDB', 'Questie', 'Auctionator'];
+const STANDIN_LINE = { QuestieDB: 5, Questie: 6, Auctionator: 7 };
+const namesOf = (names) => (names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
+/** What the server said of the three after seeing to them (how each stands, what was done, what waits), as lines: { index: line or null }. */
+function standinLines(st) {
+  const out = {};
+  const item = (n) => st.items?.find((i) => i.name === n), did = (n) => st.did?.find((d) => d.name === n);
+  const waits = (n) => st.waiting?.find((w) => w.name === n), failed = (n) => st.errors?.find((e) => e.name === n);
+  const load = (d) => (d.restart ? 'Restart the game so that it loads.' : 'Type /reload in the game.');
+  // (switched off in the game's own list of addons, for some of your characters: said, with a button to switch it on)
+  const off = (line, i, what) => {
+    if (!line || !i.offFor?.length) return line;
+    const who = i.offFor.length > 4 ? `${i.offFor.length} of your characters` : namesOf(i.offFor);
+    return { ...line, cls: 'warn', text: `${line.text} But the game has ${what} switched off for ${who}: there it answers nobody until it is switched on.`, ask: [['Switch it on', { name: i.name }]] };
+  };
+
+  // QuestieDB: the database itself, and the Atlas database laid over it in the game
+  let i = item('QuestieDB'), d = did('QuestieDB'), w = waits('QuestieDB'), e = failed('QuestieDB'), line = null;
+  const laid = !st.facts ? '' : st.facts.fresh ? ' What the Atlas database knows beyond it is laid over it in the game from the next start on.'
+    : st.facts.written ? ' What the Atlas database knows beyond it was written anew: /reload takes it up.' : ' The Atlas database is laid over it in the game.';
+  if (i) {
+    if (e) line = { text: `QuestieDB: ${e.error}`, cls: 'warn' };
+    else if (d?.what === 'removed') line = { text: `QuestieDB ${d.from ?? ''}: taken out of the game again.`, cls: '' };
+    else if (d) line = { text: (d.what === 'installed' ? `QuestieDB ${d.version}: put in the game${i.want ? '' : ' (Questie\u2019s answers come out of it)'}. Restart the game so that it loads.` : `QuestieDB: updated to ${d.version}. Start the game.`) + laid, cls: 'good' };
+    else if (w) line = { text: w.remove ? `QuestieDB ${i.version ?? ''} is taken out while the game is closed: ${w.why}.` : `QuestieDB ${w.version ?? ''} is out and the game has ${i.version}: ${w.why}.`, cls: 'warn' };
+    else if (!i.on) line = i.keptFor?.length ? { text: `QuestieDB ${i.version ?? ''}: left in the game, because ${namesOf(i.keptFor)} will not load without it.`, cls: '' } : null;
+    else if (i.held) line = { text: `QuestieDB ${i.version}: ${i.held}.${laid}`, cls: '' };
+    else if (i.state === 'real') line = { text: `QuestieDB ${i.version ?? ''}: yours, left as it is${i.latest && i.latest !== i.version ? ` (${i.latest} is out)` : ''}.${laid}`, cls: 'good' };
+    else if (i.state === 'ours') line = st.looked ? { text: `QuestieDB ${i.version}: left as it is (whether a newer one is out could not be asked: ${st.looked}).${laid}`, cls: '' } : { text: `QuestieDB ${i.version}: up to date.${laid}`, cls: 'good' };
+  }
+  out[STANDIN_LINE.QuestieDB] = off(line, i ?? {}, 'QuestieDB');
+
+  // Questie: yours is never touched; where there is none, a stand-in answers for it
+  i = item('Questie'); d = did('Questie'); w = waits('Questie'); e = failed('Questie'); line = null;
+  if (i) {
+    if (e) line = { text: `Questie: ${e.error}`, cls: 'warn' };
+    else if (d?.what === 'removed') line = { text: 'Questie: the stand-in is taken out of the game again.', cls: '' };
+    else if (!i.want) line = null;
+    else if (i.state === 'real') line = { text: `Questie ${i.version ?? ''}: yours, not touched. It reads QuestieDB, so the Atlas database laid over that reaches it.`, cls: 'good' };
+    else if (d) line = { text: `Questie: you have none, so a stand-in is in the folder Questie and answers what other addons ask of Questie, out of QuestieDB (it draws nothing itself). ${load(d)}`, cls: 'good' };
+    else if (w) line = { text: `Questie: the stand-in waits (${w.why}).`, cls: 'warn' };
+    else if (i.state === 'ours') line = { text: 'Questie: you have none, and a stand-in answers what other addons ask of Questie, out of QuestieDB.', cls: 'good' };
+  }
+  out[STANDIN_LINE.Questie] = off(line, i ?? {}, 'the stand-in');
+
+  // Auctionator: a stand-in with the map's prices; through yours, the map's prices beside its own
+  i = item('Auctionator'); d = did('Auctionator'); w = waits('Auctionator'); e = failed('Auctionator'); line = null;
+  if (i) {
+    const n = st.prices?.items ? st.prices.items.toLocaleString() : null;
+    const none = ' The map has no prices yet: choose your auction house under Auction prices.';
+    if (e) line = { text: `Auctionator: ${e.error}`, cls: 'warn' };
+    else if (d?.what === 'removed') line = { text: 'Auctionator: the stand-in is taken out of the game again.', cls: '' };
+    else if (!i.want) line = null;
+    else if (i.state === 'real') {
+      const take = st.prices?.fresh ? ' Restart the game so that it loads.' : st.prices?.written ? ' Type /reload in the game.' : '';
+      line = { text: `Auctionator ${i.version ?? ''}: yours, not touched. ${n ? `The map's prices of ${n} items are given through it to the addons that ask it, where it has none of its own or an older one.` : 'The map\u2019s prices are given through it to the addons that ask it.' + none}${take}`, cls: 'good' };
+    } else if (d) line = { text: `Auctionator: you have none, so a stand-in is in the folder Auctionator and answers with the map's prices (it has no auction window).${n ? ` It has the prices of ${n} items.` : none} ${load(d)}`, cls: 'good' };
+    else if (i.state === 'ours') line = { text: `Auctionator: you have none, and a stand-in answers with the map's prices.${n ? ` It has the prices of ${n} items.` : none}`, cls: 'good' };
+  }
+  out[STANDIN_LINE.Auctionator] = off(line, i ?? {}, 'the stand-in');
+  return out;
+}
+/** "Switch it on", of a line: that line of each of your characters' lists of addons is changed, and the line says so. */
+let standinBusy = false;
+async function standinSwitchOn(what, line, again) {
+  if (standinBusy) return;
+  standinBusy = true;
+  const had = { text: line.text, cls: line.cls, ask: line.ask };
+  let got = null;
+  Object.assign(line, { text: `${what.name}: a moment…`, cls: 'busy', ask: undefined });
+  again();
+  try {
+    const st = await (await fetch(`/api/standins/enable?name=${encodeURIComponent(what.name)}`, { method: 'POST' })).json();
+    if (st.error) throw new Error(st.error);
+    Object.assign(line, { text: `${what.name}: switched on for ${st.switchedOn === 1 ? 'that character' : `those ${st.switchedOn} characters`}. Start the game.`, cls: 'good' });
+    note('check', line.text);
+    got = st;
+  } catch (err) {
+    // (it did not work: said, with the same button to try again)
+    Object.assign(line, { ...had, text: `${what.name}: ${err.message}`, cls: 'warn' });
+  }
+  standinBusy = false;
+  again();
+  if (got) showStandins(got);
+}
+/** The boxes as the server has them, and beside each how the addon stands in the game. */
+let standLines = [];
+const showStandLines = () => $('standLines').replaceChildren(...lineNodes(standLines, showStandLines));
+function showStandins(st) {
+  $('standSec').style.display = st?.available ? '' : 'none';
+  if (!st?.available) return;
+  let ticked = 0;
+  for (const name of STANDINS) {
+    const i = st.items.find((x) => x.name === name), box = $(`optStand_${name}`), row = $(`standRow_${name}`);
+    if (!i) continue;
+    // (QuestieDB is seen to for Questie's box as well: its own box shows that, and cannot be unticked from under it)
+    const forQuestie = name === 'QuestieDB' && i.on && !i.want;
+    box.checked = i.want || forQuestie;
+    box.disabled = forQuestie || standinBusy;
+    if (i.want) ticked++;
+    $(`standSays_${name}`).textContent = i.state === 'real' ? `yours${i.version ? `, ${i.version}` : ''}`
+      : i.state === 'ours' ? (name === 'QuestieDB' ? `${i.version ?? ''}, put in by the map` : 'the map\u2019s stand-in')
+      : i.want || forQuestie ? 'not in the game yet' : '';
+    row.dataset.title ??= row.title;
+    row.title = row.dataset.title + (forQuestie ? '\n\nTicked for Questie: its answers come out of QuestieDB.' : '') + (i.wantedBy?.length ? `\n\nNamed by these addons of yours: ${namesOf(i.wantedBy)}.` : '');
+  }
+  $('standNow').textContent = ticked ? `${ticked} ticked` : '';
+}
+async function refreshStandins() {
+  try { showStandins(await getJSON('/api/standins')); } catch { /* an older server: no such section */ }
+}
+/** A box ticked or unticked: kept, and seen to there and then. */
+async function standinWant(name, on) {
+  if (standinBusy) { refreshStandins(); return; }
+  standinBusy = true;
+  for (const n of STANDINS) $(`optStand_${n}`).disabled = true;
+  standLines = [{ text: `${name}: a moment…`, cls: 'busy' }];
+  showStandLines();
+  let st = null;
+  try {
+    st = await (await fetch(`/api/standins/want?name=${encodeURIComponent(name)}&on=${on ? 1 : 0}`, { method: 'POST' })).json();
+    if (st.error) throw new Error(st.error);
+    // (said: the one whose box it was, and whatever else was done on its account - QuestieDB put in for Questie, say)
+    const lines = standinLines(st), told = new Set([name, ...[...st.did, ...st.waiting, ...st.errors].map((x) => x.name)]);
+    const mine = st.items.find((i) => i.name === name)?.state === 'real';
+    const plain = { text: on ? `${name}: ticked.` : `${name}: unticked. ${mine ? 'Yours is as it was, and nothing' : 'Nothing'} of the map's is in the game for it.`, cls: '' };
+    standLines = STANDINS.filter((n) => told.has(n)).map((n) => lines[STANDIN_LINE[n]] ?? (n === name ? plain : null)).filter(Boolean);
+    for (const l of standLines) note('check', l.text);
+  } catch (err) {
+    standLines = [{ text: `${name}: ${err.message}`, cls: 'warn' }];
+    st = null;
+  }
+  standinBusy = false;
+  showStandLines();
+  if (st) showStandins(st); else await refreshStandins();
+}
+let checkLive = false; // (one run at a time: one begun by hand while the page was still loading is not taken up a second time as one left over)
 async function checkAll(resume = null) {
   const btn = $('checkAll');
-  if (btn.disabled && !resume) return;
+  if (checkLive || (btn.disabled && !resume)) return;
+  checkLive = true;
   const run = resume ?? { step: 1, at: Date.now(), lines: [] };
   const keep = () => { try { sessionStorage.setItem(RUN_KEY, JSON.stringify(run)); } catch { /* it starts over after a reload, that is all */ } };
   const say = (i, text, cls = 'busy') => { run.lines[i] = { text, cls }; showRun(run); keep(); if (cls !== 'busy') note('check', text); };
@@ -1110,11 +1274,27 @@ async function checkAll(resume = null) {
       } else if (guides.length) say(3, guideWords(a.guides), guides.some((g) => g.state === 'changed') ? 'warn' : 'good');
       else if (a.available) say(3, 'Guides: neither Guidelime nor RestedXP is installed in the game', '');
     }
-    say(4, `Checked at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`, '');
+    // 5. what your other addons ask of QuestieDB, Questie and Auctionator: the ones whose box is ticked
+    if (run.step <= 4) {
+      say(4, 'Other addons: seeing to QuestieDB, Questie and Auctionator, where their boxes are ticked…');
+      const st = await post('/api/standins/apply');
+      run.lines[4] = null;
+      if (st.error) say(4, `Other addons: ${st.error}`, 'warn');
+      else {
+        const lines = standinLines(st);
+        Object.assign(run.lines, lines);
+        showRun(run); keep();
+        for (const l of Object.values(lines)) if (l) note('check', l.text);
+        // (the run says it now: what a box said when it was last ticked is cleared away)
+        standLines = []; showStandLines(); showStandins(st);
+      }
+    }
+    say(9, `Checked at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`, '');
   } catch (err) {
-    say(4, `Stopped: ${err.message}`, 'warn');
+    say(9, `Stopped: ${err.message}`, 'warn');
   }
   try { sessionStorage.removeItem(RUN_KEY); } catch { /* nothing kept */ }
+  checkLive = false;
   btn.disabled = false;
   btn.textContent = 'Check for updates';
   refreshAddon(false);
@@ -1695,6 +1875,7 @@ function bindUI() {
   $('optShare').addEventListener('change', (e) => refreshDatabase(e.target.checked));
   $('btnGuides').addEventListener('click', () => refreshAddon('guides'));
   $('optGuideTeach').addEventListener('change', (e) => refreshAddon(`guides?teach=${e.target.checked ? 1 : 0}`));
+  for (const name of STANDINS) $(`optStand_${name}`).addEventListener('change', (e) => standinWant(name, e.target.checked));
   $('update').addEventListener('click', async () => {
     $('update').disabled = true;
     $('updateMsg').textContent = 'Starting…';
@@ -1886,6 +2067,7 @@ async function main() {
   try { sessionStorage.removeItem(GPU_TRIES_KEY); } catch { /* nothing to forget */ }
   // Start listening for the game only once a map is up.
   refreshAddon(false);
+  refreshStandins();
   resumeCheck();
   // (a guide addon installed or updated since is seen without reloading the page)
   setInterval(() => { if (!document.hidden) refreshAddon(false); }, 30000);

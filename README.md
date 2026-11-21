@@ -74,6 +74,9 @@ in turn, and leaves alone whatever is already up to date:
 3. **The addon in the game**: installs it, or updates it to the one that came with this version.
 4. **Your guide addons**: Guidelime and RestedXP are each taught to ask the addon which floor
    you are on - again, where one was updated since (see "Guides in the game").
+5. **QuestieDB, Questie and Auctionator**, for each whose box is ticked under **Other addons**:
+   what the map has in the game for it is brought up to date (see "What your other addons ask
+   of QuestieDB, Questie and Auctionator"). With no box ticked, this step does nothing.
 
 Each is reported in a line under the button, with what is left for you to do in the game
 (`/reload`, or a restart). The page may load itself again in the middle (after an update of
@@ -3203,8 +3206,11 @@ and without a connection, or with `"database": false`, the addon is what is read
 The same data in either place is the same data: a map built from the addon is not asked to be
 built again the day the fetched copy of that version arrives.
 
-**In the game, nothing changes.** Addons that use QuestieDB there - Questie, guide packs - need
-the addon in the game's AddOns folder: the game loads nothing from anywhere else.
+**In the game**, addons that use QuestieDB - Questie, guide packs - need the addon itself in the
+game's AddOns folder: the game loads nothing from anywhere else. The box **QuestieDB** under
+**Other addons** puts it there where you have none, straight from where QuestieDB is published
+(the database holds the files the map reads, not the whole addon), and lays the Atlas database
+over it: see "What your other addons ask of QuestieDB, Questie and Auctionator".
 
 **What is refused.** A release whose data file is laid out in a way this version of the map
 cannot read stays in the database and is not fetched (the copy in use goes on being used, and
@@ -3262,7 +3268,8 @@ computer switched on, it asks Blizzard for every house whose list is newer than 
 database, boils it down (one line per item, not the auctions themselves) and writes it there.
 Every copy of the map reads the prices from the database: nobody else needs a client or an
 account. A copy fetches only the one house it is set to, and only while somebody is looking at
-prices.
+prices - or while the game runs with the box **Auctionator** ticked, where other addons are
+answered with these prices.
 TradeSkillMaster's files are different: each copy fetches them for itself, straight from
 TradeSkillMaster, and nothing of them goes into the Atlas database.
 
@@ -3385,20 +3392,180 @@ the game was sent after its files were made, laid over its tables: four items in
 to it from there alone). In the cloud: `functions/` (the scheduled function; `prepare.mjs`
 copies in the three files it shares with the map), put there with `tools/cloud.mjs`.
 
+## What your other addons ask of QuestieDB, Questie and Auctionator
+
+Plenty of addons lean on those three. A map addon asks Questie where the vendors and trainers
+stand; a profession planner asks Auctionator what an herb costs; a guide pack will not load
+without QuestieDB. The map has all of that itself: QuestieDB as published, the Atlas database
+laid over it, and your auction house's prices hour by hour. So it can answer for each of the
+three in the game, and whether it does is yours to say: the sidebar's **Other addons** section
+has a box for each, and none is ticked until you tick it.
+
+Nothing is put in the game for a box that is not ticked, and nothing is worked out from the
+addons you happen to have. (A box's tooltip names the addons of yours that mention it in their
+`.toc`. That is told, and decides nothing.)
+
+A box acts as it is ticked or unticked, and says what was done in a line under the boxes.
+**Check for updates** sees to the ticked ones again and says how each stands.
+
+| Ticked | You have none | You have your own |
+| --- | --- | --- |
+| **QuestieDB** | Put in the folder `QuestieDB`, as its makers publish it: fetched from where they publish it, checked against the fingerprint they give, nothing in it changed. Kept current from then on | Left exactly as it is, whatever its version |
+| **Questie** | A stand-in in the folder `Questie` answers what other addons ask of Questie, out of QuestieDB (which is seen to as if its own box were ticked) | Not touched. It reads QuestieDB, so the Atlas database laid over that is what reaches it |
+| **Auctionator** | A stand-in in the folder `Auctionator` answers with the map's prices | Not touched. The map's price is given through Auctionator's own price questions, wherever Auctionator has none or an older one |
+
+**An addon of yours is never written over, moved or changed.** The least that routes the map's
+data into it turned out to be nothing of its own at all: QuestieDB has a way in for
+corrections, and Auctionator's price questions can be answered through from outside. What does
+the routing is in folders of the map's own beside yours (`AzerothAtlas_Facts`,
+`AzerothAtlas_Prices`). So an addon manager updating your addon undoes nothing, and with those
+two switched off your addon is as its makers published it.
+
+**A stand-in is in the folder the addon itself would be in**, under its name, so that every
+addon that names it finds it: one that will not load without Questie loads, and one that loads
+after Auctionator where it is there does so. Its title in the game's list of addons says what
+it is ("Azeroth Atlas stand-in").
+
+**Unticked again**, the stand-in is taken out, and whatever was laid beside your own addon. A
+QuestieDB the map put in is taken out too, unless a Questie of yours is there or an addon that
+will not load without QuestieDB (its `.toc` says so): then it stays, and the line says for
+whom.
+
+What is the map's own is known by a mark: a stand-in's `.toc` says
+`## X-AzerothAtlas-StandIn`, and a QuestieDB the map put in has a note beside it
+(`AzerothAtlas-installed.json`) with the fingerprint of its data file. A folder without the
+mark, or whose data file is another by now (an addon manager updated it), is yours and is
+treated as yours. So is the addon itself unpacked over a stand-in (you installed the real one
+later): what is left of the stand-in is cleared out of the folder, and the map's data is routed
+into yours from then on. Which boxes are ticked is kept with what is yours
+(`<dataDir>/user/standins.json`). A folder the game has open is not replaced or removed under
+it: bringing QuestieDB up to date, or taking it out, waits until the game is closed, and the
+line says so. A new folder goes in at any time, and the game finds it when it next starts.
+
+**Switched off in the game.** The game keeps, for each character, which addons are switched
+off, and goes on keeping it for an addon whose folder is gone: one you once switched off and
+removed is still switched off the day a folder of its name is back - a stand-in's too, since it
+has the addon's own name. A QuestieDB that is switched off answers nobody, and nothing that
+needs it loads. So a line says which of your characters the addon is switched off for, with a
+button, **Switch it on**, which changes that one line of each of those characters' lists
+(`WTF/Account/.../AddOns.txt`) and nothing else, while the game is closed. It is asked and not
+done by itself, because it is your setting.
+
+### The Atlas database, laid over QuestieDB in the game
+
+The 3D map is built from QuestieDB with the Atlas database laid over it ("The Atlas database"
+says what is believed over what). Where the box **QuestieDB** or **Questie** is ticked, the
+same is worked out for the QuestieDB that is in the game, yours or one the map put in: it is
+read as the map reads it, the database is laid over it by the same code, and whatever reads
+otherwise afterwards, in a field QuestieDB itself has, is a row for the game:
+
+| | |
+| --- | --- |
+| A creature, object or quest QuestieDB does not have | its whole row (an object only if it stands somewhere or a quest has to do with it) |
+| A field QuestieDB says nothing of: a level it has as 0, somebody it does not place, a quest with no giver | that field |
+| A name the game's own server gives otherwise | that name, laid over only where the game is in English, so a translated name is never undone |
+| Somebody the databases put in one place, whom players have only ever met elsewhere | where they were met, as on the map |
+
+Against QuestieDB 1.1.4 and database 14 that is 1,115 creatures, 193 objects and 203 quests,
+65 names, 6 people moved to where they were met, and the 126 mailboxes named for whoever asks
+where they are. Heights, health and what a vendor sells have no field in QuestieDB, and stay
+the map's.
+
+QuestieDB has a way in for exactly this: an addon registers a "correction", rows of
+`{ [id] = { field = value } }`, under its own name, and QuestieDB lays them over what it reads.
+The rows are written as a small addon of the map's own, `AzerothAtlas_Facts`, which hands them
+to QuestieDB under the name `AzerothAtlas`. **QuestieDB's own files are not touched**: with
+that addon switched off, QuestieDB is as its makers published it. QuestieDB's own layer is
+under ours, and Questie's (which it adds when it starts, from what your character is and has
+done) is over it. The rows hold for the one QuestieDB they were worked out against, so the file
+names it, and nothing is laid over another one until the map has run and written them anew.
+`/dump AzerothAtlasFactsState` in the game says what was laid over, or why nothing was. With
+both boxes unticked, `AzerothAtlas_Facts` is taken out of the game again.
+
+### The stand-in for Questie
+
+It hands QuestieDB on under the names addons ask Questie by. It is not Questie: it draws no
+icons, tracks nothing and has no settings, and none of Questie's code is in it.
+
+| Asked for | Answered |
+| --- | --- |
+| `QuestieLoader:ImportModule(name)` | a module by name; one nobody has made is an empty one, as with Questie |
+| `"QuestieDB"` | `QueryNPCSingle`, `QueryQuestSingle`, `QueryObjectSingle`, `QueryItemSingle` and the same for whole rows; `NPCPointers`, `QuestPointers`, `ObjectPointers`, `ItemPointers`; `npcFlags`, `classKeys`, `factionIDs`, `factionTemplate`; `GetQuest`, `GetNPC`, `GetObject`, `GetItem`, `IsDoable` |
+| `"ZoneDB"` | which area is which map and back, an area by its name, the dungeons and where their doors are |
+| `"Townsfolk"` | the mailboxes, and whose side each is for |
+
+**It is in the folder `Questie`, and that has a price.** There is no `Questie` in the game
+with it (no global of that name, no frame of Questie's), so an addon that looks for those to
+leave something to Questie goes on doing its own work: RestedXP goes on telling your party what
+you have done. But an addon that asks the game whether an addon *named* Questie is loaded is
+told yes, and may leave its work to a Questie that does none: OneForAll switches its own quest
+icons and the quest lines in its tooltips off. Where you want those, leave the box unticked.
+
+`IsDoable` goes by what QuestieDB says of the quest and the game says of your character: not
+done yet, old enough, of a race and class it is for, the quests before it done, none taken that
+rules it out. Standing with a faction, a profession's skill and what is on at the moment are
+not looked at.
+
+### Auctionator: the stand-in, and the map's prices through your own
+
+The prices are the ones the map keeps for the auction house you chose under **Auction
+prices**, so nobody has to scan the auction house for other addons to have prices. One file
+(`addon/standins/Auctionator.lua`) hands them on in both cases, and finds out which it is by
+whether an Auctionator is there when it runs. None of Auctionator's code is in it: both ways
+go by the names other addons call.
+
+**The stand-in** (you have no Auctionator) has no auction window of its own, sells nothing and
+scans nothing. It answers by the names the installed addons were seen to ask under:
+
+| Asked for | Answered |
+| --- | --- |
+| `GetAuctionPriceByItemID`, `GetAuctionPriceByItemLink` | the lowest anybody asked for one piece when the list was read (what Auctionator's own would be straight after a scan), or nothing for an item nobody was selling |
+| `GetAuctionAgeByItemID`, `GetAuctionAgeByItemLink` | days since the list was read |
+| `RegisterForDBUpdate` | taken; called only for whoever asked before the game knew your character's side |
+| `ConvertToSearchString`, `CreateShoppingList` | the list is kept while the game runs and said in the chat, with what each thing costs and what the lot comes to: there is no shopping window to put it in |
+| `Auctionator.SavedState.TimeOfLastBrowseScan` | when the prices were read, so an addon that says "last scan: 40 min ago" says what is so |
+
+**Through your own Auctionator**, the four price questions above
+(`GetAuctionPriceByItemID`, `...ByItemLink`, `GetAuctionAgeByItemID`, `...ByItemLink`) are
+answered through, and nothing else is touched. The map's price is told where Auctionator has
+none, or where the map's list was read no longer ago than Auctionator last saw the item (in
+days, as Auctionator counts); otherwise Auctionator's own is. The age told is that of the price
+told. A complaint Auctionator makes about a question is handed on as it is. Its window, its
+scans, its shopping lists and who it tells of new prices are its own as before, and so are the
+prices in its own tooltips and its own selling window: only what other addons ask of it goes
+through. `/dump AzerothAtlasPricesState()` in the game says which of the two ways is at work.
+
+An auction house belongs to one side of one kind of realm. The map's prices are told to a
+character of that side on that kind of realm; a character of another is told nothing by the
+stand-in, and Auctionator's own prices alone through yours.
+
+The game can be handed nothing while it runs but what it loads itself. So the prices are
+written as a file the game loads - `prices.lua` in the stand-in's folder, or in
+`AzerothAtlas_Prices` beside your own Auctionator - and are as fresh as the last time the game
+loaded its addons: when it started, or `/reload`. With the box ticked the map fetches them
+once as it starts and every hour while the game runs, not only while the Prices page is open.
+A list older than thirty days is not handed on, and one that was is taken out of the game's
+folder again (see "Thirty days, and no longer").
+
+The pieces: `server/standins.js` (the boxes, what is put in and taken out),
+`server/facts.js` and `facts-worker.js` (the rows for QuestieDB), `server/prices.js` (the
+prices for the game), `addon/standins/Questie.lua`, `Auctionator.lua` and `Layer.lua` (what
+runs in the game).
+
 ## Credits
 
 The map is built from your own installed game. What else it draws on, and where each comes from:
 
 | What | From | How it gets here |
 | --- | --- | --- |
-| Creatures, NPCs, quests, where they stand | **QuestieDB** by the Questie team and its contributors (github.com/Questie/QuestieDB; GPL-3.0) | Each release is fetched by a scheduled function of the database's own and kept in the database as published, with its licence; every copy fetches it from there when the map is built (or reads the addon in your game's folder, where that is the newer). Not in the download |
+| Creatures, NPCs, quests, where they stand | **QuestieDB** by the Questie team and its contributors (github.com/Questie/QuestieDB; GPL-3.0) | Each release is fetched by a scheduled function of the database's own and kept in the database as published, with its licence; every copy fetches it from there when the map is built (or reads the addon in your game's folder, where that is the newer). Where you tick the box for it and have none in the game, the whole addon is fetched from where it is published and put in the game's AddOns folder as it is. Not in the download |
 | NPC heights, what quests ask for, drop rates, creature health and respawn times | **cmangos classic-db** | Downloaded when the map is built, kept in the map data. Not included |
 | The layout of the game's data tables | **WoWDBDefs** (wowdev) | Each definition is fetched the first time it is needed, kept in `extractor/dbd/`. Not included |
 | The doorways between maps (`extractor/doorways.json`) | **ShortestPathForever** by cjber, `Data/Portals.lua` (GPL-3.0-or-later) | Included; the addon's own, newer list is read instead where it is installed |
 | The timetables of boats, zeppelins and the tram (`viewer/transit.json`, `addon/AzerothAtlas/TransitData.lua`) | **DockWatch** by Wyveryx (MIT), recorded in the game; **NauticusClassicResurrected** (MIT) by way of **ForeverTransport** by Stilo | Included |
 | Guides in the game | **Guidelime** and **RestedXP**, whichever you run, with the guides you have for them | Followed as they run in your game. Not included. One line of each is changed in your own copy, unless you switch that off (see "Guides in the game") |
 | How an item's stats, armor and damage are worked out, and where the game keeps its recipes | **forever-ref** by alcaras (github.com/alcaras/forever-ref), which found that this game uses the formulas TrinityCore worked out for the client, and checked its results against Wowhead | The method only. The code is this project's own; its results were held against forever-ref's |
-| Auction prices | **Blizzard Entertainment**'s game data (its API for developers) | Read hourly by a scheduled function of the database's own; in the database for 30 days, not in the download |
+| Auction prices | **Blizzard Entertainment**'s game data (its API for developers) | Read hourly by a scheduled function of the database's own; in the database for 30 days, not in the download. Handed on to the game where the box Auctionator is ticked |
 | How often and how fast an item sells; a second opinion on its price | **TradeSkillMaster**'s public price files (tradeskillmaster.com) | Fetched by each copy for itself. Not included |
 | Facts in the Atlas database marked `w`: what a creature or quest is, and where QuestieDB is silent | **Wowhead** (wowhead.com/forever) | Read by the database's maintainer; in the database, not in the download |
 
@@ -3520,3 +3687,9 @@ The 3D map shows them, the game does not. In the order worth looking:
 - With the continents and Zephras Isle on one picture, NPC markers are those of the map in
   hand; each of the others shows them once it is taken in hand (look at it closely, or choose
   it from the list). The route is drawn on all of them.
+- The stand-ins for Questie and Auctionator answer what the addons installed here were seen to
+  ask (OpenMap, RestedXP, WhatsItFor, OneForAll, TradeSkillMaster, EllesmereUI, Forever Leveling
+  Guide). An addon that asks them something else gets no answer. They, the Atlas layer over
+  QuestieDB and the map's prices through a real Auctionator were run in a made-up game - the
+  first two against the real QuestieDB addon, the last against an Auctionator made up from the
+  names other addons call it by - and not in the game itself.

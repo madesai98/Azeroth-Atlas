@@ -24,6 +24,9 @@ import { Fights, measuredHealth } from './fights.js';
 import { Minimap } from './minimap.js';
 import { clockFigures, writeClockAddon } from './boats.js';
 import { writeDropsAddon } from './drops.js';
+import { standinStatus, applyStandins, setWant, switchOn, pricesMode } from './standins.js';
+import { writePricesAddon } from './prices.js';
+import { writeFactsAddon } from './facts.js';
 import { Auctions } from './auctions.js';
 import { openLogs, logDir, note, noteCrashes } from './log.js';
 import { Reports } from './report.js';
@@ -40,8 +43,8 @@ note('server', 'starting', { node: process.versions.node, electron: process.vers
 // build runs, and while a report of a problem is being made, server/watch.js is asked not to
 // start the server again.
 const job = { running: false, phase: '', done: 0, total: 0, log: [], summary: null, error: null, startedAt: null, finishedAt: null };
-let updating = false, reporting = false;
-const busy = () => process.send?.({ busy: job.running || updating || reporting });
+let updating = false, reporting = false, standing = false;
+const busy = () => process.send?.({ busy: job.running || updating || reporting || standing });
 let cfg;
 try { cfg = loadConfig(configFile); } catch (err) {
   if (err.code !== 'NO_GAME') { note('server', 'the settings could not be taken', { error: err.message }); throw err; }
@@ -83,6 +86,26 @@ const handDrops = () => {
     return r;
   } catch (err) { note('database', 'the drop rates could not be written for the addon', { error: err.message }); return null; }
 };
+// (and what the database knows beyond QuestieDB, laid over the QuestieDB in the game for every addon that reads it -
+// facts.js, where the box "QuestieDB" or "Questie" on the page is ticked. Worked out in a thread of its own; looked
+// at when the map starts, each time the database has been fetched, when a box is ticked, and by "Check for updates".)
+const handFacts = async () => {
+  try {
+    const r = await writeFactsAddon(cfg);
+    if (r?.written) note('database', 'what the Atlas database knows beyond QuestieDB, written for the game to lay over QuestieDB', { creatures: r.npc, objects: r.object, quests: r.quest, names: r.named, movedToWhereTheyWereMet: r.moved, mailboxes: r.mailboxes, questiedb: r.version, fresh: r.fresh || undefined });
+    return r;
+  } catch (err) { note('database', 'what the database knows beyond QuestieDB could not be written for the game', { error: err.message }); return null; }
+};
+// (and the auction prices, for the addons that ask Auctionator what an item costs - prices.js, where the box
+// "Auctionator" on the page is ticked. Looked at when the map starts, each time the prices have been fetched, when
+// the box is ticked, and by "Check for updates".)
+const handPrices = () => {
+  try {
+    const r = writePricesAddon(cfg);
+    if (r?.written) note('auctions', r.mode === 'route' ? 'auction prices written for the game, to be given through your Auctionator' : 'auction prices written for the game, for the stand-in that answers in Auctionator\'s place', { items: r.items, house: r.house, listed: r.t, fresh: r.fresh || undefined });
+    return r;
+  } catch (err) { note('auctions', 'the auction prices could not be written for the game', { error: err.message }); return null; }
+};
 // The database fetched anew: the map's creatures, NPCs and quests are built again with it, by
 // itself. A short job - only the maps the database changed anything on are done again - and
 // the one way what the other copies have learned reaches this one's map without anybody having
@@ -102,10 +125,11 @@ const applyDatabase = () => {
     startUpdate(false);
   } catch (err) { note('map', 'the map could not be updated with the Atlas database by itself', { error: err.message }); }
 };
-const atlas = new AtlasDb(cfg, configFile, { hold: () => job.running, after: () => { handBoats(); handDrops(); applyDatabase(); } });
+const atlas = new AtlasDb(cfg, configFile, { hold: () => job.running, after: () => { handBoats(); handDrops(); handFacts(); applyDatabase(); } });
 atlas.start();
 handBoats();
 handDrops();
+handFacts();
 setTimeout(applyDatabase, 8000).unref?.();
 // Where you are inside a dungeon, read off the game's minimap: the game hides it from the addon
 // there, and the minimap's picture shows it (see minimap.js). Only while a map page is open and
@@ -131,13 +155,23 @@ const combat = cfg.combatLog === false ? null : new CombatLog(cfg, {
 });
 combat?.start();
 // What things cost at the auction house, and how that has moved (see auctions.js).
-const auctions = new Auctions(cfg, configFile, { hold: () => job.running });
+// (Where the box "Auctionator" is ticked and the game has one - the map's stand-in, or your own with the map's
+// prices given through it - the addons there are answered with these prices: they are kept fresh while the game
+// runs, looked at once as the map starts, and handed on after every look.)
+const pricesWanted = () => { try { return !!pricesMode(cfg); } catch { return false; } };
+const auctions = new Auctions(cfg, configFile, {
+  hold: () => job.running,
+  wanted: () => ['live', 'minimized', 'nosignal'].includes(tracker.state?.status) && pricesWanted(),
+  after: () => handPrices(),
+});
 auctions.start();
+handPrices();
+if (pricesWanted()) auctions.touch();
 const VIEWER_DIR = path.join(PROJECT_ROOT, 'viewer');
 // The page's own files, watched: a page that is open loads itself again when they change (changes.js).
 const changes = new Changes(VIEWER_DIR);
 // "Report a problem": everything that may explain one, in a zip (report.js)
-const reports = new Reports({ configFile, cfg, busy: (on) => { reporting = on; busy(); }, live: { status: () => status(), tracker, mail, atlas, auctions, minimap, addon: () => addonStatus(cfg) } });
+const reports = new Reports({ configFile, cfg, busy: (on) => { reporting = on; busy(); }, live: { status: () => status(), tracker, mail, atlas, auctions, minimap, addon: () => addonStatus(cfg), standins: () => standinStatus(cfg) } });
 note('server', 'the settings in use', { game: cfg.installRoot, found: !!cfg.foundGame, flavour: flavourFolder(cfg), data: cfg.dataDir, port: cfg.port, ingame: cfg.ingame !== false, minimap: cfg.minimap !== false, autoUpdate: cfg.autoUpdate ?? true, oldAddonInUse: oldAddon });
 
 // ---- update job ---------------------------------------------------------------------------
@@ -394,6 +428,45 @@ const server = http.createServer((req, res) => {
       res.writeHead(500, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
     }
+    return;
+  }
+  if (p === '/api/standins' || p === '/api/standins/apply' || p === '/api/standins/want' || p === '/api/standins/enable') {
+    // What other addons ask of QuestieDB, Questie and Auctionator, answered out of the map's own data (standins.js),
+    // for each of the three whose box on the page is ticked: how each stands in the game (GET); /want?name=&on=1|0:
+    // a box ticked or unticked, and seen to there and then; /apply: all of them seen to ("Check for updates" does);
+    // /enable?name=: switched on for the characters it is switched off for, in the game's own list of addons.
+    const json = (code, body) => { res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
+    const act = p.slice('/api/standins'.length);
+    if (!act) { if (req.method !== 'GET') { res.writeHead(405); res.end(); return; } try { json(200, standinStatus(cfg)); } catch (err) { json(500, { error: err.message }); } return; }
+    if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
+    const origin = req.headers.origin;
+    if (origin && new URL(origin).host !== req.headers.host) { res.writeHead(403); res.end(); return; }
+    const gameSeen = ['live', 'minimized', 'nosignal'].includes(tracker.state?.status);
+    const name = url.searchParams.get('name');
+    (async () => {
+      if (standing) throw new Error('this is being seen to already: a moment');
+      // (the game's addon folders are being written: the server is not started again in the middle - watch.js)
+      standing = true; busy();
+      try {
+        if (act === '/enable') {
+          const st = switchOn(cfg, name, { gameSeen });
+          note('standins', `${name}: switched on in the game's list of addons`, { characters: st.switchedOn });
+          return st;
+        }
+        if (act === '/want') {
+          const on = url.searchParams.get('on') === '1';
+          setWant(cfg, name, on);
+          note('standins', `the box "${name}" on the page: ${on ? 'ticked' : 'unticked'}`);
+        }
+        // (a box ticked asks where QuestieDB is published only where there is none to put in; "Check for updates" asks whether a newer one is out)
+        const st = await applyStandins(cfg, { gameSeen, look: act === '/apply' });
+        // (what they answer with goes in with them: the prices and the Atlas database's rows, which the game finds when it next loads its addons)
+        const prices = handPrices(), facts = await handFacts();
+        if (st.did.length || st.errors.length || st.waiting.length) note('standins', 'what other addons ask of QuestieDB, Questie and Auctionator: seen to', { did: st.did, waiting: st.waiting, errors: st.errors, couldNotLook: st.looked ?? undefined });
+        if (pricesWanted()) auctions.touch();
+        return { ...standinStatus(cfg), did: st.did, waiting: st.waiting, errors: st.errors, looked: st.looked, prices: prices ? { mode: prices.mode, items: prices.items, written: prices.written, fresh: prices.fresh } : null, facts: facts ? { written: facts.written, fresh: facts.fresh } : null };
+      } finally { standing = false; busy(); }
+    })().then((st) => json(200, st), (err) => { note('standins', 'what other addons ask could not be seen to', { error: err.message, what: act, name: name ?? undefined }); json(500, { error: err.message }); });
     return;
   }
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); res.end(); return; }

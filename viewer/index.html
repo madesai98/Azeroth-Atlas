@@ -106,13 +106,14 @@
   #setup { display: flex; flex-direction: column; gap: 5px; padding: 8px 9px; border: 1px solid var(--line); border-radius: 7px; }
   #appLine a { margin-left: 4px; }
   #sideFoot { flex: none; padding: 9px 12px 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
-  #checkLines { display: flex; flex-direction: column; gap: 2px; }
-  #checkLines:empty { display: none; }
-  #checkLines div { padding-left: 15px; text-indent: -15px; }
-  #checkLines div::before { content: '•'; display: inline-block; width: 15px; text-indent: 0; }
-  #checkLines div.busy::before { content: '…'; }
-  #checkLines div.good::before { content: '✓'; }
-  #checkLines div.warn::before { content: '!'; }
+  #checkLines, #standLines { display: flex; flex-direction: column; gap: 2px; }
+  #checkLines:empty, #standLines:empty { display: none; }
+  #checkLines div, #standLines div { padding-left: 15px; text-indent: -15px; }
+  #checkLines div::before, #standLines div::before { content: '•'; display: inline-block; width: 15px; text-indent: 0; }
+  #checkLines div.busy::before, #standLines div.busy::before { content: '…'; }
+  #checkLines div.good::before, #standLines div.good::before { content: '✓'; }
+  #checkLines div.warn::before, #standLines div.warn::before { content: '!'; }
+  #checkLines button, #standLines button { width: auto; font-size: 11px; padding: 1px 8px; margin: 2px 0 1px 2px; text-indent: 0; }
   #fatalMore { opacity: .7; word-break: break-word; }
   #fatalMore:empty { display: none; }
   #fatalAgain, #fatalReport { width: auto; padding: 6px 22px; margin: 6px 3px 0; }
@@ -458,6 +459,17 @@
       <div class="secb" id="priceBody"></div>
     </details>
 
+    <details class="sec" data-sec="addons" id="standSec" style="display:none">
+      <summary><span class="grow">Other addons</span><span id="standNow" class="dim small"></span></summary>
+      <div class="secb">
+        <div class="dim small">Answer what your other addons ask of these, out of the map's own data:</div>
+        <label class="row" id="standRow_QuestieDB" title="Ticked: QuestieDB is in the game with the Atlas database laid over it, for every addon that reads it (Questie, guide packs, map addons). You have none: it is put in the folder QuestieDB as its makers publish it, and kept up to date. You have your own: it is left exactly as it is. Either way a small addon of the map's own beside it (AzerothAtlas_Facts) hands QuestieDB what the Atlas database knows beyond it, through QuestieDB's own way in for corrections: no file of QuestieDB's is changed. Unticked: that small addon is taken out, and a QuestieDB the map put in as well, unless one of your addons will not load without it."><input type="checkbox" id="optStand_QuestieDB"><span class="grow">QuestieDB</span><span id="standSays_QuestieDB" class="dim small"></span></label>
+        <label class="row" id="standRow_Questie" title="Ticked, and you have no Questie: a stand-in goes in the folder Questie, where every addon that names Questie finds it, and answers what they ask of it (where the vendors stand, what a quest is) out of QuestieDB, which is put in with it. It draws no icons and has no quest list. An addon that leaves its own quest icons to Questie whenever an addon of that name is loaded (OneForAll does) leaves them to the stand-in too, and shows none. Ticked, and you have Questie: nothing of it is touched. It reads QuestieDB, so the Atlas database laid over that is what reaches it. Unticked: the stand-in is taken out."><input type="checkbox" id="optStand_Questie"><span class="grow">Questie</span><span id="standSays_Questie" class="dim small"></span></label>
+        <label class="row" id="standRow_Auctionator" title="Ticked, and you have no Auctionator: a stand-in goes in the folder Auctionator, where every addon that names Auctionator finds it, and answers what they ask of it with the prices the map keeps for the auction house chosen under Auction prices. It has no auction window. Ticked, and you have Auctionator: nothing of it is touched. A small addon of the map's own beside it (AzerothAtlas_Prices) gives the map's price to the addons that ask Auctionator, wherever Auctionator has none of its own or an older one; its window, its scans and its lists are its own as before. Unticked: whichever of the two was put in is taken out."><input type="checkbox" id="optStand_Auctionator"><span class="grow">Auctionator</span><span id="standSays_Auctionator" class="dim small"></span></label>
+        <div id="standLines" class="small"></div>
+      </div>
+    </details>
+
     <details class="sec" data-sec="overlays">
       <summary><span class="grow">Overlay settings</span><span id="ovNow" class="dim small"></span></summary>
       <div class="secb" id="ovBody"></div>
@@ -487,7 +499,7 @@
 
   </div>
   <div id="sideFoot">
-    <button id="checkAll" class="primary" title="Brings everything up to date, in turn, and leaves alone what already is: Azeroth Atlas itself, the map's data, the addon in the game, your guide packs">Check for updates</button>
+    <button id="checkAll" class="primary" title="Brings everything up to date, in turn, and leaves alone what already is: Azeroth Atlas itself, the map's data, the addon in the game, your guide packs - and, for each of QuestieDB, Questie and Auctionator whose box is ticked under Other addons, what the map has in the game for it">Check for updates</button>
     <div id="checkLines" class="small"></div>
     <button id="btnReport" title="Something not working as it should? Say what, and Azeroth Atlas packs your words into one zip file with everything that may help find the cause: this computer, its own notes of what it did, the game and its addons. You choose where it is saved. Nothing is sent anywhere">Report a problem</button>
     <label id="dbRow" class="row small" style="display:none" title="Azeroth Atlas keeps one database of the game world that every copy of it adds to. Ticked, this copy sends what it learns: what the game's server has told your game about the creatures, objects and quests you have met (read from the game's own cache); where NPCs stand when you talk to them; what your fights and the game's own windows show of creatures, vendors, trainers and quests; when the boats leave; and, of the insides of dungeons, the doors, lifts and portals the map did not know of and how far off its reading of the minimap is. Facts about the game world only: nothing about your account, your characters, your realm or your computer, and not where you were or when (but for the moment a boat left). Unticked, this copy sends nothing and still gets what the others have found"><input type="checkbox" id="optShare"><span class="grow">Share what this copy learns</span><span id="dbNow" class="dim small"></span></label>

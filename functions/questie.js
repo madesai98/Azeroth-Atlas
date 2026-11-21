@@ -7,7 +7,8 @@
 // scheduled function (index.js) looks once an hour whether a new version is out, and if so puts
 // the files the map reads into the database, as they are; a copy of the map fetches them from
 // there (atlasdb/questiedb.js) and reads them as before (extractor/questie.js). This is the only
-// place QuestieDB is fetched from where it is published.
+// place the map's data is fetched from where QuestieDB is published. (The whole addon, for the
+// game's own AddOns folder, is another matter: server/standins.js.)
 //
 // It keeps nothing of its own: what is in the database says which version that is.
 //
