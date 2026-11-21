@@ -1921,6 +1921,45 @@ Tried against a mocked game that fills its tooltip the way this one does, with t
 the map writes them from the real database; not yet seen in the game itself when this was
 written.
 
+## Tracking all your completed quests at once
+
+The game tracks a quest - its objectives in the list on the right of the screen - when you tick
+it in the quest log, and a right-click on a zone's name in the quest log tracks or untracks all
+of that zone's quests ("Track All", "Untrack All"). It has nothing for the whole log. The addon
+adds two entries for that (asked for on 20 November 2026: "a button that adds all completed
+quests to the tracked list would be sick, and also an untrack all button"):
+
+| | |
+|---|---|
+| **Track All Completed Quests** | Every quest in your log that is ready to hand in is tracked, in every zone, as far as there is room: the game tracks 25 quests at most. What you tracked already stays tracked. |
+| **Untrack All Quests** | Every quest you track is untracked. The quest the game focuses is let go of too, as the game itself does when that quest is untracked. |
+
+They stand in three of the game's own menus, below what the game has there: the quest log's
+options (the button by its search box), the right-click on a zone's name in the quest log (under
+the game's own two, which are for that zone only), and the right-click on a quest in the list on
+the right of the screen. Typed, they are `/atlas track` and `/atlas untrack`. What was done is
+said in chat: "6 quests ready to hand in tracked, 1 was already", "no room to track 4 quests
+ready to hand in: the game tracks 25 quests at most", "10 quests untracked".
+
+- **Not in a fight.** The list on the right lays itself out again whenever a quest is tracked or
+  untracked, and it holds buttons (a quest's item) that an addon may not have moved in a fight.
+  Asked for in a fight, it is done the moment the fight is over, in the order asked (untrack all
+  and then track the completed ones leaves just those tracked), and it says so.
+- **Ready to hand in** is as the game's quest log has it: the objectives done, or none to do. A
+  failed quest, one the game hides, a bonus objective and a world quest are left as they are,
+  as the game's own list leaves them out.
+- A new player in the game's first quests, where the game lets no quest be untracked, gets no
+  "Untrack All Quests" (the game has none of its own there either).
+
+The entries come from the game's own way of letting addons add to its menus (`Menu.ModifyMenu`),
+and the tracking from the calls the game's own quest log uses (`C_QuestLog.AddQuestWatch`,
+`RemoveQuestWatch`); both were read out of the installed game's interface code
+(`addon/AzerothAtlas/Tracked.lua`). It needs version 32 of the addon, and the game started again
+once after it is put in (a new file: the game only looks for those when it starts). Tried
+against a mocked game whose quest log, tracked list and menus behave as that code has them, with
+the quest log of the report that asked for it; not yet seen in the game itself when this was
+written.
+
 ## Overlays: the map drawn over the game
 
 The application can draw over the game's window, so that the map is where you are looking and

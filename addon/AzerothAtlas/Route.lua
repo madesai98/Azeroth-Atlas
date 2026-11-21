@@ -1299,6 +1299,7 @@ function shared.Command(word, rest)
     say("/atlas guide (which guide addon the route follows: Guidelime or RestedXP)   /atlas guide auto, /atlas guide guidelime, /atlas guide restedxp (set it)")
     say("Shift-click the world map: a quick waypoint.   Ctrl-click: a pin, and you are asked which level where there are several (/atlas ask: asked, or not; /atlas level asks whenever you like).")
     say("/atlas drops (how often a creature drops what your quest wants, after that line of its tooltip: /atlas drops off, /atlas drops on)")
+    say("/atlas track (every quest ready to hand in is tracked)   /atlas untrack (every quest is untracked)   Both are also in the quest log's menus and in the right-click on a tracked quest.")
   end
 end
 

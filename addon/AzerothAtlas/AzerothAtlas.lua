@@ -1670,6 +1670,12 @@ SlashCmdList["AZEROTHATLAS"] = function(msg)
     if shared.DropsSay then shared.DropsSay(rest) else say("this copy of the addon does not show drop rates: update it from the 3D map, and start the game again.") end
     return
   end
+  if word == "track" or word == "untrack" then
+    -- /atlas track: every quest ready to hand in is tracked; /atlas untrack: every quest is untracked (Tracked.lua)
+    local run = word == "track" and shared.TrackReady or shared.UntrackAll
+    if run then run() else say("this copy of the addon cannot track or untrack all your quests at once: update it from the 3D map, and start the game again.") end
+    return
+  end
   if word == "log" then
     -- /atlas log: the last of the addon's own notes (all of them go into a report made on the 3D map, after a /reload)
     for _, line in ipairs(shared.LastLog(tonumber(rest) or 15)) do
