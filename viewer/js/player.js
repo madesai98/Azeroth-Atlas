@@ -120,6 +120,7 @@ export class PlayerLink {
         this.me.heading = facing === null || facing === undefined ? null : (360 - (facing * 180) / Math.PI) % 360;
         this.me.indoors = !!p.indoors;
         this.me.taxi = !!p.taxi;
+        this.me.dead = !!p.dead; // (dead or a ghost: the game's marker is on your body, and nothing is measured by it - height.js)
         this.me.zone = p.zone ?? 0; // the game's own map of where you are (a zone's, or a city's)
         // How you are moving, for the height (null = the addon in the game is an older one that does not say).
         this.me.swimming = p.swimming ?? null;

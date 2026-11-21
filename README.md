@@ -2331,6 +2331,38 @@ water). `/atlas measure off` turns it off (and `on`, on); `/atlas measure` says 
 found. Without it - an older addon, a map with none of those places, an instance - everything
 below works as it did.
 
+**Not while you are dead.** Dead, the game keeps its marker on your body, whatever an addon
+points it at, and the distance it gives is the way to that. Taken for the distance to a
+landmark, that made a ghost - who runs back along the ground - as many hundreds of yards high
+as the body was far off, a little less with every step towards it; the map had nothing to stand
+on up there, took it for "something the map does not have", and the camera that follows you
+went up into the sky after it and came down again every four seconds. (Reported on 20 November
+2026, from Stranglethorn: "my map keeps zooming in and out and losing position". The report's
+own notes had the ghost at 660 yards up at the graveyard and at 236 a minute on; reckoned
+from the way to the body, at the two moments the report has a spot for, it comes to 330 and
+236 yards where the map had noted 332 and 236.) So:
+
+- **The addon measures nothing from dying until you live again** (`UnitIsDeadOrGhost`, and the
+  game's own word that its marker is on your body: `C_SuperTrack.IsSuperTrackingCorpse`), and
+  does not point the marker anywhere in that time. A fix it was in the middle of when you died
+  is given up, the marker put back in that frame. Alive again, it measures at once.
+- **A distance has to go with the marker.** The marker is pointed at three places, one frame
+  each, and the distance to each is another: they differ, as a rule by hundreds of yards. Three
+  that are the same, but for what you moved in between, are the distance to one thing, which
+  is none of the three - whatever holds the marker, said by the game or not. Nothing is made of
+  such a fix, the addon notes it once (with what the game says it is tracking), and tries less
+  and less often while it lasts.
+- **A place is not struck off on such a distance.** A place the game gives a shorter distance
+  to than the way across the map is "not where the list has it", and is left alone until the
+  next `/reload`. As a ghost every place further off than the body was that - Ironforge and
+  Anvilmar first, the two that say most from anywhere in the east. That is now decided when the
+  fix is finished, and only for one whose distances went with the marker.
+- **The map passes over a measurement that comes while you are dead**, so a copy of the addon
+  from before this (version 27 and older) does no harm either: nothing to do in the game for
+  the map to be right again.
+
+The addon's part needs its version 28 (**Check for updates**, then `/reload` in the game).
+
 **On a flight path** (the game says so) your height is the flight route's own: every route is
 in the game data as 3D points, and the map follows the same curve through them. Where it sets
 you down you are on the ground at the flight master's height, which is also in the data, so you
@@ -2477,9 +2509,10 @@ Limits that come from the game, not from this tool:
   players, so live enemy positions cannot be shown (spawn zones show where they are stationed).
 - Inside dungeons and raids the game may hide your position; the map then only switches to
   the right map. There is nothing to measure by there either.
-- Your height is measured every few seconds, not all the time, and only on maps the game's
-  data has flight masters or landmarks for (the two continents; not instances). Between two
-  measurements, and where there are none:
+- Your height is measured every few seconds, not all the time, only on maps the game's
+  data has flight masters or landmarks for (the two continents; not instances), and not while
+  you are dead (the game's marker is on your body then). Between two measurements, and where
+  there are none:
   - a lift is only known where the game's data has it as one, and only taken where you stood
     still on it;
   - a first arrival indoors somewhere you have never walked is a guess, with the other floors

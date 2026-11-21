@@ -424,10 +424,19 @@ export class HeightTracker {
       // The game has measured your height (see #fixed): held, once, against where you were when
       // that came - not against somewhere you have got to since.
       if (me.band) this.#banded(me);
+      // Not one that came while you are dead. The game then keeps its marker on your body
+      // whatever the addon points it at, and its distance is the way to that: taken for the
+      // distance to a flight master it had a ghost, running back along the ground, hundreds
+      // of yards up - by about as much as the body was far off, and the camera went up there
+      // after it and came down again with every measurement (a report of 20 November 2026,
+      // in Stranglethorn: 660 yards up at the graveyard, 236 a minute on). The addon measures
+      // nothing while you are dead as of its version 28; an older one still sends what it made
+      // of the distance, and that is passed over here.
       const fix = me.fix;
       if (fix && fix.n !== this.fixN) {
         this.fixN = fix.n;
-        if (fix.map === me.map && Math.abs(clock - (fix.t ?? clock)) <= FIX_FRESH && Math.hypot(me.x - fix.x, me.y - fix.y) <= FIX_NEAR) this.#fixed(me, fix, clock);
+        if (me.dead) this.#note('fix:dead', 'a height the game "measured" while you are dead is passed over: its marker is on your body then, and the distance is the way to that', { at: [Math.round(me.x), Math.round(me.y)], places: (fix.refs ?? []).map((r) => `${r.kind} ${r.id}: ${Math.round(r.h * 10) / 10} of ${r.d}`) });
+        else if (fix.map === me.map && Math.abs(clock - (fix.t ?? clock)) <= FIX_FRESH && Math.hypot(me.x - fix.x, me.y - fix.y) <= FIX_NEAR) this.#fixed(me, fix, clock);
       }
     }
   }

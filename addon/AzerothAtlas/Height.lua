@@ -25,6 +25,16 @@
 -- flight, on coming out of water, on going indoors or out or into a place of another name, a
 -- moment after you stop, and every few seconds while you move (more often under water).
 -- /atlas measure turns it off and on, and says what it last found.
+--
+-- Not while you are dead. The game then keeps its marker on your body, whatever an addon points
+-- it at, and the distance it gives is the way to that: taken for the distance to a flight master
+-- it made a ghost, running back along the ground, hundreds of yards high - by as much as the
+-- body was far off, less with every step towards it (a report of 20 November 2026: the 3D map
+-- went up into the sky and came down again every few seconds). So nothing is measured from
+-- dying until you live again, and a fix is taken as soon as you do. And whatever else may one
+-- day hold the marker: a distance that is to the place the marker was pointed at changes when
+-- the marker goes on to the next place. One that stays as it was is to something else, and
+-- nothing is made of that fix (Finish).
 local shared = AzerothAtlas
 if type(shared) ~= "table" then return end
 
@@ -109,6 +119,34 @@ local function PinType(kind)
   return T.AreaPOI
 end
 
+-- Dead, or a ghost - or the game says its marker is on your body: the distance it gives is to
+-- that, whatever the marker is pointed at (see the top of this file).
+local function Dead()
+  if UnitIsDeadOrGhost and yes(UnitIsDeadOrGhost("player")) then return true end
+  if not C_SuperTrack then return false end
+  if C_SuperTrack.IsSuperTrackingCorpse and yes(call(C_SuperTrack.IsSuperTrackingCorpse)) then return true end
+  local T = Enum and Enum.SuperTrackingType
+  if T and T.Corpse ~= nil and C_SuperTrack.GetHighestPrioritySuperTrackingType then
+    return plain(call(C_SuperTrack.GetHighestPrioritySuperTrackingType)) == T.Corpse
+  end
+  return false
+end
+
+-- Whether the distances the game gave for the places of one fix went with its marker. Each is
+-- to another place: they differ, as a rule by hundreds of yards. Two that are the same - but
+-- for what you moved between the two frames - are the distance to one thing, which is neither
+-- place. (Two places that happen to be as far off as each other, to a foot: that fix is lost,
+-- and the next is four seconds away.)
+local function Stuck(seen)
+  for i = 1, #seen - 1 do
+    for k = i + 1, #seen do
+      local a, b = seen[i], seen[k]
+      if abs(a.d - b.d) <= 0.05 + sqrt((a.x - b.x) ^ 2 + (a.y - b.y) ^ 2) then return true end
+    end
+  end
+  return false
+end
+
 function shared.MeasureOn() return type(AzerothAtlasDB) ~= "table" or AzerothAtlasDB.measure ~= false end
 function shared.SetMeasure(on)
   if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end
@@ -160,12 +198,36 @@ local function Back()
   else call(C_SuperTrack.ClearSuperTrackedMapPin) end
 end
 
+-- A fix that is being taken is given up: the marker goes back, and nothing is made of what was read.
+local function Drop(now)
+  Back()
+  job = nil
+  shared.measuring = nil
+  fix.tried = now
+end
+
 local function Finish(now)
   local j = job
   Back()
   job = nil
   shared.measuring = nil
   fix.tried = now
+  -- The game's distance did not go with its marker: it is to something else, and says nothing
+  -- of these places - not how high you are by them, and not that they are somewhere else.
+  if Stuck(j.seen) then
+    count.empty, count.row = count.empty + 1, count.row + 1
+    if count.row >= 3 then count.offUntil = now + math.min(300, 10 * count.row) end
+    if not said.stuck then
+      said.stuck = true
+      local T = Enum and Enum.SuperTrackingType
+      local top = C_SuperTrack.GetHighestPrioritySuperTrackingType and plain(call(C_SuperTrack.GetHighestPrioritySuperTrackingType))
+      shared.Log("height: the game's distance stayed at " .. string.format("%.1f", j.seen[1].d) .. " yd whichever of " .. #j.seen .. " places its marker was pointed at: it is to something else, and no height is had from it"
+        .. " (what the game says it is tracking first: " .. tostring(top) .. (T and T.MapPin ~= nil and (", a place of the map being " .. tostring(T.MapPin)) or "") .. ")")
+    end
+    return
+  end
+  -- (a distance shorter than the way across the map: the place is not where the list has it)
+  for _, key in ipairs(j.short) do bad[key] = true end
   -- the two that say most
   local a, b = nil, nil
   for _, g in ipairs(j.got) do
@@ -219,8 +281,10 @@ local function Step(now)
   if kind == PinType(ref.kind) and id == ref.id and x and y then
     if d and d > 0 then
       local across2 = (x - ref.x) ^ 2 + (y - ref.y) ^ 2
-      -- (a distance shorter than the way across the map: the place is not where the list has it)
-      if d * d < across2 - 2 * d then bad[ref.kind * 100000 + ref.id] = true
+      j.seen[#j.seen + 1] = { d = d, x = x, y = y }
+      -- (a distance shorter than the way across the map: the place is not where the list has it -
+      -- if the distance is to that place at all, which is known when the fix is finished)
+      if d * d < across2 - 2 * d then j.short[#j.short + 1] = ref.kind * 100000 + ref.id
       else
         j.got[#j.got + 1] = { kind = ref.kind, id = ref.id, z = ref.z, d = d, h = sqrt(math.max(0, d * d - across2)), fine = fine }
         if #j.got == 1 then j.x, j.y = x, y end
@@ -256,7 +320,7 @@ local function Begin(now, map, x, y)
   local list = Pick(map, x, y)
   fix.tried = now
   if #list == 0 then return end
-  job = { list = {}, i = 1, got = {}, at = now, x = x, y = y }
+  job = { list = {}, i = 1, got = {}, seen = {}, short = {}, at = now, x = x, y = y }
   for i, r in ipairs(list) do job.list[i] = r end
   -- (where you are in this frame: what the game says of the first place in the next frame is for here)
   local fx, fy, ffine = Here()
@@ -277,7 +341,12 @@ end
 
 local function Run()
   local now = GetTime()
-  if job then Step(now) return end
+  local dead = Dead()
+  if job then
+    -- (you died while a fix was being taken: what the game gave in this frame may be the way to your body already)
+    if dead then Drop(now) else Step(now) end
+    return
+  end
   if not shared.MeasureOn() or shared.probing or (shared.StripOn and not shared.StripOn()) then return end
   if not (C_SuperTrack and C_SuperTrack.SetSuperTrackedMapPin and C_Navigation and C_Navigation.GetDistance and shared.HeightRefs and PinType(1) ~= nil) then return end
   local x, y, _, map = UnitPosition("player")
@@ -298,9 +367,17 @@ local function Run()
     if falling and not was.falling then was.fellAt = now end
     if was.falling and not falling and now - (was.fellAt or now) >= 0.6 then Want(now, 0.15) end
     if swimming ~= was.swimming or indoors ~= was.indoors or place ~= was.place then Want(now, 0.3) end
+    -- (alive again: at your body, or wherever a spirit healer or a friend brought you back)
+    if was.dead and not dead then Want(now, 0.3) end
   end
-  was.x, was.y, was.map, was.taxi, was.falling, was.swimming, was.indoors, was.place = x, y, map, taxi, falling, swimming, indoors, place
+  was.x, was.y, was.map, was.taxi, was.falling, was.swimming, was.indoors, was.place, was.dead = x, y, map, taxi, falling, swimming, indoors, place, dead
   if taxi then due = nil return end
+  -- (dead, the game's distance is the way to your body: nothing to measure by)
+  if dead then
+    due = nil
+    if not said.dead then said.dead = true; shared.Log("height: not measured while you are dead - the game's marker stays on your body, and its distance is the way to that") end
+    return
+  end
   -- as you go: every few seconds while you move, and once a moment after you stop
   local since = now - fix.tried
   local gone = fix.x and (abs(x - fix.x) + abs(y - fix.y)) or huge
