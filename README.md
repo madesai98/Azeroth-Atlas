@@ -1770,8 +1770,9 @@ Where's the Key?
 ```
 
 Where no figure is known the line is left as the game wrote it - as "Primitive Key" above, an
-item new to this game that nobody has a rate for yet. No other addon is needed for it (asked
-for on 20 November 2026, by someone about to uninstall Questie).
+item new to this game that nobody has a rate for yet. And what a quest of yours still wants of
+the creature that the game does not list at all is added under it (below). No other addon is
+needed for it (asked for on 20 November 2026, by someone about to uninstall Questie).
 
 **Where the figures come from.** The Atlas database, as this copy last fetched it: every
 creature's record has `drops`, the items quests ask for that it gives, each with a rate in per
@@ -1794,20 +1795,59 @@ figure is added to the line the game has just written (`addon/AzerothAtlas/Drops
 or dash and colour as they were; whole above ten in a hundred, finer the rarer the drop
 (`37%`, `5.5%`, `0.92%`).
 
+**What the game does not list is added.** The game lists a quest under a creature only where
+its own word on that creature names the item, and that word is short. The database knows of
+more: of the 960 creatures it has both that list and rates for, seven in ten of the rated
+drops (2,883 of 4,033) are items the list leaves out, and 810 of the 960 have at least one. A
+Bloodscalp Hunter drops the pages of *The Green Hills of Stranglethorn*, about one time in a
+hundred each, and the game says nothing of them under it. So once the tooltip has been
+written, your quest log is gone through, and whatever a quest of yours still wants that this
+creature has a rate for, and that the game did not list, is written under it as the game
+would have: the quest's name, and under it the line as your log has it, with its rate.
+
+```
+Bloodscalp Hunter
+Level 35
+Humanoid
+Bloodscalp Ears
+  15/15 Bloodscalp Ear (22%)
+Where's the Key?
+- 0/1 Primitive Key
+Chapter I
+- 0/1 Green Hills of Stranglethorn - Page 1 (0.92%)
+- 0/1 Green Hills of Stranglethorn - Page 4 (0.93%)
+```
+
+- **Only what is still wanted.** A thing you have all of is not added (the game shows its own
+  such lines ticked; these are simply not there).
+- **Nothing twice.** A thing the game has listed is not added again, and a quest the game
+  lists one thing of gets the other straight under the game's lines, where those end the
+  tooltip; else under the quest's name written once more, so that it is clear whose it is.
+- **Your log is read when it changes** (the game says when), and every few seconds besides,
+  not with every tooltip: the game writes a tooltip anew several times a second while the
+  mouse stays.
+- An added line cannot be told from the game's own but by this: it always has a rate. (With
+  Questie still installed and adding lines of its own, the same thing may stand twice, once
+  from each: this was asked for by someone uninstalling it.)
+
 **What it does not do.**
 
-- It adds nothing the game does not show: a creature the game lists no quest of yours under
-  gets no line from this, whatever the database knows of it.
+- Nothing for a creature the database has no rate for, whatever else is known to drop from it,
+  and nothing for a thing with no rate: a line is added because of a rate, not without one.
 - Nothing inside a dungeon or a raid, where the game keeps what a tooltip holds to itself, and
-  nothing with any value the game hands over as "secret": left alone, not worked around.
+  nothing with any value the game hands over as "secret": left alone, not worked around. A
+  tooltip of which any line is kept secret gets no lines of ours either: what the game has
+  listed there cannot be told.
 - A copy that has never fetched the database (or has it switched off from the start) has no
   figures to write: the tooltip is as the game writes it, and `/atlas drops` says so.
 
-`/atlas drops` says whether it is on and how many creatures there are figures for; `/atlas
-drops off` (and `on`) switches it, as does **In a creature's tooltip, show how often it drops
-what your quest wants** in the addon's options. It needs version 29 of the addon (**Check for
-updates**), and the game started again once: the addon has a new file, and the figures a new
-folder, and the game only looks for either when it starts.
+`/atlas drops` says whether it is on, how many creatures there are figures for and how many
+lines it has added; `/atlas drops off` (and `on`) switches both, as does **In a creature's
+tooltip, show how often it drops what your quest wants** in the addon's options. The rates
+after the game's own lines need version 29 of the addon, the added lines version 30 (**Check
+for updates**) - and the game started again once since version 29 was put in: the addon had a
+new file then, and the figures a new folder, and the game only looks for either when it
+starts. From 29 to 30 a `/reload` is enough.
 
 Tried against a mocked game that fills its tooltip the way this one does, with the figures as
 the map writes them from the real database; not yet seen in the game itself when this was

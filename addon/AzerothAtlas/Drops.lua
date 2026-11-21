@@ -16,12 +16,24 @@
 -- the game itself gives it for the item's number. A line about anything else (a kill to make,
 -- a thing to use) is the name of no such item, and is left alone.
 --
+-- And what the game does not list is added. The game lists a quest under a creature only where
+-- its own word on that creature names the item; the database knows of more (a Bloodscalp Hunter
+-- drops the pages of The Green Hills of Stranglethorn, one time in a hundred each, and the game
+-- says nothing of them under it). So when the tooltip has been written, your quest log is gone
+-- through: whatever a quest of yours still wants that this creature has a figure for, and that
+-- the game did not list, is written under it as the game would have - the quest's name, and
+-- under it the line of your log with its figure: "- 0/1 Green Hills of Stranglethorn - Page 1
+-- (0.92%)". Under the game's own lines of that quest where those end the tooltip, else under
+-- the quest's name written once more. Only what is still wanted: a thing you have all of is
+-- not added.
+--
 -- What is not done:
---   - nothing is added that the game does not show: a creature the game lists no quest of yours
---     under gets no line from this;
 --   - nothing inside a dungeon or a raid, where the game keeps what is in a tooltip to itself,
---     and nothing with any value the game hands over as "secret": left alone, not worked around;
---   - no tooltip but the game's own.
+--     and nothing with any value the game hands over as "secret": left alone, not worked around.
+--     A tooltip of which any line is kept secret gets no lines of ours either: what the game
+--     has listed there cannot be told, and nothing is to stand twice;
+--   - no tooltip but the game's own, and none but a creature's;
+--   - nothing for a creature the database has no figure for, whatever else drops from it.
 --
 -- /atlas drops         whether it is on, and how many creatures there are figures for
 -- /atlas drops off     the tooltip as the game writes it (and on, on)
@@ -138,30 +150,60 @@ local function RateFor(d, list, subject)
   return best
 end
 
--- The creature a tooltip is of: the game's number for it - or nothing (a player, a pet, something the game will not say).
-local function CreatureOf(tooltip, unitType)
-  local guid = nil
-  local info = tooltip.processingInfo
-  local data = open(info) and info.tooltipData or nil
-  if open(data) then
-    local kind = data.type
-    if secret(kind) or kind ~= unitType then return nil end
-    guid = data.guid
-    if secret(guid) then return nil end
-  elseif type(tooltip.GetUnit) == "function" then
-    -- (a game whose tooltip does not say what it is being filled from: the unit it is of)
-    local ok, _, unit = pcall(tooltip.GetUnit, tooltip)
-    if not ok or secret(unit) or type(unit) ~= "string" or type(UnitGUID) ~= "function" then return nil end
-    local got, v = pcall(UnitGUID, unit)
-    if not got or secret(v) then return nil end
-    guid = v
-  end
-  if type(guid) ~= "string" then return nil end
+-- The creature the game names by this: its number - or nothing (a player, a pet, something the game will not say).
+local function CreatureBy(guid)
+  if guid == nil or secret(guid) or type(guid) ~= "string" then return nil end
   local kind, _, _, _, _, id = strsplit("-", guid)
   if kind ~= "Creature" and kind ~= "Vehicle" then return nil end
   id = tonumber(id)
   if not id or id <= 0 then return nil end
   return id
+end
+
+-- The creature a tooltip is being filled for, while the game fills it - or nothing.
+local function CreatureOf(tooltip, unitType)
+  local info = tooltip.processingInfo
+  local data = open(info) and info.tooltipData or nil
+  if open(data) then
+    local kind = data.type
+    if secret(kind) or kind ~= unitType then return nil end
+    return CreatureBy(data.guid)
+  elseif type(tooltip.GetUnit) == "function" then
+    -- (a game whose tooltip does not say what it is being filled from: the unit it is of)
+    local ok, _, unit = pcall(tooltip.GetUnit, tooltip)
+    if not ok or secret(unit) or type(unit) ~= "string" or type(UnitGUID) ~= "function" then return nil end
+    local got, v = pcall(UnitGUID, unit)
+    if not got then return nil end
+    return CreatureBy(v)
+  end
+  return nil
+end
+
+-- Whether a tooltip is one to write into just now: the game's own, not one it forbids, and not
+-- inside a dungeon or a raid (where the game keeps what is in a tooltip to itself).
+local function Ours(tooltip)
+  if tooltip ~= GameTooltip or not shared.DropsOn() then return false end
+  if type(tooltip.IsForbidden) == "function" and tooltip:IsForbidden() then return false end
+  if type(IsInInstance) == "function" then
+    local ok, inside = pcall(IsInInstance)
+    if not ok or secret(inside) or inside then return false end
+  end
+  return true
+end
+
+-- A line of the tooltip, by its number - or nothing.
+local function LineAt(tooltip, name, index)
+  local line = (type(tooltip.GetLeftLine) == "function" and tooltip:GetLeftLine(index)) or (name and _G[name .. "TextLeft" .. index]) or nil
+  if line and type(line.GetText) == "function" and type(line.SetText) == "function" then return line end
+  return nil
+end
+-- How many lines a tooltip has, and the name its lines go by - or nothing.
+local function Lines(tooltip)
+  local name = type(tooltip.GetName) == "function" and tooltip:GetName() or nil
+  local count = type(tooltip.NumLines) == "function" and tooltip:NumLines() or nil
+  if secret(count) or type(count) ~= "number" then return nil end
+  if secret(name) or type(name) ~= "string" then name = nil end
+  return count, name
 end
 
 -- The line of the tooltip the game has just written this text into, and what stands in it. The
@@ -171,31 +213,21 @@ end
 -- that counts the game's lines, not what others have put between them.) A line the game keeps
 -- secret is not read.
 local function Written(tooltip, text)
-  local name = type(tooltip.GetName) == "function" and tooltip:GetName() or nil
-  local count = type(tooltip.NumLines) == "function" and tooltip:NumLines() or nil
-  if secret(count) or type(count) ~= "number" then return nil end
-  if secret(name) or type(name) ~= "string" then name = nil end
+  local count, name = Lines(tooltip)
+  if not count then return nil end
   for index = count, 1, -1 do
-    local line = (type(tooltip.GetLeftLine) == "function" and tooltip:GetLeftLine(index)) or (name and _G[name .. "TextLeft" .. index]) or nil
-    if line and type(line.GetText) == "function" and type(line.SetText) == "function" then
-      local shown = words(line:GetText())
-      if shown and find(shown, text, 1, true) and not find(shown, MARK, 1, true) then return line, shown end
-    end
+    local line = LineAt(tooltip, name, index)
+    local shown = line and words(line:GetText())
+    if shown and find(shown, text, 1, true) and not find(shown, MARK, 1, true) then return line, shown end
   end
   return nil
 end
 
-local count = { shown = 0 }
+local count = { shown = 0, added = 0 }
 
 -- A line of a quest's wants has been written into a tooltip.
 local function Line(tooltip, lineData, unitType)
-  if tooltip ~= GameTooltip or not shared.DropsOn() then return end
-  if type(tooltip.IsForbidden) == "function" and tooltip:IsForbidden() then return end
-  -- (inside a dungeon or a raid the game keeps what is in a tooltip to itself)
-  if type(IsInInstance) == "function" then
-    local ok, inside = pcall(IsInInstance)
-    if not ok or secret(inside) or inside then return end
-  end
+  if not Ours(tooltip) then return end
   if not open(lineData) then return end
   local text = words(lineData.leftText)
   if not text or text == "" then return end
@@ -215,7 +247,125 @@ local function Line(tooltip, lineData, unitType)
   count.shown = count.shown + 1
 end
 
-local hooked = false
+-- ---- what the game does not list ---------------------------------------------------------------
+-- What your quests still want, a line of your log each: { quest, title, text (as your log has
+-- it: "0/1 Bloodscalp Tusk"), subject (what it is about, in small letters) }. Read again when
+-- the game says the log has changed, and every few seconds besides - not with every tooltip.
+local wants = { list = {}, dirty = true, at = -100 }
+local function Wanted()
+  local now = type(GetTime) == "function" and GetTime() or 0
+  if not wants.dirty and now >= wants.at and now - wants.at < 5 then return wants.list end
+  local list = {}
+  local Q = C_QuestLog
+  if type(Q) == "table" and type(Q.GetNumQuestLogEntries) == "function" and type(Q.GetInfo) == "function" and type(Q.GetQuestObjectives) == "function" then
+    local ok, n = pcall(Q.GetNumQuestLogEntries)
+    if not ok or secret(n) or type(n) ~= "number" then n = 0 end
+    for i = 1, math.min(n, 200) do
+      local got, info = pcall(Q.GetInfo, i)
+      if got and open(info) then
+        local header, hidden, id, title = info.isHeader, info.isHidden, info.questID, words(info.title)
+        local said = not secret(header) and not secret(hidden) and not secret(id)
+        if said and not header and not hidden and type(id) == "number" and id > 0 and title and title ~= "" then
+          local had, goals = pcall(Q.GetQuestObjectives, id)
+          if had and open(goals) then
+            for _, goal in ipairs(goals) do
+              if open(goal) then
+                local text, finished = words(goal.text), goal.finished
+                -- (only what is still wanted; one the game will not say is done or not is left out)
+                if text and text ~= "" and not secret(finished) and finished ~= true then
+                  local subject = Subject(text)
+                  if subject and subject ~= "" then list[#list + 1] = { quest = id, title = title, text = text, subject = lower(subject) } end
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  wants.list, wants.dirty, wants.at = list, false, now
+  return list
+end
+
+-- (the tooltip lines were last added to: told of the same writing of a tooltip twice, they are added once)
+local done = { data = nil, lines = nil }
+
+-- A creature's tooltip has been written, every line of it: what your quests still want of the
+-- creature that the game did not list is written under it (see the top of this file).
+local function Unit(tooltip, data, types, unitType)
+  if not Ours(tooltip) or not open(data) then return end
+  local kind = data.type
+  if secret(kind) or kind ~= unitType then return end
+  if rawequal(done.data, data) and done.lines == (Lines(tooltip)) then return end
+  local d = Figures()
+  if not d then return end
+  local id = CreatureBy(data.guid)
+  local list = id and DropsOf(d, id)
+  if not list then return end
+  local wanted = Wanted()
+  if #wanted == 0 then return end
+  -- What the game has listed already, by what each of its lines is about - and the quest whose
+  -- own lines (yours, not a companion's, which follow their name) are the last thing it wrote.
+  -- With anything of it kept secret that cannot be told, and nothing is added.
+  local listed, quest, mine, lastQuest, lastText = {}, nil, true, nil, nil
+  local lines = data.lines
+  if lines ~= nil then
+    if not open(lines) then return end
+    for _, l in ipairs(lines) do
+      if not open(l) then return end
+      local t, text = l.type, l.leftText
+      if secret(t) or secret(text) then return end
+      if t == types.QuestTitle then
+        local q = l.id
+        if secret(q) then return end
+        quest, mine = (type(q) == "number" and q or nil), true
+        lastQuest, lastText = quest, (type(text) == "string" and text or nil)
+      elseif types.QuestPlayer ~= nil and t == types.QuestPlayer then
+        mine, lastQuest, lastText = false, nil, nil
+      elseif t == types.QuestObjective then
+        if type(text) == "string" and mine then
+          local s = Subject(text)
+          if s and s ~= "" then listed[lower(s)] = true end
+          lastQuest, lastText = quest, text
+        else
+          lastQuest, lastText = nil, nil
+        end
+      else
+        quest, mine, lastQuest, lastText = nil, true, nil, nil
+      end
+    end
+  end
+  -- (the game's own lines of a quest still end the tooltip: a line of ours for that quest goes straight under them)
+  local block = nil
+  if lastQuest and lastText then
+    local n, name = Lines(tooltip)
+    local line = n and n >= 1 and LineAt(tooltip, name, n) or nil
+    local shown = line and words(line:GetText())
+    if shown and find(shown, lastText, 1, true) then block = lastQuest end
+  end
+  local dash = words(rawget(_G, "QUEST_DASH")) or "- "
+  local added = 0
+  local function consider(w)
+    if listed[w.subject] then return end
+    local pct = RateFor(d, list, w.subject)
+    if not pct then return end
+    -- (the quest's name, as the game writes one: in its yellow)
+    if w.quest ~= block then tooltip:AddLine(w.title, 1, 0.82, 0); block = w.quest end
+    tooltip:AddLine(dash .. w.text .. " " .. MARK .. "(" .. Percent(pct) .. ")|r", 1, 1, 1, true)
+    listed[w.subject] = true
+    added = added + 1
+  end
+  -- (first what belongs under the lines the game ended on, then the rest, quest by quest as your log has them)
+  local first = block
+  if first then for _, w in ipairs(wanted) do if w.quest == first then consider(w) end end end
+  for _, w in ipairs(wanted) do if w.quest ~= first then consider(w) end end
+  if added > 0 then
+    count.added = count.added + added
+    done.data, done.lines = data, (Lines(tooltip))
+  end
+end
+
+local hooked, adding = false, false
 do
   local types = Enum and Enum.TooltipDataLineType
   local kinds = Enum and Enum.TooltipDataType
@@ -226,13 +376,28 @@ do
       shared.Try("drop rates", Line, tooltip, lineData, unitType)
     end)
     hooked = ok
+    if ok and type(TooltipDataProcessor.AddTooltipPostCall) == "function" and types.QuestTitle ~= nil then
+      adding = pcall(TooltipDataProcessor.AddTooltipPostCall, unitType, function(tooltip, data)
+        shared.Try("drop rates, lines of its own", Unit, tooltip, data, types, unitType)
+      end)
+    end
   end
+end
+
+-- (your quest log has changed: what it still wants is read again with the next tooltip. The
+-- frame's name is not the figures' - AzerothAtlasDrops: the game makes a frame's name a word of
+-- its own, and it would stand where the figures stood.)
+do
+  local frame = CreateFrame("Frame", "AzerothAtlasDropsWatch")
+  frame:SetScript("OnEvent", function() wants.dirty = true end)
+  -- (registered one at a time: a name this game does not have must not stop the rest)
+  for _, event in ipairs({ "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "QUEST_TURNED_IN", "UNIT_QUEST_LOG_CHANGED", "PLAYER_ENTERING_WORLD" }) do pcall(frame.RegisterEvent, frame, event) end
 end
 
 do
   local d = Figures()
   if not hooked then shared.Log("drops: this game has no way for an addon to add to a line of its tooltip: no drop rates are shown")
-  elseif d then shared.Log("drops: rates for " .. tostring(d.creatures) .. " creatures (" .. tostring(d.rates) .. " in all), as the 3D map wrote them from the Atlas database")
+  elseif d then shared.Log("drops: rates for " .. tostring(d.creatures) .. " creatures (" .. tostring(d.rates) .. " in all), as the 3D map wrote them from the Atlas database" .. (adding and "" or "; this game has no way for an addon to add lines to a creature's tooltip, so only the game's own lines get a rate"))
   else shared.Log("drops: no rates to show - the 3D map has not written them yet (AzerothAtlas_Drops), or the game has not been started since it did") end
 end
 
@@ -247,5 +412,7 @@ function shared.DropsSay(word)
     say("drop rates are shown in a creature's tooltip, after what your quest wants of it - but there are none to show yet. The 3D map writes them, from the Atlas database, beside this addon (AzerothAtlas_Drops): run Azeroth Atlas once, then start the game again. /atlas drops off turns it off.")
     return
   end
-  say("where a creature's tooltip says what your quest wants of it, how often it drops that is put after it: figures for " .. tostring(d.creatures) .. " creatures, from the Atlas database as the 3D map last wrote it (" .. count.shown .. " shown since you logged in). Where none is known, the line is as the game wrote it. /atlas drops off turns it off.")
+  say("where a creature's tooltip says what your quest wants of it, how often it drops that is put after it: figures for " .. tostring(d.creatures) .. " creatures, from the Atlas database as the 3D map last wrote it (" .. count.shown .. " shown since you logged in). Where none is known, the line is as the game wrote it. "
+    .. (adding and ("What a quest of yours still wants of a creature and the game does not list is added under it, with its figure (" .. count.added .. " lines added). ") or "")
+    .. "/atlas drops off turns it off.")
 end
