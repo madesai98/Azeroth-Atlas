@@ -76,6 +76,7 @@ export function bindNpcs(app, sheet) {
   bind('npcMyQuests', 'myQuests', (i) => i.checked);
   bind('npcUnsure', 'unsure', (i) => i.checked);
   bind('npcNames', 'names', (i) => i.checked);
+  bind('npcMarks', 'marks', (i) => i.checked);
   bind('npcMin', 'min', (i) => number(i.value));
   bind('npcMax', 'max', (i) => number(i.value));
   bind('npcRange', 'range', (i) => Math.max(50, Math.min(60000, number(i.value) ?? 1200)));

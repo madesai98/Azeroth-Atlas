@@ -451,7 +451,8 @@ What the zones are not:
 ## NPCs
 
 Tick **NPCs** (in the sidebar) and everyone and everything QuestieDB knows on the map is standing in
-the 3D world: a small sign over each head, faint where a roof or a hill is in the way.
+the 3D world: a sign over each head - for quests, a big 3D mark (below) - faint where a roof or a
+hill is in the way.
 
 | Sign | Who |
 | --- | --- |
@@ -510,6 +511,32 @@ figure on the floor they are on, in the colour of their sign, and quest objects 
 the sign, smaller, sits over the head. Elites, rares and bosses are bigger. From further off
 they are the signs alone, which read better from a height. A figure can be pointed at and
 clicked anywhere on its body.
+
+**The signs of quests are big 3D marks** (from 0.6.13), so that where to go stands out at a
+glance:
+
+| Mark | Over |
+| --- | --- |
+| a big gold **!** | whoever gives a quest open to you |
+| a big gold **?** | whoever takes a quest of yours that is finished - grey while it is not |
+| crossed swords, steel with red hilts | what a quest of yours has you kill, use or collect |
+| a blue gem | a quest object (when **Quest objects** is switched on) |
+
+- Each is a solid, shaded model with a dark outline, so that it stands out of a sunlit forest or
+  a snowfield as well as off grass: at least 46 pixels tall however far off, up to 86 close by,
+  floating over the head of its figure (over the spot, from further off). In a picture under 900
+  pixels tall they are smaller with it, down to a little over half that size: the map as a
+  minimap over the game is a few hundred pixels tall.
+- They face you, from above as from the side, and stand still. The map draws a picture only when
+  something has changed, and a mark that turned by itself would keep it drawing all the time
+  beside the game.
+- Behind a wall or under a roof they show through, fainter, as the signs did.
+- Someone with a finished quest of yours to take and another to give shows the **?**, as in the
+  game: it is what you go to them for now. (Where your quests are not known, the **!**.)
+- A mark can be pointed at and clicked anywhere on it, and the name of whoever is under it is
+  written over it.
+- **Big 3D quest marks**, under the switches, turns them back into the small flat signs. The
+  other signs - vendors, trainers, flight masters - stay small either way.
 
 **Point** at a sign for a line about it; **click** it for a card: level, what they do, every
 quest they start and end (dimmed when not for you, with why), where they stand and how that

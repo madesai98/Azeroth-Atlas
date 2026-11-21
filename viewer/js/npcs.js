@@ -136,9 +136,27 @@ const KEY = 'wfmap.npcs';
 const STRIDE = 6;        // floats per marker: position (from the layer's origin), sign, shown at any distance, size
 const DOOR_SAME = 600;   // yards: QuestieDB's pin for a dungeon this near the spot the game itself names for its door is that door, less exactly
 const SIZE = [1, 1.25, 1.3, 1.6, 1.1]; // how big a figure is, by rank: ordinary, elite, rare elite, boss, rare
-const TALL = 1.9;        // yards: a figure's height at size 1 (see npcfigures.js)
-const SIGN_FAR = 2.4;    // yards above the feet a sign floats on its own...
+export const TALL = 1.9;     // yards: a figure's height at size 1 (see npcfigures.js)
+export const SIGN_FAR = 2.4; // yards above the feet a sign floats on its own...
 const signNear = (size) => TALL * size + 0.45; // ...and over the head of a figure
+
+// The signs of quests are big marks standing in the world, solid and outlined (questmarks.js
+// draws them; "Big 3D quest marks" in the NPC panel turns them back into the flat signs). By sign:
+// which model, how big against the full size, how wide against its height, and its colour.
+export const MARKS = {
+  0: { model: 'bang', scale: 1, wide: 0.32, color: '#ffd02a' },      // gives a quest open to you
+  1: { model: 'hook', scale: 1, wide: 0.6, color: '#ffd02a' },       // takes a quest of yours, finished
+  14: { model: 'hook', scale: 0.82, wide: 0.6, color: '#b6bec8' },   // takes a quest of yours not finished yet
+  13: { model: 'swords', scale: 0.85, wide: 1.05, color: '#ff4b3a' }, // what a quest of yours has you kill, use or collect
+  12: { model: 'gem', scale: 0.58, wide: 0.64, color: '#5aa8ff' },    // a quest object (switched off unless asked for: there are many)
+};
+// How many CSS pixels tall a mark is: MARK_K over its distance, between these two (the flat signs: 1700, 15 and 30).
+export const MARK_K = 4800, MARK_MIN = 46, MARK_MAX = 86;
+/**
+ * A mark's height in CSS pixels, at a distance (yards) from the camera. fit: smaller in a small
+ * picture (the map as a minimap over the game: questmarks.js, markFit).
+ */
+export const markPx = (icon, dist, fit = 1) => Math.min(MARK_MAX, Math.max(MARK_MIN, MARK_K / Math.max(dist, 0.5))) * fit * (MARKS[icon]?.scale ?? 1);
 
 /**
  * What is searched for: the words in the box, in small letters - or nothing, for fewer than
@@ -152,7 +170,8 @@ export class NpcLayer {
   constructor(app) {
     this.app = app;
     // (ranks, types: which creatures, by rank and by kind of thing - every one unless switched off)
-    this.settings = { enabled: false, kinds: Object.fromEntries(KINDS.map((k) => [k.key, k.on])), search: '', min: null, max: null, myQuests: true, ranks: {}, types: {}, unsure: false, names: true, range: 1200 };
+    // (marks: the signs of quests as big marks in the world - questmarks.js)
+    this.settings = { enabled: false, kinds: Object.fromEntries(KINDS.map((k) => [k.key, k.on])), search: '', min: null, max: null, myQuests: true, ranks: {}, types: {}, unsure: false, names: true, marks: true, range: 1200 };
     try {
       const saved = JSON.parse(localStorage.getItem(KEY));
       if (saved) {
@@ -186,6 +205,7 @@ export class NpcLayer {
     this.onChange = () => {};
     this.onNote = () => {};
     this.context = '';     // faction + level the kinds were worked out for
+    this.markView = null;  // the quest marks as last drawn (questmarks.js): { perPx: yards a CSS pixel spans a yard away, up: the screen's up, fit: their size against the full } - or null: none
   }
 
   save() { try { localStorage.setItem(KEY, JSON.stringify(this.settings)); } catch { /* not remembered */ } }
@@ -711,6 +731,9 @@ export class NpcLayer {
         }
         if (!on) { if (text) off++; return; }
         icon[i] = sign(i, k);
+        // (someone you can hand a finished quest of yours to, who has another to give: the "?"
+        // comes first, as in the game - it is what you go to them for now)
+        if (KINDS[k].key === 'quest' && this.mine && d.ready[i] && (mask & enabled & BIT.turnin)) icon[i] = KINDS.find((x) => x.key === 'turnin').icon;
         // (what a search finds is shown at any distance: it is what you are looking for)
         if (text) far[i] = 1;
       });
@@ -742,17 +765,24 @@ export class NpcLayer {
     if (!this.count) return -1;
     const o = this.origin, inst = this.inst, range = this.settings.range;
     let best = -1, bestD = 16 * 16;
-    const fig = this.figureDist;
+    const fig = this.figureDist, marks = this.markView;
     for (let k = 0; k < this.count; k++) {
       const q = k * STRIDE, size = inst[q + 5];
       const rx = inst[q] + o[0] - camPos[0], ry = inst[q + 1] + o[1] - camPos[1], feet = inst[q + 2] + o[2] - camPos[2];
       const d2 = rx * rx + ry * ry + feet * feet;
       if (!inst[q + 4] && d2 > range * range) continue;
-      const figure = d2 < fig * fig;
-      const p = project(viewProj, rx, ry, feet + (figure ? signNear(size) : SIGN_FAR));
+      const figure = d2 < fig * fig, lift = figure ? signNear(size) : SIGN_FAR;
+      const p = project(viewProj, rx, ry, feet + lift);
       if (!p) continue;
       const sx = (p[0] * 0.5 + 0.5) * width, sy = (0.5 - p[1] * 0.5) * height;
       let dd = (sx - mx) * (sx - mx) + (sy - my) * (sy - my);
+      const mark = marks ? MARKS[inst[q + 3]] : null;
+      if (mark) {
+        // A big quest mark stands up from where the sign was, and can be pointed at anywhere on
+        // it (the nearer of two that overlap); beside it is not on it.
+        const px = markPx(inst[q + 3], Math.hypot(rx, ry, feet + lift), marks.fit), half = Math.max(8, (px * mark.wide) / 2 + 3);
+        dd = mx >= sx - half && mx <= sx + half && my >= sy - px - 3 && my <= sy + 6 ? 1 + Math.sqrt(d2) * 1e-3 : Infinity;
+      }
       if (figure) {
         // a figure can be pointed at anywhere on its body, not only at the sign over its head
         const f = project(viewProj, rx, ry, feet);
@@ -775,10 +805,13 @@ export class NpcLayer {
       if (dist < reach) near.push([dist, k]);
     }
     near.sort((a, b) => a[0] - b[0]);
-    const side = this.app.danger.settings.faction === 'horde' ? 'h' : 'a';
+    const side = this.app.danger.settings.faction === 'horde' ? 'h' : 'a', marks = this.markView;
     return near.slice(0, limit).map(([dist, k]) => {
-      const e = d.entries[d.owner[this.shown[k]]];
-      return { kind: 'npc', name: e.n, x: inst[k * STRIDE] + o[0], y: inst[k * STRIDE + 1] + o[1], z: inst[k * STRIDE + 2] + o[2], lift: dist < this.figureDist ? signNear(inst[k * STRIDE + 5]) : SIGN_FAR, minDist: 0, maxDist: reach, prio: 5,
+      const e = d.entries[d.owner[this.shown[k]]], icon = inst[k * STRIDE + 3];
+      const lift = dist < this.figureDist ? signNear(inst[k * STRIDE + 5]) : SIGN_FAR;
+      // (over a big quest mark, which stands up the screen from where the sign was: its height there, and a little more)
+      const over = marks && MARKS[icon] ? markPx(icon, dist, marks.fit) * dist * marks.perPx * 1.08 + 0.2 : 0, up = marks?.up ?? [0, 0, 1];
+      return { kind: 'npc', name: e.n, x: inst[k * STRIDE] + o[0] + up[0] * over, y: inst[k * STRIDE + 1] + o[1] + up[1] * over, z: inst[k * STRIDE + 2] + o[2] + up[2] * over, lift, minDist: 0, maxDist: reach, prio: 5,
         color: e.k ? '#bcdcff' : e[side] === 2 && !unsure(e, side) ? '#ffb3a8' : e[side] === 1 ? '#ffe9a3' : unsure(e, side) && e[side] === 2 ? '#d5d9e0' : '#c4f7cb' };
     });
   }
@@ -1046,7 +1079,7 @@ ${GLOBALS_WGSL}
 struct Layer {
   origin: vec4f,  // the markers' own origin, camera-relative
   view: vec4f,    // x, y: one pixel in clip units; z: how far markers show; w: how high above the feet they float
-  near: vec4f,    // x: closer than this a marker is a figure standing in the world, and its sign sits over its head; y: a figure's height
+  near: vec4f,    // x: closer than this a marker is a figure standing in the world, and its sign sits over its head; y: a figure's height; z: 1 - the signs of quests are big marks instead (questmarks.js)
 };
 @group(1) @binding(0) var<uniform> L: Layer;
 @group(1) @binding(1) var sheet: texture_2d<f32>;
@@ -1064,7 +1097,8 @@ struct VSOut { @builtin(position) clip: vec4f, @location(0) uv: vec2f, @location
   let limit = select(L.view.z, 1.0e9, far > 0.5);
   let fade = clamp((limit - dist) / (limit * 0.12), 0.0, 1.0);
   var c = G.viewProj * vec4f(rel, 1.0);
-  if (c.w < 0.3 || fade <= 0.0) { out.clip = vec4f(2.0, 2.0, 2.0, 1.0); return out; }
+  let mark = L.near.z > 0.5 && (${Object.keys(MARKS).map((k) => `abs(icon - ${k}.0) < 0.5`).join(' || ')});
+  if (c.w < 0.3 || fade <= 0.0 || mark) { out.clip = vec4f(2.0, 2.0, 2.0, 1.0); return out; }
   // big when you are close, never smaller than a readable dot
   let px = clamp(1700.0 / dist, 15.0, 30.0) * select(1.0, 0.72, figure);
   c = vec4f(c.xy + (corner - vec2f(0.5)) * L.view.xy * px * c.w, c.z, c.w);
@@ -1129,7 +1163,7 @@ export class NpcRenderer {
     const gpu = this.gpu, d = this.data, ratio = gpu.pixelRatio || 1;
     d[0] = layer.origin[0] - camera.pos[0]; d[1] = layer.origin[1] - camera.pos[1]; d[2] = layer.origin[2] - camera.pos[2];
     d[4] = (2 * ratio) / gpu.width; d[5] = (2 * ratio) / gpu.height; d[6] = layer.settings.range; d[7] = SIGN_FAR;
-    d[8] = layer.figureDist; d[9] = TALL;
+    d[8] = layer.figureDist; d[9] = TALL; d[10] = layer.settings.marks ? 1 : 0;
     gpu.device.queue.writeBuffer(this.uniform, 0, d);
     pass.setBindGroup(0, gpu.globalsGroup);
     pass.setBindGroup(1, this.group);

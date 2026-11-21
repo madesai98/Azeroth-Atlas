@@ -12,6 +12,7 @@ import { bindNpcs } from './npcui.js';
 import { bindQuests } from './quests.js';
 import { bindPrices } from './prices.js';
 import { NpcFigures } from './npcfigures.js';
+import { QuestMarks } from './questmarks.js';
 import { FloorFinder } from './floors.js';
 import { NavGrid } from './navgrid.js';
 import { TravelRoutes } from './travel.js';
@@ -506,6 +507,8 @@ function render() {
   app.questUi.drawRest(pass);
   app.models.drawTransparent(pass);
   app.npcRenderer.draw(pass, app.npcs, camera);
+  // (the signs of quests, big and solid: a "!" over who gives one, a "?" over who takes one - questmarks.js)
+  app.questMarks.draw(pass, app.npcs, camera);
   pass.end();
   gpu.device.queue.submit([encoder.finish()]);
   sentFrame(gpu);
@@ -1782,6 +1785,7 @@ async function main() {
   const sheet = makeIconSheet();
   app.npcRenderer = new NpcRenderer(app.gpu, sheet);
   app.npcFigures = new NpcFigures(app.gpu);
+  app.questMarks = new QuestMarks(app.gpu); // (the signs of quests as big marks in the world: questmarks.js)
   app.npcUi = bindNpcs(app, sheet);
   // every quest there is, to search and look into (the Quests section)
   app.questUi = bindQuests(app);
