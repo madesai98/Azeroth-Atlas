@@ -467,6 +467,39 @@ export class NameCache {
   }
 
   /**
+   * Where the game's own interface is on the screen, as the addon says (Windows.lua, version 37;
+   * an older one does not say, and one in which it is switched off says so): the rectangles in
+   * which the game draws its bars and frames and every window that is open. The map drawn over
+   * the game, where it is set to lie behind the interface, leaves those open (viewer/js/overlay.js).
+   * { gen (the edition: another whenever anything of it changes), rects: [left, top, right, bottom,
+   *   left, top, ... - each edge as so many 1023rds of the game's picture, across or down] } - or
+   * null: not said. It comes in pieces that name the edition they belong to, as your quests do: a
+   * new one is taken only when every piece of it is in.
+   */
+  ui() {
+    const first = this.raw.get(`${TEXT_KIND.TALK}:11`);
+    if (first && first.length >= 2) {
+      const gen = first[0], count = first[1];
+      if (count === 255 || gen === 0) this.uiSaid = null; // (switched off in the game)
+      else if (count <= 24) {
+        const rects = [];
+        let whole = true;
+        for (let chunk = 0; chunk < Math.max(1, Math.ceil(count / 6)); chunk++) {
+          const b = this.raw.get(`${TEXT_KIND.TALK}:${11 + chunk}`);
+          if (!b || b[0] !== gen || b[1] !== count) { whole = false; break; }
+          for (let i = 2; i + 4 < b.length && rects.length < count * 4; i += 5) {
+            // (four edges of ten bits each, in five bytes)
+            const v = b[i] * 4294967296 + b[i + 1] * 16777216 + b[i + 2] * 65536 + b[i + 3] * 256 + b[i + 4];
+            rects.push(Math.floor(v / 1073741824) % 1024, Math.floor(v / 1048576) % 1024, Math.floor(v / 1024) % 1024, v % 1024);
+          }
+        }
+        if (whole && rects.length === count * 4) this.uiSaid = { gen, rects };
+      }
+    }
+    return this.uiSaid ?? null;
+  }
+
+  /**
    * Your pet, and what your minimap is set to track, as the addon says (Yours.lua) - or null from
    * an addon that does not say (before version 34). The map names the dots of the game's minimap
    * by it (dots.js).

@@ -28,7 +28,9 @@
 //     many keyboards type @, # and {).
 //   - the mouse. The window lies over the whole of the game's, and must not take a click meant
 //     for the game: it takes none, except while the pointer is on a panel the page has said
-//     can be clicked (it is looked at thirty times a second). It never takes the keyboard
+//     can be clicked (it is looked at thirty times a second) - and not on a part of that panel
+//     the page has left open, for the game's own interface to show through: the map set to
+//     lie behind the interface. It never takes the keyboard
 //     either - a click on the map over the game leaves your character running - until you
 //     click into something to type in, and gives it back when you are done.
 //   - what you have set (overlays.json, beside what the window remembers): the page shows it
@@ -42,7 +44,7 @@ const SHAPES = ['circle', 'rounded', 'square'];
 const DEFAULTS = {
   v: 1,
   side: { shown: false, hotkey: 'Control+Alt+F1', pinned: false, anchor: 'tl', origin: 'tl', x: 16, y: 80, w: 344, h: 720, opacity: { still: 100, moving: 70, combat: 45 }, through: { moving: false, combat: true } },
-  map: { shown: false, hotkey: 'Control+Alt+F2', pinned: false, anchor: 'cc', origin: 'cc', x: 0, y: 0, w: 960, h: 640, opacity: { still: 100, moving: 70, combat: 45 }, through: { moving: false, combat: true } },
+  map: { shown: false, hotkey: 'Control+Alt+F2', pinned: false, anchor: 'cc', origin: 'cc', x: 0, y: 0, w: 960, h: 640, opacity: { still: 100, moving: 70, combat: 45 }, through: { moving: false, combat: true }, below: false },
   mini: { shown: false, hotkey: 'Control+Alt+F3', pinned: false, anchor: 'tr', origin: 'tr', x: -24, y: 24, w: 260, h: 260, opacity: { still: 100, moving: 100, combat: 85 }, through: { moving: false, combat: false }, shape: 'circle', turn: true, auto: false },
 };
 const LEAST = { side: [260, 220], map: [320, 220], mini: [120, 120] }; // the smallest an overlay can be made
@@ -66,6 +68,8 @@ function sound(raw) {
     };
     for (const k of ['still', 'moving', 'combat']) o.opacity[k] = Math.round(num(r.opacity?.[k], 5, 100, d.opacity[k]));
     for (const k of ['moving', 'combat']) o.through[k] = typeof r.through?.[k] === 'boolean' ? r.through[k] : d.through[k];
+    // (the map: over the game's own interface, as it comes - or behind it: see viewer/js/overlay.js, holesOf)
+    if (id === 'map') o.below = r.below === true;
     if (id === 'mini') {
       o.shape = SHAPES.includes(r.shape) ? r.shape : d.shape;
       o.turn = typeof r.turn === 'boolean' ? r.turn : d.turn;
@@ -86,6 +90,27 @@ function key(text) {
   // (a letter or a figure by itself would be taken from the game and from everything typed anywhere)
   if (!parts.some((p) => p !== 'Shift') && !/^F\d+$/.test(last)) return null;
   return [...parts, last].join('+');
+}
+
+/**
+ * Is the pointer on something of the page that can be clicked? rects: [{ x, y, w, h, round (its
+ * corners are not part of it), holes: [{ x, y, w, h }] (parts of it that are left open: the
+ * game's own interface shows there, and takes its clicks) }], all in the overlay's window.
+ */
+function takesAt(rects, x, y) {
+  const inside = (r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+  return rects.some((r) => {
+    if (!inside(r)) return false;
+    // (round: its corners are the game's)
+    if (r.round && ((x - r.x - r.w / 2) / (r.w / 2)) ** 2 + ((y - r.y - r.h / 2) / (r.h / 2)) ** 2 > 1) return false;
+    return !(r.holes ?? []).some(inside);
+  });
+}
+/** What the page says can be clicked, made sound: a dozen panels at the most, each with no more than a hundred parts left open. */
+function soundRects(list) {
+  const ok = (r) => r && [r.x, r.y, r.w, r.h].every((v) => typeof v === 'number' && Number.isFinite(v));
+  return Array.isArray(list) ? list.slice(0, 12).filter(ok).map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h, round: r.round === true,
+    holes: Array.isArray(r.holes) ? r.holes.slice(0, 100).filter(ok).map((q) => ({ x: q.x, y: q.y, w: q.w, h: q.h })) : [] })) : [];
 }
 
 /**
@@ -224,11 +249,8 @@ function overlays(d) {
     try { p = screen.getCursorScreenPoint(); } catch { return; }
     const b = host.getBounds(), x = p.x - b.x, y = p.y - b.y;
     // (not held on to while you type: a click on the game then goes to the game, which takes the keyboard back with it)
-    const on = mouse.hold || mouse.rects.some((r) => {
-      if (x < r.x || x >= r.x + r.w || y < r.y || y >= r.y + r.h) return false;
-      // (round: its corners are the game's)
-      return !r.round || ((x - r.x - r.w / 2) / (r.w / 2)) ** 2 + ((y - r.y - r.h / 2) / (r.h / 2)) ** 2 <= 1;
-    });
+    // (and not where a panel is left open for the game's interface: a click there is the game's)
+    const on = mouse.hold || takesAt(mouse.rects, x, y);
     if (on !== mouse.takes) { mouse.takes = on; takes(on); }
   }
 
@@ -291,10 +313,10 @@ function overlays(d) {
     if (running() !== held) bind();
     arrange();
   });
-  // (what of the page can be clicked just now, in the overlay's window: [{ x, y, w, h, round }]; and a drag under way)
+  // (what of the page can be clicked just now, in the overlay's window: [{ x, y, w, h, round, holes }]; and a drag under way)
   ipcMain.on('atlas:overlay:rects', (e, list) => {
     if (from(e) !== 'page') return;
-    mouse.rects = Array.isArray(list) ? list.slice(0, 12).filter((r) => r && [r.x, r.y, r.w, r.h].every((v) => typeof v === 'number' && Number.isFinite(v))).map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h, round: r.round === true })) : [];
+    mouse.rects = soundRects(list);
   });
   ipcMain.on('atlas:overlay:hold', (e, on) => { if (from(e) === 'page') mouse.hold = on === true; });
   ipcMain.on('atlas:overlay:typing', (e, on) => { if (from(e) === 'page' && hosted) typing(on === true); });
@@ -327,4 +349,4 @@ function overlays(d) {
   };
 }
 
-module.exports = { overlays, sound, key, DEFAULTS, LEAST, IDS, POINTS, SHAPES };
+module.exports = { overlays, sound, key, takesAt, soundRects, DEFAULTS, LEAST, IDS, POINTS, SHAPES };

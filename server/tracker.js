@@ -325,6 +325,19 @@ export class PlayerTracker {
         this.quests = { rev: this.quests.rev + 1, log: q.log, done: q.done, me: who ? { class: who.class, race: who.race, skills: who.skills, reps: who.reps, spells: who.spells } : null };
       }
     }
+    // Where the game's own interface is on the screen (the addon's Windows.lua): for the map drawn
+    // over the game, where it is set to lie behind the interface (viewer/js/overlay.js). Taken
+    // when a piece of it has come in: { n (the edition), r: [left, top, right, bottom, ... in
+    // 1023rds of the game's picture] } - or null: the addon does not say.
+    if (d.text && d.text.last && d.text.kind === TEXT_KIND.TALK && d.text.key >= 11 && d.text.key <= 14) {
+      const ui = this.names.ui();
+      const said = ui ? `${ui.gen}:${ui.rects.join()}` : '';
+      if (said !== this.uiSaid) {
+        this.uiSaid = said;
+        this.ui = ui ? { n: ui.gen, r: ui.rects } : null;
+        if (changed('ui', ui ? ui.rects.length / 4 : null)) note('game', ui ? 'where the game\'s interface is on the screen: so many rectangles' : 'the game no longer says where its interface is', ui ? { rectangles: ui.rects.length / 4 } : undefined);
+      }
+    }
     const player = {
       map: d.map, mode: d.mode, x: d.x, y: d.y, z: d.z, facing: d.facing, zone: d.zone, level: d.level, inInstance: d.inInstance, dead: d.dead, taxi: d.taxi, indoors: d.indoors, faction: d.faction,
       // how you are moving (null when the addon in the game is an older one that does not say)
@@ -393,6 +406,8 @@ export class PlayerTracker {
       party: d.party.map((m) => ({ slot: m.slot, name: this.names.party(m.slot), x: m.x, y: m.y, dead: m.dead })),
       // what the game's minimap shows as dots, as places in the world, and what your tracking is set to (dots.js)
       ...this.#dotsNow(),
+      // where the game's own interface is on the screen, for the map drawn behind it
+      ui: this.ui ?? null,
     });
   }
 }

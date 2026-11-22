@@ -81,7 +81,7 @@ local L_COMBAT = 16
 -- (kind 7 has more than the NPC under its other keys: 1 the route mailboxes, 2 the level you
 -- chose, 8 the server's clock and from 16 on a boat line each: see Route.lua and Transit.lua;
 -- 9 where the game's minimap is on the screen: see MinimapReport; 10 the quests you have just
--- handed in: see HandedBytes)
+-- handed in: see HandedBytes; 11 to 14 where the game's interface is on the screen: Windows.lua)
 local T_PARTY, T_STATS, T_BIND, T_BINDPOS, T_FLIGHTS, T_TALK = 2, 3, 4, 5, 6, 7
 local Q_LOG, Q_DONE = 0, 1
 -- where the waypoint comes from: your guide's step, a journey of your own in Shortest Path
@@ -1189,6 +1189,14 @@ local function BuildMessages()
     end
     if sent > 0 and #quests.bulk > sent then quests.at = sent end
   end
+  -- where the game's own interface is on the screen (Windows.lua), for the map drawn over the game
+  -- to make room for it: all of it when it has changed, else a piece of it a round
+  if shared.WindowsReport then
+    local ok, reports = shared.Try("windows report", shared.WindowsReport)
+    if ok and type(reports) == "table" then
+      for _, r in ipairs(reports) do list[#list + 1] = { T_TALK, r[1], r[2] } end
+    end
+  end
   -- the level you chose for a waypoint with more than one under it (Route.lua), first: the 3D map is waiting for it
   if shared.ChoiceReport then
     local ok, bytes = shared.Try("choice report", shared.ChoiceReport)
@@ -1424,6 +1432,8 @@ end
 -- further - so the round begins again from its first message, where such things are said,
 -- as soon as the message being sent is through)
 local textCursor, textPart, textFresh = 0, 0, false
+-- (for the addon's other files: what they have to say has changed, and the 3D map is waiting for it)
+function shared.SayNow() textFresh = true end
 local function NextText()
   local now = GetTime()
   if textPart == 0 and textFresh then textFresh, textCursor, messagesAt = false, #messages, -100 end
@@ -1779,6 +1789,12 @@ SlashCmdList["AZEROTHATLAS"] = function(msg)
   if word == "me" or word == "self" then
     -- /atlas me: what the 3D map is told of your character, to tell which quests are open to you (Self.lua)
     if shared.SelfSay then shared.SelfSay() else say("this copy of the addon does not say who your character is: update it from the 3D map, and start the game again.") end
+    return
+  end
+  if word == "windows" or word == "interface" then
+    -- /atlas windows, /atlas windows off, /atlas windows on: where the game's interface is on the
+    -- screen, said to the 3D map for the map drawn behind it (Windows.lua)
+    if shared.WindowsSay then shared.WindowsSay(rest) else say("this copy of the addon does not say where the game's interface is: update it from the 3D map, and start the game again.") end
     return
   end
   if word == "pet" or word == "yours" then

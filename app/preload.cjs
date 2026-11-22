@@ -15,7 +15,8 @@
 //     .dock()           put all of them away: the page is back in its window
 //     .on(fn)           fn(how things stand) whenever any of it changes
 //     .game(info)       tell the application where the game's window is: { status, window: { x, y, w, h } } as the map's server has it
-//     .rects(list)      (the page, over the game) what of it can be clicked just now: [{ x, y, w, h, round }] in the window
+//     .rects(list)      (the page, over the game) what of it can be clicked just now: [{ x, y, w, h, round, holes: [{ x, y, w, h }] }]
+//                       in the window (holes: parts of a panel left open for the game's interface, where a click is the game's)
 //     .hold(on)         a drag is under way: the mouse stays with the overlay until it is over
 //     .typing(on)       you are typing into the overlay: it takes the keyboard, and gives it back
 //     .state()          (for the tests) how the windows stand

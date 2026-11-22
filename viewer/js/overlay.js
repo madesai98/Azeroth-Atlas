@@ -27,6 +27,13 @@
 // fight. Whatever of the page can be clicked at the moment is told to the application, which
 // lets the mouse through everywhere else.
 //
+// The full map can be set to lie behind the game's own interface. No window of another program
+// can: what is done is that the map's box is left open wherever the game draws its interface -
+// its bars and frames, and every window that is open - so that those show through and take
+// their clicks (holesOf: the addon says where they are, through the strip, about a second
+// after anything of it changes; the application is told what is left open, and lets the mouse
+// through there).
+//
 // As a minimap the map is always on you, round or square, turning with you and zooming by the
 // kind of place as is set for the minimap alone, from as far off as you last had it. The
 // switches under "You" are the full map's (and the application's window's): they stand as they
@@ -63,6 +70,63 @@ export function place(o, gw, gh, least = [1, 1]) {
 /** The other way: how far apart anchor and origin are for an overlay that lies at (left, top) with size w by h: { x, y }. */
 export function apart(anchor, origin, gw, gh, left, top, w, h) {
   return { x: Math.round(left) - Math.round(frac(anchor[1]) * gw) + Math.round(frac(origin[1]) * w), y: Math.round(top) - Math.round(frac(anchor[0]) * gh) + Math.round(frac(origin[0]) * h) };
+}
+
+/**
+ * Rectangles that may lie over one another ([left, top, right, bottom] each), as rectangles
+ * that do not, covering the same ground: [{ x, y, w, h }]. (What is cut out of a panel is cut
+ * out once: two cuts lying over each other would, the way such a shape is drawn, put the
+ * ground they share back.)
+ */
+export function disjoint(rects) {
+  const edges = (a, b) => [...new Set(rects.flatMap((r) => [r[a], r[b]]))].sort((p, q) => p - q);
+  const xs = edges(0, 2), ys = edges(1, 3), out = [];
+  let open = new Map(); // the stretches of the band above, each with the rectangle it is the foot of
+  for (let j = 0; j + 1 < ys.length; j++) {
+    const y1 = ys[j], y2 = ys[j + 1], cy = (y1 + y2) / 2, spans = [];
+    let run = null;
+    for (let i = 0; i + 1 < xs.length; i++) {
+      const cx = (xs[i] + xs[i + 1]) / 2;
+      if (rects.some((r) => cx > r[0] && cx < r[2] && cy > r[1] && cy < r[3])) { if (run) run[1] = xs[i + 1]; else run = [xs[i], xs[i + 1]]; } else if (run) { spans.push(run); run = null; }
+    }
+    if (run) spans.push(run);
+    const next = new Map();
+    for (const [a, b] of spans) {
+      const key = `${a},${b}`, above = open.get(key);
+      // (the same stretch as in the band above: one rectangle, a band taller)
+      if (above && above.y + above.h === y1) { above.h = y2 - above.y; next.set(key, above); } else { const q = { x: a, y: y1, w: b - a, h: y2 - y1 }; out.push(q); next.set(key, q); }
+    }
+    open = next;
+  }
+  return out;
+}
+
+/**
+ * Where the game's own interface is drawn within a box of the overlay: the parts of the box
+ * to leave open, so that the interface shows through and takes its clicks - [{ x, y, w, h }]
+ * in the overlay's window, none lying over another.
+ * @param ui   what the game says of its interface (the server's strip.js: ui): { r: [left, top,
+ *             right, bottom, ... each edge as so many 1023rds of the game's picture] } - or null
+ * @param box  { x, y, w, h } in the overlay's window, which lies over the whole of the game's
+ *             picture (gw by gh)
+ * @param pad  pixels left open round each part: the game's frames have edges and glows that
+ *             reach a little past the place the game gives for them
+ */
+export function holesOf(ui, box, gw, gh, pad = 3) {
+  const r = ui?.r;
+  if (!Array.isArray(r) || r.length < 4 || !(gw > 0) || !(gh > 0)) return [];
+  const rects = [];
+  for (let i = 0; i + 3 < r.length; i += 4) {
+    const x1 = Math.max(box.x, Math.floor((r[i] / 1023) * gw) - pad), y1 = Math.max(box.y, Math.floor((r[i + 1] / 1023) * gh) - pad);
+    const x2 = Math.min(box.x + box.w, Math.ceil((r[i + 2] / 1023) * gw) + pad), y2 = Math.min(box.y + box.h, Math.ceil((r[i + 3] / 1023) * gh) + pad);
+    if (x2 - x1 >= 2 && y2 - y1 >= 2) rects.push([x1, y1, x2, y2]);
+  }
+  return disjoint(rects);
+}
+
+/** A box with parts of it cut out, as the shape it is drawn within (for the box's own style: its corner is 0, 0). */
+export function cutPath(box, holes) {
+  return `path(evenodd, "M0 0H${box.w}V${box.h}H0Z${holes.map((q) => `M${q.x - box.x} ${q.y - box.y}h${q.w}v${q.h}h${-q.w}Z`).join('')}")`;
 }
 
 /**
@@ -111,6 +175,9 @@ export function bindOverlays(app) {
     drag: null,         // a panel being dragged or resized: { id, kind, rect, ... }
     form: null,         // what the map's box is just now, over the game: 'map', 'mini' or null (put away)
     gameSaid: '', typing: false, built: false, rects: '',
+    uiSaid: '',         // where the game's interface is, as last heard (see heard)
+    holes: 0,           // how many parts of the map are left open for it just now
+    cut: '',            // ...and the shape the map's box is cut to for that ('' whole)
   };
   const html = document.documentElement, body = document.body;
   const over = () => !!st.told?.over;
@@ -124,6 +191,10 @@ export function bindOverlays(app) {
       const said = JSON.stringify([s.status, s.window ?? null]);
       if (said !== st.gameSaid) { st.gameSaid = said; api.game({ status: s.status, window: s.window ?? null }); }
     }
+    // (where the game's own interface is has changed - a window opened, a bag shut: the map that
+    // lies behind the interface is left open somewhere else)
+    const ui = s?.ui && Array.isArray(s.ui.r) ? `${s.ui.n}:${s.ui.r.join()}` : '';
+    if (ui !== st.uiSaid) { st.uiSaid = ui; if (over() && st.told?.settings.map.below) { lay(); show(); } }
     const now = performance.now();
     if (p && s.status === 'live') {
       if ((typeof p.speed === 'number' && p.speed > 0.2) || p.taxi) st.movedAt = now;
@@ -198,6 +269,7 @@ export function bindOverlays(app) {
     asMini(form === 'mini');
     body.classList.toggle('ov-mini', form === 'mini');
     for (const [k] of SHAPES) body.classList.toggle(`ov-shape-${k}`, form === 'mini' && t.settings.mini.shape === k);
+    if (!on || form !== 'map' || !t.settings.map.below) { if (st.cut) { st.cut = ''; $('mapBox').style.clipPath = ''; } st.holes = 0; }
     if (!on) { if (st.rects !== '[]' && api) { st.rects = '[]'; api.rects([]); } app.dirty = true; return; }
     if (form === 'mini') { const o = t.settings.mini, P = app.player; if (P && (P.turn !== !!o.turn || P.auto !== !!o.auto)) { P.turn = !!o.turn; P.auto = !!o.auto; } }
     const list = [];
@@ -219,8 +291,19 @@ export function bindOverlays(app) {
       const r = rectOf(form);
       for (const k of ['x', 'y', 'w', 'h']) html.style.setProperty(`--ov-map-${k}`, `${r[k]}px`);
       html.style.setProperty('--ov-map-o', String(o.opacity[st.how] / 100));
+      // The map set to lie behind the game's own interface: no window of another program can, so
+      // it is left open wherever the game draws its interface (the addon says where: holesOf) -
+      // the interface shows through there, and a click there is the game's.
+      let holes = [];
+      if (form === 'map' && o.below) {
+        holes = holesOf(app.player?.state?.ui, r, ...size());
+        const shape = holes.length ? cutPath(r, holes) : '';
+        // (set only when it is another shape: the browser writes it in its own way, so what is set is remembered here)
+        if (shape !== st.cut) { st.cut = shape; $('mapBox').style.clipPath = shape; }
+        st.holes = holes.length;
+      }
       // (round: its corners are the game's to click)
-      if (!through(o)) list.push(form === 'mini' && o.shape === 'circle' ? { ...r, round: true } : r);
+      if (!through(o)) list.push(form === 'mini' && o.shape === 'circle' ? { ...r, round: true } : holes.length ? { ...r, holes } : r);
     }
     const said = JSON.stringify(list);
     if (said !== st.rects) { st.rects = said; api?.rects(list); }
@@ -386,7 +469,10 @@ export function bindOverlays(app) {
         check('Auto-zoom', 'The minimap’s distance from you goes by the kind of place you are in (the three distances under You). Its own switch: unticked, it stays as far off as you zoom it with the wheel.', () => st.told.settings.mini.auto, (v) => api.set({ mini: { auto: v } }))));
     const reset = el('button', { text: 'Put it back where it comes', title: 'Where it lies, how big it is and what it is held by, as they were before anything was changed.' });
     reset.addEventListener('click', () => api.set({ [st.tab]: { anchor: null, origin: null, x: null, y: null, w: null, h: null } }));
-    box.append(ui.note, ui.tabs, shown, ui.keyMsg, ui.only,
+    // (the map alone: over the game's own interface, as it comes - or behind it)
+    ui.below = check('Behind the game’s interface', 'Unticked, the map lies over everything in the game: your bars, your bags, any window you open. Ticked, it looks as if it lay behind the game’s interface: wherever the game draws its bars, frames and open windows the map is left open, so that they show through - and a click there is the game’s, not the map’s. The addon in the game says where the interface is, about a second after it changes.', () => st.told.settings.map.below, (v) => api.set({ map: { below: v } }));
+    ui.belowNote = el('div', { class: 'small dim' });
+    box.append(ui.note, ui.tabs, shown, ui.keyMsg, ui.only, ui.below, ui.belowNote,
       check('Pinned: it cannot be moved or resized', 'Unpinned, drag it by its head (the sidebar) or the grip at its top (the map; the minimap can be dragged anywhere), and resize it by its bottom right corner. It stays inside the game’s window.', (o) => o.pinned, (v) => set({ pinned: v })),
       pct('still', 'Opacity standing still'), pct('moving', 'Opacity while moving'), pct('combat', 'Opacity in a fight'),
       row(el('span', { class: 'grow', text: 'Clicks go through it' }), thru('moving', 'moving'), thru('combat', 'in a fight')),
@@ -416,6 +502,13 @@ export function bindOverlays(app) {
     const t = st.told, o = t.settings[st.tab], up = upOf(t.settings);
     for (const f of ui.shows ?? []) f();
     ui.mini.style.display = st.tab === 'mini' ? 'flex' : 'none';
+    // (behind the game's interface: the map's alone - and what the game says of where its interface is)
+    ui.below.style.display = st.tab === 'map' ? '' : 'none';
+    const said = app.player?.state?.ui, live = app.player?.state?.status === 'live';
+    ui.belowNote.style.display = st.tab === 'map' && t.settings.map.below ? '' : 'none';
+    ui.belowNote.textContent = !live ? 'It goes by what the game says of where its interface is: nothing is heard from the game just now, so the map lies over all of it.'
+      : !said ? 'The game does not say where its interface is, so the map lies over all of it. That takes version 37 of the addon (Update addon, then start the game again: it has a new file), and /atlas windows on in the game if it was switched off there.'
+        : `The game names ${said.r.length / 4} part${said.r.length === 4 ? '' : 's'} of the screen its interface is drawn in${up.map ? `; the map is left open in ${st.holes} place${st.holes === 1 ? '' : 's'}` : ''}.`;
     ui.key.classList.toggle('asking', st.asking === st.tab);
     ui.key.textContent = st.asking === st.tab ? 'Press the key…' : keyWords(o.hotkey);
     const given = t.keys?.[st.tab];

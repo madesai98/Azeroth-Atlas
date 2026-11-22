@@ -2131,6 +2131,10 @@ put away):
   A key held for an overlay is taken from every other program, whatever it would have done
   there - which is why the keys are held only while the game is running, and why they do not
   come as Ctrl + Alt + a figure: that is how many keyboards type @, # and {.
+- **Behind the game's interface** (the map alone): unticked, as it comes, the map lies over
+  everything in the game. Ticked, it looks as if it lay behind the game's own interface: your
+  bars and frames, your bags, any window you open show through it, and take their clicks (see
+  "Behind the game's interface" below).
 - **Pinned**: it cannot be moved or resized. Unpinned, drag the sidebar by its head, the map
   by the grip at its top, the minimap anywhere; resize by the bottom right corner. Every panel
   has a pin and a cross of its own in its corner too (the cross puts it away).
@@ -2168,6 +2172,42 @@ your character runs on. Only when you click into something to type in (the searc
 number) does the overlay take the keyboard, and it gives it back when you leave that - Esc, or
 a click on the game.
 
+**Behind the game's interface** (asked for on 21 November 2026: "configure if it will appear
+above or below ingame UI ... if its below, then it tracks what UI is open and masks the window
+in the areas where the ingame UIs are showing so it looks like it appears behind them", and
+"the masked sections should also be uninteractable with mouse clicks passing through those
+areas"). No window of another program can lie behind a part of the game's own picture. What
+the map does, set so, is leave itself open wherever the game draws its interface: nothing of
+the map is drawn there, so the bar or the bag shows through, and the mouse goes through there
+to the game - a click on your bag is a click on your bag.
+
+Where the interface is, the addon says, through the strip (`addon/AzerothAtlas/Windows.lua`,
+from version 37): the rectangles of the screen in which the game draws its bars and frames,
+the minimap, the chat, and every window that is open - the game's own and other addons' alike.
+It looks at what hangs under the interface's root a few times a second: what is shown, takes
+the mouse or draws something is a rectangle; a frame that only holds others is looked into;
+tooltips are left out. What touches is made one, and the two dozen biggest are said - only
+once they have been found the same twice running, so a window still sliding open is said where
+it comes to rest. Each edge goes as a 1023rd of the screen, and the map leaves three pixels
+more round each part, for edges and glows. `/atlas windows` in the game says how many
+rectangles it names; `/atlas windows off` stops it (and `on` starts it again).
+
+What to know of it:
+
+- It follows the game by about a second: a window you open is under the map for that long and
+  then in front of it, and one you shut leaves its hole for as long. That is the strip's pace
+  (a few bytes with every picture the game draws); nothing quicker leads out of the game.
+- It is rectangles. A round minimap leaves a square open, a frame's see-through corners are
+  part of its rectangle, and a frame that reaches further than what it draws - a list of
+  quests with three lines in it - leaves all of its place open.
+- More than two dozen separate parts are not said: the smallest are left out, and the map lies
+  over those.
+- A tooltip, a menu that is gone again within the second, a name over a head: the map lies
+  over those too.
+- With an addon from before version 37, or with it switched off in the game, the game says
+  nothing, and the map lies over all of the interface as it did ("Overlay settings" says so).
+- It is the full map's alone: the sidebar and the minimap lie over the game's interface.
+
 **One map, not two.** What is over the game is not a second copy of the map. It is the
 application's own page, taken out of its window and laid over the game's in one that is
 see-through, has no frame and stays on top; there the page shows its sidebar and its map as two
@@ -2193,10 +2233,11 @@ is drawn until the map or the minimap is brought up.
 31 of the addon; with an older one you are never taken to be fighting). **Moving** is the
 game's own speed for you, a change of place, or a flight path.
 
-How it is made: `app/overlay.cjs` (the window over the game, the keys, the mouse; what is set is
-kept in `overlays.json` beside what the window remembers), `app/main.cjs` (the page as a view
-that can be lifted out of its window), `viewer/js/overlay.js` (the panels, where they lie, the
-map as a minimap and as the map again, the settings). Only in the application: a page open in
+How it is made: `app/overlay.cjs` (the window over the game, the keys, the mouse - which goes
+through wherever a panel is left open; what is set is kept in `overlays.json` beside what the
+window remembers), `app/main.cjs` (the page as a view that can be lifted out of its window),
+`viewer/js/overlay.js` (the panels, where they lie, the map as a minimap and as the map again,
+the map cut open where the game's interface is, the settings). Only in the application: a page open in
 a browser cannot draw over anything, and its "Overlay settings" says so.
 
 Tried on the real page with the application stood in for (67 checks: where a panel lies for
@@ -2215,6 +2256,19 @@ screen for a few seconds - both with 0.6.8, not again since. **Not tried in the 
 the overlays over the running game, the keys while the game has the keyboard, the mouse going
 through to it, the keyboard taken for typing and given back. If any of that is not as it
 should be, "Report a problem" has what is set and how the windows stand.
+
+The map behind the game's interface (0.6.18) was tried on the real page with the application
+stood in for (31 checks: the map cut open where a bag, a bar, two windows lying over each other
+and a window that fills the screen are said to be, a click there not the map's, the
+application told what is left open, the map whole again when they shut, when the game says
+nothing, as a minimap, and put away); the addon's reading of the interface in a made-up one
+(33 checks: what is a rectangle and what is looked into, what is left out, what is made one, a
+window opening, dragged and shut); the two together through the real strip into the map's
+server (8 checks: a window that opens is known there in under a second, and nothing else the
+strip says is kept waiting); and the application's own reckoning of where the mouse goes
+through, by itself. **Not tried in the application itself, nor in the game**: that the game
+shows through the open parts as it does round the panels, and takes its clicks there, rests on
+their being the same see-through window and the same letting-through of the mouse.
 
 ## Live player link
 
