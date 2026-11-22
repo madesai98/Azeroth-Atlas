@@ -87,7 +87,7 @@ const kind = (key, label, group, icon, on, hint) => ({ key, label, group, icon, 
 export const KINDS = [
   kind('quest', 'Quest givers', 'quests', 0, true, 'Whoever starts a quest. With "Available quests only": only who has one you can take now. Without: every one of them - a gold ! where there is a quest for you now, a grey one where there is none'),
   kind('turnin', 'Quest turn-ins', 'quests', 1, true, 'Where a quest is handed in. With the live link: the quests in your log, grey until they are finished'),
-  kind('target', 'My quest targets', 'quests', 13, true, 'What the unfinished quests in your log have you kill, use or collect (needs the live link)'),
+  kind('target', 'My quest targets', 'quests', 13, true, 'What the unfinished quests in your log still have you kill, use or collect: what a quest asked for and you have done is no longer marked (needs the live link)'),
   kind('flight', 'Flight masters', 'services', 2, true),
   kind('inn', 'Innkeepers', 'services', 3, true),
   kind('repair', 'Repairs', 'services', 5, true),
@@ -194,7 +194,8 @@ export class NpcLayer {
     this.quests = null;    // quests.json, once it has been fetched
     this.seen = null;      // every sighting (all maps), once fetched
     this.focus = null;     // a quest id: show only who and what that quest involves
-    this.mine = null;      // your quests as the game reports them: { log: Map<id, state>, done: Set<id> | null, who: your character (see setQuestState) | null } (null = not known)
+    this.mine = null;      // your quests as the game reports them: { log: Map<id, state>, done: Set<id> | null, who: your character (see setQuestState) | null, goals: Map<id, how far it has got> } (null = not known)
+    this.tracked = null;   // how far the quest you track has got, as the game says of that one (see setTracked)
     this.rev = 0;          // changes whenever the markers do
     this.count = 0;        // markers the filters leave
     this.inst = new Float32Array(0);
@@ -235,9 +236,31 @@ export class NpcLayer {
     const me = d?.me && typeof d.me === 'object' ? d.me : null;
     const pairs = (list, value) => (Array.isArray(list) ? new Map(list.filter(Array.isArray).map((r) => [r[0], value(r)])) : null);
     const who = me ? { class: me.class || 0, race: me.race || 0, skills: pairs(me.skills, (r) => [r[1] || 0, r[2] || 0]), reps: pairs(me.reps, (r) => r[1] ?? null), spells: pairs(me.spells, (r) => r[1] === true) } : null;
-    this.mine = d && Array.isArray(d.log) ? { log: new Map(d.log.map((q) => [q.id, q.state])), done: Array.isArray(d.done) ? new Set(d.done) : null, who } : null;
+    // (goals: of a quest that is part done, which part - an addon of version 36 or later says it: see #left)
+    const goals = new Map((Array.isArray(d?.log) ? d.log : []).filter((q) => q.goals && Array.isArray(q.goals.kinds)).map((q) => [q.id, q.goals]));
+    this.mine = d && Array.isArray(d.log) ? { log: new Map(d.log.map((q) => [q.id, q.state])), done: Array.isArray(d.done) ? new Set(d.done) : null, who, goals } : null;
     this.#classify();
     this.rebuild();
+  }
+
+  /**
+   * How far the quest you track has got, as the game says of that one quest (the server's
+   * strip.js: heads().tracked - { id, state, n, done, kinds }, or null). An addon from before
+   * version 36 says it of no other: so of that one, at least, what is done is no longer shown
+   * as something to go after.
+   */
+  setTracked(t) {
+    const sig = t && Array.isArray(t.kinds) ? `${t.id}.${t.state}.${t.done}.${t.kinds.join('')}` : '';
+    if (sig === (this.trackedSig ?? '')) return;
+    this.trackedSig = sig;
+    this.tracked = sig ? t : null;
+    this.#classify();
+    this.rebuild();
+  }
+
+  /** How far a quest of your log has got, where the game says: { n, done, kinds } (see #left) - or null. */
+  #progress(id) {
+    return this.mine?.goals?.get(id) ?? (this.tracked?.id === id && this.tracked.state === 0 ? this.tracked : null);
   }
 
   /** What is known of your character, for telling which quests are open to you (questopen.js: closedWhy). */
@@ -475,7 +498,8 @@ export class NpcLayer {
     const d = this.data, q = this.quests?.quests?.[id];
     if (!q || !from) return null;
     const done = progress ? progress.state === 1 : this.mine?.log.get(id) === 1;
-    const left = done ? null : this.#left(q, progress);
+    // (of a quest that is not the one you track, how far it has got is said with your log, where the addon says it)
+    const left = done ? null : this.#left(q, progress ?? this.#progress(id));
     // (no NPC data for this map at all: there is nothing of it here to look for)
     if (!d) return (done ? null : this.#door(q, from)) ?? this.#elsewhere(q, done, left) ?? (done ? null : this.#elsewhere(q, true, null));
     const takers = () => {
@@ -620,9 +644,10 @@ export class NpcLayer {
     // (each quest is asked about once: many are given by several)
     const you = this.you(), Q = this.quests?.quests, why = new Map(), names = { factions: this.quests?.factions };
     const open = (id) => { if (!Q?.[id]) return !this.quests; let w = why.get(id); if (w === undefined) why.set(id, (w = closedWhy(id, Q, you, names))); return w === ''; };
-    // what the unfinished quests in your log are after
+    // what the unfinished quests in your log are after - of each, what it still asks for: the
+    // eight raiders killed, a quest's raiders are no longer anything to go after (see #left)
     const after = new Set();
-    if (this.mine) for (const [id, state] of this.mine.log) if (state === 0) this.#targets(id, after);
+    if (this.mine) for (const [id, state] of this.mine.log) if (state === 0 && Q?.[id]) this.#targets(id, after, this.#left(Q[id], this.#progress(id)));
     d.entries.forEach((e, i) => {
       let m = 0n;
       d.ready[i] = 0;

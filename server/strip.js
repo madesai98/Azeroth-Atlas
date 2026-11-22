@@ -245,7 +245,8 @@ export class NameCache {
 
   /**
    * Your quests, as far as they have arrived: { log: [{ id, state (0 in progress, 1 ready to hand
-   * in, 2 failed) }] | null, done: [quest ids] | null, sig }. Each list comes in pieces that
+   * in, 2 failed), goals (of one that is part done: which part - see #said) }] | null, done:
+   * [quest ids] | null, sig }. Each list comes in pieces that
    * name the edition they belong to; a list is replaced only when every piece of a newer
    * edition is in, so what is returned is always one whole list as the game had it.
    *
@@ -253,12 +254,50 @@ export class NameCache {
    * moment that is said, which is long before the list of quests done has come round again.
    */
   quests() {
-    const q = this.#lists(), handed = this.handed();
+    const q = this.#said(), handed = this.handed();
     if (!handed.length) return q;
     const gone = new Set(handed);
     const log = q.log && q.log.filter((x) => !gone.has(x.id));
     const done = q.done && [...new Set([...q.done, ...handed])].sort((a, b) => a - b);
     return { log, done, sig: `${q.sig}+${handed.join(',')}` };
+  }
+
+  /**
+   * The two lists, and with each quest of the log that is part done, which part (goals): a quest
+   * with something done that is not ready to hand in has goals: { n (how many things it asks
+   * for), done (which of them are done: a bit each, the first the lowest), kinds: [of each: 1 a
+   * creature, 2 an item, 3 an object, 0 anything else] } - as the game's own list of what it
+   * asks for has it. A quest with no goals said has nothing done yet (or the addon does not say:
+   * one from before version 36 - or says of sixteen quests and no more).
+   */
+  #said() {
+    const q = this.#lists(), g = this.goals();
+    if (!g || !q.log) return { ...q, sig: `${q.sig}/${g ? g.gen : '-'}` };
+    return { log: q.log.map((x) => (x.state === 0 && g.of.has(x.id) ? { ...x, goals: g.of.get(x.id) } : x)), done: q.done, sig: `${q.sig}/${g.gen}.${g.of.size}` };
+  }
+
+  /**
+   * How far the quests of your log have got that are part done, as the addon says (version 36;
+   * an older one does not say): { gen (the edition), of: Map<quest id, { n, done, kinds }> } - or
+   * null: not said. It comes in pieces that name the edition they belong to, as your quests do: a
+   * new one is taken only when every piece of it is in.
+   */
+  goals() {
+    const g0 = this.raw.get(`${TEXT_KIND.QLOG}:4`);
+    if (g0 && g0.length >= 2 && g0[1] <= 16) {
+      const gen = g0[0], count = g0[1], of = new Map();
+      let whole = true;
+      for (let chunk = 0; chunk < Math.max(1, Math.ceil(count / 4)); chunk++) {
+        const b = this.raw.get(`${TEXT_KIND.QLOG}:${4 + chunk}`);
+        if (!b || b[0] !== gen || b[1] !== count) { whole = false; break; }
+        for (let i = 2; i + 6 < b.length && of.size < count; i += 7) {
+          const id = b[i] * 65536 + b[i + 1] * 256 + b[i + 2], n = b[i + 3], kinds = b[i + 5] * 256 + b[i + 6];
+          if (id > 0 && n >= 1 && n <= 8) of.set(id, { n, done: b[i + 4] & (2 ** n - 1), kinds: Array.from({ length: n }, (_, k) => (kinds >> (k * 2)) & 3) });
+        }
+      }
+      if (whole && of.size === count) this.goalsSaid = { gen, of };
+    }
+    return this.goalsSaid ?? null;
   }
 
   /**

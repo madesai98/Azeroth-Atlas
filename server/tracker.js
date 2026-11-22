@@ -261,7 +261,8 @@ export class PlayerTracker {
     if (changed('target', target)) note('game', target ? `the game heads for a waypoint (kind ${target.kind}: 1 guide, 2 journey, 3 pin, 4 quick)` : 'the game has no waypoint', target ?? undefined);
     const h = this.names.heads();
     if (changed('heads', h)) note('game', 'what you could be heading for', h ? { guide: spot(h.guide), waypoint: spot(h.waypoint), corpse: spot(h.corpse), quest: h.quest, tracked: h.tracked } : { said: false });
-    if (changed('quests', this.quests.rev)) note('game', 'your quest log', { rev: this.quests.rev, log: this.quests.log?.map((q) => `${q.id}:${q.state}`) ?? null, done: this.quests.done?.length ?? null,
+    // (of a quest that is part done, which of the things it asks for are done: "4281:0 (1 of 3 done: 100)" - the first of three)
+    if (changed('quests', this.quests.rev)) note('game', 'your quest log', { rev: this.quests.rev, log: this.quests.log?.map((q) => `${q.id}:${q.state}${q.goals ? ` (${q.goals.kinds.filter((_, k) => (q.goals.done >> k) & 1).length} of ${q.goals.n} done: ${q.goals.kinds.map((_, k) => (q.goals.done >> k) & 1).join('')})` : ''}`) ?? null, done: this.quests.done?.length ?? null,
       // (who your character is, as far as the addon says: what a quest's requirements are held against)
       you: this.quests.me ? { class: this.quests.me.class, race: this.quests.me.race, professions: this.quests.me.skills?.filter((s) => s[1] || s[2]).map((s) => `${s[0]}:${s[1]}/${s[2]}`) ?? null, standingsKnown: this.quests.me.reps?.filter((r) => r[1] !== null).length ?? null, spellsKnown: this.quests.me.spells?.filter((s) => s[1]).length ?? null } : null });
     const t = this.names.travel();

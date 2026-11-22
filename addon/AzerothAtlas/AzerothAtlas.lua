@@ -76,7 +76,8 @@ local L_COMBAT = 16
 -- on, who your character is - class, race, professions, standings: Self.lua); where your hearthstone is set
 -- (its name, and the spot if this addon saw you bind there); the flight points you know;
 -- the NPC whose window you last opened; and, a little at a time, your quests: the ones in your
--- log (kind 0) and the ones you have done (kind 1, running on into kind 0 from key 8)
+-- log (kind 0; under its keys 4 to 7, how far those of them have got that are part done: see
+-- quests.Goals) and the ones you have done (kind 1, running on into kind 0 from key 8)
 -- (kind 7 has more than the NPC under its other keys: 1 the route mailboxes, 2 the level you
 -- chose, 8 the server's clock and from 16 on a boat line each: see Route.lua and Transit.lua;
 -- 9 where the game's minimap is on the screen: see MinimapReport; 10 the quests you have just
@@ -960,8 +961,15 @@ local TALK_EVENTS = {
 -- there and then), and a quest you hand in is named in a message of its own at the head of every
 -- round for two minutes (HandedBytes) - the list of quests done is long, and takes a while to
 -- come round again in full. The map counts a quest so named as done from the moment it arrives.
+--
+-- And of a quest in your log that is part done, which part: you have killed the eight raiders it
+-- asks for and not yet the shadowmancers, and the map is to show you the shadowmancers and not
+-- the raiders. So with the log goes, for each quest of it that has something done and is not
+-- ready to hand in, how far it has got (quests.Goals: what QuestProgress says of it, as it is
+-- said of the quest you track). It is short - seven bytes a quest - and is said afresh, with
+-- the log, the moment a thing a quest asks for is done.
 local quests = { bulk = {}, at = 0, log = nil, logSig = "", logGen = 0, done = nil, doneGen = 0, dirty = true, retry = 3, readAt = -1000,
-  logFresh = false, handed = {}, counting = {} }
+  logFresh = false, handed = {}, counting = {}, goals = nil, goalsGen = 0 }
 local HANDED_FOR, HANDED_MOST, COUNT_FOR = 120, 5, 60
 local LOG_PER_MESSAGE, LOG_MAX, DONE_PER_MESSAGE, DONE_MESSAGES = 11, 44, 34, 120
 
@@ -996,6 +1004,24 @@ local function ReadQuestLog()
   end
   table.sort(list)
   return list
+end
+
+-- How far the quests of your log have got, for those with something done that are not ready to
+-- hand in (of the others there is nothing to say: all of it is still to do, or none): of each
+-- its number (3 bytes), how many things it asks for, which of them are done (a bit each, the
+-- first the lowest) and what kind each is (2 bytes: see QuestProgress). Sixteen quests at the
+-- most; of one left out the map shows everything, as it did of all of them before.
+function quests.Goals(log)
+  local out = {}
+  for i = 1, #log do
+    local state = log[i] % 4
+    if state == 0 and #out < 16 then
+      local id = (log[i] - state) / 4
+      local _, n, done, kinds = QuestProgress(id)
+      if n and n > 0 and done and done > 0 then out[#out + 1] = Byte3(id) .. strchar(n, done, floor(kinds / 256), kinds % 256) end
+    end
+  end
+  return table.concat(out)
 end
 
 -- The quests you have done, as one string: each number as its step up from the one before, in
@@ -1044,6 +1070,15 @@ local function BuildBulk()
       bulk[#bulk + 1] = { Q_LOG, chunk, table.concat(bytes) }
     end
   end
+  -- (how far the part-done ones have got, right after the log and under the keys it leaves free -
+  -- 4 to 7: which edition, how many quests, then four of them to a message)
+  local goals = quests.goals
+  if goals then
+    local count = #goals / 7
+    for chunk = 0, math.max(0, floor((count - 1) / 4)) do
+      bulk[#bulk + 1] = { Q_LOG, 4 + chunk, strchar(quests.goalsGen, count) .. string.sub(goals, chunk * 28 + 1, (chunk + 1) * 28) }
+    end
+  end
   local done = quests.done
   if done then
     local n = floor((#done + DONE_PER_MESSAGE - 1) / DONE_PER_MESSAGE)
@@ -1080,6 +1115,15 @@ local function RefreshQuests()
     if sig ~= quests.logSig or not quests.log then
       quests.log, quests.logSig = log, sig
       quests.logGen = quests.logGen % 255 + 1
+      quests.logFresh = true
+      changed = true
+    end
+    -- (how far each has got, where a part of it is done: another the moment a thing a quest asks
+    -- for is finished - and then said at once, with the log, like the log itself)
+    local ok3, goals = pcall(quests.Goals, log)
+    if ok3 and type(goals) == "string" and goals ~= quests.goals then
+      quests.goals = goals
+      quests.goalsGen = quests.goalsGen % 255 + 1
       quests.logFresh = true
       changed = true
     end

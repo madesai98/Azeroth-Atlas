@@ -563,8 +563,10 @@ each is ready to hand in, and every quest you have ever done. From then on:
   not one for another class, or that asks for a profession you do not have (see below);
 - a **turn-in** is where one of the quests in YOUR log goes, bright when it is ready and grey
   until then;
-- **My quest targets** marks what your unfinished quests have you kill, use or collect, and what
-  drops the things they ask for;
+- **My quest targets** marks what your unfinished quests still have you kill, use or collect,
+  and what drops the things they ask for. What a quest asked for and you have done is no longer
+  marked: with the eight raiders killed and the shadowmancers still to go, the shadowmancers
+  are marked and the raiders are not (see below);
 - the card says of every quest what it is to you: in your log, ready to hand in, done, from
   level 12, after another quest, outgrown.
 
@@ -578,6 +580,16 @@ within two), and a quest you hand in is named on its own straight away, so the m
 done that moment and does not wait for the long list. The line under the switches says what it
 knows ("Your quests, from the game: 14 in your log, 312 done"). Until it knows, quests go by
 side and level as before.
+
+With your log goes how far each quest in it has got that is part done (addon version 36): of
+the things it asks for, in the game's own order, which are done and what kind each is - a
+creature, an item, an object. The game does not say which creature; the quest data has them
+kind by kind in the same order, and that is how the two are matched up. A kind that is all done
+or not begun is plain; where a kind is part done and the game lists more or fewer of it than
+the data has, nothing of that kind is taken for done: better a mark on something finished than
+none on something that is not. It is said again the moment a thing is finished (a second or
+two). Sixteen part-done quests are said at the most; of any beyond that everything stays marked.
+An addon from before says it of the one quest you track, and of that one the map goes by it.
 
 (Before 0.6.16 a quest could take from ten seconds to several minutes to reach the map: the
 strip was looked at about fifteen times a second while the addon draws a new piece some twenty
@@ -2629,13 +2641,14 @@ so a blue dot where one of them stands is left out. Of the others, one is your p
 that has been there longest. Whatever else of yours the game puts on its minimap - a hunter's
 hawks, for their eighteen seconds - is not shown.
 
-**Does the game say where your pet is?** To an addon it says so of you and of your party;
-whether it does of a pet in this game nobody has tried yet. The addon asks, and where the game
-answers, that is gone by: the pet is then shown where the game says even with no dot to see -
-beyond the minimap's edge, or under your own arrow - and the blue dot at that place is the pet,
-however many blue dots there are (`/atlas pet` says whether it answered). The game's combat
-log does say where a pet is, with each blow it strikes or takes; that is not used here: it
-comes in bursts, late, and only in a fight.
+**Does the game say where your pet is?** Not to an addon. It says so of you and of your party;
+of a pet it gives nothing (seen in the game on 21 November 2026, a hunter's pet out in the open
+country; `/atlas pet` says what it gave). So your pet is where its blue dot is, and is not
+shown where the minimap has no dot of it: beyond its edge, or under your own arrow. The addon
+asks all the same, and should the game ever answer, that is gone by: the pet is then shown
+where the game says even with no dot to see, and the blue dot at that place is the pet,
+however many blue dots there are. The game's combat log does say where a pet is, with each blow
+it strikes or takes; that is not used here: it comes in bursts, late, and only in a fight.
 
 What it cannot do:
 

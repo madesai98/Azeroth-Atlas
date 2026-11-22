@@ -682,6 +682,8 @@ function step(now, seen) {
     // the game with them (ingame.js). The game knows that at first hand - it hears of a thing
     // done before this page does - and so can tell the route from before from the one it waits for.
     app.questFor = heads ? { id: heads.quest ?? 0, state: heads.tracked?.id === heads.quest ? heads.tracked.state : 0, done: heads.tracked?.id === heads.quest ? heads.tracked.done : 0 } : null;
+    // (and what of it is done is no longer shown as something to go after: npcs.js, setTracked)
+    app.npcs.setTracked(heads?.tracked?.id === heads?.quest ? heads?.tracked ?? null : null);
     // (noted when it changes - log.js: what the routes of the moment are worked out for)
     if (changed('quest', app.questFor)) note('quest', app.questFor?.id ? `the quest you track: ${app.npcs.quests?.quests?.[app.questFor.id]?.n ?? app.questFor.id}` : 'no quest is tracked', { ...app.questFor, asTheGameSays: heads?.tracked ?? null, leadsTo: want.quest ? { name: want.quest.name, at: [Math.round(want.quest.x), Math.round(want.quest.y)] } : null, knownToTheMap: !!app.npcs.quests?.quests?.[app.questFor?.id] });
     if (changed('lead', [leadKind, target?.source ?? null, !!app.route.enabled])) note('route', target ? `the route that leads is the one to your ${leadKind === 'guide' ? "guide's step" : 'waypoint'}` : 'nothing leads: the game has no waypoint, and no marker is dropped here', { said: target?.source ?? null, drawn: app.route.enabled });
