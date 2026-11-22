@@ -568,12 +568,25 @@ each is ready to hand in, and every quest you have ever done. From then on:
 - the card says of every quest what it is to you: in your log, ready to hand in, done, from
   level 12, after another quest, outgrown.
 
-That is a lot to send through a strip a few pixels high (hundreds of quest numbers), so it goes
-a little at a time: the log within a second or two, the list of quests done over the next
-several (packed as the steps between their numbers), and again after you hand one in. The map
-only believes a list once every piece of one edition of it has arrived. The line under the
-switches says what it knows ("Your quests, from the game: 14 in your log, 312 done"). Until it
-knows, quests go by side and level as before.
+That is a lot to send through a strip a few pixels high (hundreds of quest numbers), so most
+of it goes a little at a time: the list of quests done over ten seconds or so after you log in
+(packed as the steps between their numbers), and again after you hand one in. The map only
+believes a list once every piece of one edition of it has arrived. What you have just done is
+said at once, though: when your log changes, the addon starts what it sends over again with the
+whole log (a quest taken, handed in or given up is on the map within a second, one finished
+within two), and a quest you hand in is named on its own straight away, so the map counts it
+done that moment and does not wait for the long list. The line under the switches says what it
+knows ("Your quests, from the game: 14 in your log, 312 done"). Until it knows, quests go by
+side and level as before.
+
+(Before 0.6.16 a quest could take from ten seconds to several minutes to reach the map: the
+strip was looked at about fifteen times a second while the addon draws a new piece some twenty
+times a second, so pieces were missed - and a piece seen twice, which the game's picture often
+gives with a pixel or two different, was taken for a gap as well. A message of several pieces
+then had to wait for its next turn. The map now looks at every picture Windows hands it of the
+game, up to fifty a second, and takes a piece seen twice for the one piece it is: measured on
+the game, the pieces never seen went from 91 in twenty seconds to none, for 2.3% of one
+processor core instead of 1.3%.)
 
 **What makes a quest open to you.** A quest giver in the game shows its "!" only for a quest
 your character can be given at that moment. The map goes by the same things: what QuestieDB
@@ -590,8 +603,15 @@ when nothing here speaks against it (`viewer/js/questopen.js` is all of it):
 | Your standing with a faction | too low ("needs more standing with Bloodsail Buccaneers") or, where a quest is for those a faction dislikes, too high |
 | What you have learned | it asks for a spell you do not know - or is offered only to those who do not, and you do |
 | The time of year | it belongs to a festival or a world event (Lunar Festival, Midsummer, the Darkmoon Faire, the war effort...): whether its event is on is not known to the map, so it is taken to be closed |
+| Questie's own lists | Questie's makers list it as not in this game (a duplicate, one never finished, a promotion: "Your Reward has Arrived!", which had every capital's innkeeper wearing a gold "!"), or show no "!" for it (a book you bring to a librarian, a sealed crate, the Stranglethorn fishing tournament's quests, CLUCK!), or it belongs to a world event that is over (the Ahn'Qiraj war effort, the Scourge invasion) or to a festival. A quest of the first two kinds makes nobody a quest giver, even with **Available quests only** unticked |
 
 The card of a quest giver says of each of its quests which of these it is.
+
+Questie's lists are Questie's own, kept by hand, and not part of QuestieDB: the map carries a
+copy (`viewer/js/questhidden.js`, made from Questie 12.12.0 by `tools/make-quest-hidden.mjs`,
+which works out each entry for this game as Questie does: WoW Forever counts as the original
+game). Of the quests in QuestieDB 1.1.4 that is 176 not in this game, 96 with no "!", 138 of an
+event that is over and 220 of a festival.
 
 **Who your character is** comes from the game, with your quests, from version 33 of the addon
 on (`Self.lua`): your class and race, and - of each profession, faction and spell that some
@@ -3813,11 +3833,11 @@ The 3D map shows them, the game does not. In the order worth looking:
 - With the continents and Zephras Isle on one picture, NPC markers are those of the map in
   hand; each of the others shows them once it is taken in hand (look at it closely, or choose
   it from the list). The route is drawn on all of them.
-- A quest that is in QuestieDB and not in the game (a duplicate, one that was never finished)
-  is not told apart from one that is: its giver has the gold "!" if nothing else speaks
-  against it. Questie keeps a list of those by hand, which is Questie's own and not part of
-  QuestieDB. And a quest of a festival or a world event is taken to be closed all year: the
-  map does not know when its event is on.
+- A quest that is in QuestieDB and not in the game is told apart by Questie's own hand-kept
+  list, as the map's copy of it has it (from Questie 12.12.0): one the game has stopped offering
+  since is not, until a newer Questie says so and the copy is made again. And a quest of a
+  festival or a world event is taken to be closed all year: the map does not know when its
+  event is on.
 - The stand-ins for Questie and Auctionator answer what the addons installed here were seen to
   ask (OpenMap, RestedXP, WhatsItFor, OneForAll, TradeSkillMaster, EllesmereUI, Forever Leveling
   Guide). An addon that asks them something else gets no answer. They, the Atlas layer over

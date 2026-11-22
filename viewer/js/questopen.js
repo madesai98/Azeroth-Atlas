@@ -26,14 +26,33 @@
 //                                         to those who have not, not that spell (sp)
 //   the time of year                      a quest of a festival or a world event is taken to be
 //                                         closed: whether its event is on is not known here
+//   Questie's own lists                   a quest Questie's makers list as not in this game (a
+//                                         duplicate, one never finished, a promotion), one they
+//                                         show no "!" for (a book brought to a librarian, a sealed
+//                                         crate, the fishing tournament's), one of a world event
+//                                         that is over (the Ahn'Qiraj war effort), one of a
+//                                         festival (questhidden.js: tools/make-quest-hidden.mjs)
 //
 // What is not known is not held against a quest: without the live link nothing of your log or
 // of what you have done is, and a quest is judged by side and level alone; an addon from before
 // version 33 does not say your race, class, professions, standings or spells. (So the fewer of
 // those are known, the more quest givers count as having something for you.)
 //
-// Not told apart: a quest that is in the data and not in the game (a duplicate, one never
-// finished). Questie keeps a list of those by hand; it is Questie's own, and not in QuestieDB.
+// Questie's lists are Questie's (they are not in QuestieDB): the map has a copy of them, made
+// from a release of Questie. A quest the game has stopped offering since is not told apart until
+// they say so.
+import { NOT_IN_GAME, NO_MARK, EVENT_OVER, FESTIVAL } from './questhidden.js';
+
+/** Why Questie keeps a quest off its map, by quest: 1 not in this game, 2 no "!" for it, 3 its event is over, 4 a festival's. */
+const HIDDEN = new Map([...FESTIVAL.map((id) => [id, 4]), ...EVENT_OVER.map((id) => [id, 3]), ...NO_MARK.map((id) => [id, 2]), ...NOT_IN_GAME.map((id) => [id, 1])]);
+const HIDDEN_WHY = { 1: 'not in this game', 2: 'not offered with a "!"', 3: 'its event is over', 4: 'only while its event is on' };
+
+/**
+ * Is a quest one that makes whoever gives it a quest giver at all? Not one that is not in this
+ * game, nor one the game shows no "!" for: those are no sign of anything to be had there, whatever
+ * else is known.
+ */
+export const givenHere = (id) => { const h = HIDDEN.get(id); return h !== 1 && h !== 2; };
 
 /** A quest this many levels under you is no longer worth doing (the game hides its "!"). */
 export const GREY = 7;
@@ -85,6 +104,9 @@ export function closedWhy(id, Q, you, names = {}) {
   }
   if (did(id)) return q.rep ? 'done before, and can be done again' : 'done';
   if (q.ex?.some((x) => did(x) || have(x))) return 'you took another instead';
+  // (one Questie's makers keep off their map in this game: questhidden.js)
+  const hidden = HIDDEN.get(id);
+  if (hidden) return HIDDEN_WHY[hidden];
 
   // who it is for
   const race = RACE_MARK[you.race];

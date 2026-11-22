@@ -17,7 +17,7 @@
 import { GLOBALS_WGSL, targets } from './gpu.js';
 import { unpackContainer, sectionView } from './formats.js';
 import { project } from './math.js';
-import { closedWhy } from './questopen.js';
+import { closedWhy, givenHere } from './questopen.js';
 
 /** How a height is known, by the source number stored with each spawn point. */
 export const HEIGHT_HOW = [
@@ -630,8 +630,10 @@ export class NpcLayer {
       const hostile = !e.k && e[side] === 2 && !unsure(e, side);
       if (e.k) m |= BIT.object;
       if (!hostile) {
-        if (e.qs?.length) {
-          if (e.qs.some(open)) { d.open[i] = 1; m |= BIT.quest; } else if (everyGiver) m |= BIT.quest;
+        // (a quest not in this game, or one the game shows no "!" for, makes nobody a quest giver: questopen.js, givenHere)
+        const gives = e.qs?.length ? e.qs.filter(givenHere) : null;
+        if (gives?.length) {
+          if (gives.some(open)) { d.open[i] = 1; m |= BIT.quest; } else if (everyGiver) m |= BIT.quest;
         }
         let hand = 0;
         for (const id of e.qe ?? []) hand = Math.max(hand, this.#handIn(id));

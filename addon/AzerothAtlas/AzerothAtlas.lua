@@ -79,7 +79,8 @@ local L_COMBAT = 16
 -- log (kind 0) and the ones you have done (kind 1, running on into kind 0 from key 8)
 -- (kind 7 has more than the NPC under its other keys: 1 the route mailboxes, 2 the level you
 -- chose, 8 the server's clock and from 16 on a boat line each: see Route.lua and Transit.lua;
--- 9 where the game's minimap is on the screen: see MinimapReport)
+-- 9 where the game's minimap is on the screen: see MinimapReport; 10 the quests you have just
+-- handed in: see HandedBytes)
 local T_PARTY, T_STATS, T_BIND, T_BINDPOS, T_FLIGHTS, T_TALK = 2, 3, 4, 5, 6, 7
 local Q_LOG, Q_DONE = 0, 1
 -- where the waypoint comes from: your guide's step, a journey of your own in Shortest Path
@@ -953,7 +954,15 @@ local TALK_EVENTS = {
 -- messages a round, the log first, and the list of quests done packed as the steps between
 -- their numbers. Each message says which edition of its list it belongs to and how long that
 -- is, so the map only believes a list once every piece of one edition has arrived.
-local quests = { bulk = {}, at = 0, log = nil, logSig = "", logGen = 0, done = nil, doneGen = 0, dirty = true, retry = 3, readAt = -1000 }
+--
+-- What you have just done is said at once, though: when your log changes, the round of messages
+-- starts again with the whole log (QUEST_ACCEPTED, QUEST_TURNED_IN and QUEST_REMOVED start it
+-- there and then), and a quest you hand in is named in a message of its own at the head of every
+-- round for two minutes (HandedBytes) - the list of quests done is long, and takes a while to
+-- come round again in full. The map counts a quest so named as done from the moment it arrives.
+local quests = { bulk = {}, at = 0, log = nil, logSig = "", logGen = 0, done = nil, doneGen = 0, dirty = true, retry = 3, readAt = -1000,
+  logFresh = false, handed = {}, counting = {} }
+local HANDED_FOR, HANDED_MOST, COUNT_FOR = 120, 5, 60
 local LOG_PER_MESSAGE, LOG_MAX, DONE_PER_MESSAGE, DONE_MESSAGES = 11, 44, 34, 120
 
 local function ReadQuestLog()
@@ -1053,6 +1062,15 @@ end
 local function RefreshQuests()
   local now = GetTime()
   if now - quests.readAt > 300 then quests.dirty = true; if quests.retry < 1 then quests.retry = 1 end end
+  -- (a quest handed in: the done list is read again once the game counts it - or after a minute,
+  -- for one it never counts, as it does not count a quest that can be done again)
+  for id, since in pairs(quests.counting) do
+    local counted = C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted and yes(C_QuestLog.IsQuestFlaggedCompleted(id))
+    if counted or now - since > COUNT_FOR then
+      quests.counting[id] = nil
+      if quests.retry < 1 then quests.retry = 1 end
+    end
+  end
   if not quests.dirty and quests.retry < 1 then return end
   quests.dirty = false
   local changed = false
@@ -1062,6 +1080,7 @@ local function RefreshQuests()
     if sig ~= quests.logSig or not quests.log then
       quests.log, quests.logSig = log, sig
       quests.logGen = quests.logGen % 255 + 1
+      quests.logFresh = true
       changed = true
     end
   end
@@ -1080,6 +1099,28 @@ local function RefreshQuests()
 end
 local QUEST_EVENTS = { QUEST_LOG_UPDATE = true, QUEST_ACCEPTED = true, QUEST_REMOVED = true, QUEST_TURNED_IN = true }
 
+-- A quest you have just handed in (QUEST_TURNED_IN names it): kept for HANDED_FOR seconds, the
+-- newest last, HANDED_MOST at most.
+local function Handed(id)
+  id = plain(id)
+  if not id or id <= 0 or id >= 16777216 then return end
+  local list = quests.handed
+  for i = #list, 1, -1 do if list[i].id == id then table.remove(list, i) end end
+  list[#list + 1] = { id = id, at = GetTime() }
+  while #list > HANDED_MOST do table.remove(list, 1) end
+  quests.counting[id] = GetTime()
+end
+-- ...said as: how many (1 to HANDED_MOST), then each quest's number in three bytes; nil when
+-- there is none to say.
+local function HandedBytes()
+  local now, out = GetTime(), {}
+  local list = quests.handed
+  for i = #list, 1, -1 do if now - list[i].at > HANDED_FOR then table.remove(list, i) end end
+  if #list == 0 then return nil end
+  for i = 1, #list do out[#out + 1] = Byte3(list[i].id) end
+  return strchar(#list) .. table.concat(out)
+end
+
 -- A place you could be heading for, as nine bytes: said (128), there is one (1), its map, north and west.
 local function HeadBytes(s)
   if not s.on then return strchar(128, 0, 0, 0, 0, 0, 0, 0, 0) end
@@ -1090,6 +1131,20 @@ end
 local messages = {}
 local function BuildMessages()
   local list = {}
+  -- your quests, first of all where they have changed: the whole log, and what you have just handed in
+  shared.Try("quests", RefreshQuests)
+  local handed = HandedBytes()
+  if handed then list[#list + 1] = { T_TALK, 10, handed } end
+  if quests.logFresh then
+    -- (the bulk begins with the log's pieces: it carries on after them, with the quests done; and
+    -- the round starts again here, at its head, where this list may be made in the middle of one)
+    quests.logFresh, quests.head = false, true
+    local sent = 0
+    for i, m in ipairs(quests.bulk) do
+      if m[1] == Q_LOG and m[2] < 8 then list[#list + 1] = m; sent = i end
+    end
+    if sent > 0 and #quests.bulk > sent then quests.at = sent end
+  end
   -- the level you chose for a waypoint with more than one under it (Route.lua), first: the 3D map is waiting for it
   if shared.ChoiceReport then
     local ok, bytes = shared.Try("choice report", shared.ChoiceReport)
@@ -1175,8 +1230,7 @@ local function BuildMessages()
     for i = chunk * 18 + 1, math.min(#flights, chunk * 18 + 18) do bytes[#bytes + 1] = Byte2(flights[i]) end
     if #bytes > 0 and chunk < 64 then list[#list + 1] = { T_FLIGHTS, chunk, table.concat(bytes) } end
   end
-  -- your quests: two pieces a round, in turn
-  shared.Try("quests", RefreshQuests)
+  -- your quests: two pieces a round, in turn (read again at the head of this round)
   local bulk = quests.bulk
   for _ = 1, math.min(2, #bulk) do
     quests.at = quests.at % #bulk + 1
@@ -1332,7 +1386,11 @@ local function NextText()
   if textPart == 0 and (now - messagesAt > 1 or textCursor >= #messages) then
     -- a fresh round once the last one is through (and at most once a second)
     if textCursor >= #messages then textCursor = 0 end
-    if now - messagesAt > 1 then messagesAt = now; BuildMessages(); if textCursor >= #messages then textCursor = 0 end end
+    if now - messagesAt > 1 then
+      messagesAt = now
+      BuildMessages()
+      if textCursor >= #messages or quests.head then textCursor, quests.head = 0, false end
+    end
   end
   if #messages == 0 then return nil end
   if textPart == 0 then textCursor = textCursor % #messages + 1 end
@@ -1569,7 +1627,7 @@ strip:RegisterEvent("HEARTHSTONE_BOUND")
 -- (registered one at a time: a name this game does not have must not stop the rest)
 for event in pairs(TALK_EVENTS) do pcall(strip.RegisterEvent, strip, event) end
 for event in pairs(QUEST_EVENTS) do pcall(strip.RegisterEvent, strip, event) end
-strip:SetScript("OnEvent", function(_, event)
+strip:SetScript("OnEvent", function(_, event, ...)
   if event == "PLAYER_LOGIN" then
     pcall(ClaimSlash)
     if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end
@@ -1601,7 +1659,10 @@ strip:SetScript("OnEvent", function(_, event)
     return
   elseif QUEST_EVENTS[event] then
     quests.dirty = true
-    if event == "QUEST_TURNED_IN" then quests.retry = 6 end
+    if event == "QUEST_TURNED_IN" then quests.retry = 6; Handed(...) end
+    -- (not for every QUEST_LOG_UPDATE: those come many a second while you loot and kill, and the
+    -- round would never get past its head; the log is read again at the head of every round anyway)
+    if event ~= "QUEST_LOG_UPDATE" then textFresh = true end
     return
   elseif event == "HEARTHSTONE_BOUND" then
     -- you set your hearthstone here: remember the spot under the inn's name

@@ -64,7 +64,14 @@ export function ensureReader() {
 export class PlayerTracker {
   /** @param opts { processNames?: string[], pathHint?: string, intervalMs?: number, fixed?: [x, y] } */
   constructor(opts = {}) {
-    this.opts = { processNames: ['Wow'], pathHint: '', intervalMs: 55, fixed: null, ...opts };
+    // (intervalMs: how long the helper waits between two looks at the strip. The addon draws a new
+    // piece of what it has to say every 50 ms or so, and a piece the helper misses spoils the
+    // message it is part of until that comes round again. Windows hands the helper a picture of
+    // the game every 20 ms at most (strip-reader.cs), and a wait of 15 - one step of Windows'
+    // clock, 15.6 ms - is shorter than that: no picture is passed over. Measured on the game on
+    // 21 Nov 2026, twenty seconds each: at 55 ms 91 pieces drawn and never seen, at 25 ms 23, at
+    // 15 none; the helper then takes 2.3% of one processor core, against 1.3% at 55.)
+    this.opts = { processNames: ['Wow'], pathHint: '', intervalMs: 15, fixed: null, ...opts };
     this.clients = new Set();
     this.child = null;
     this.stopTimer = null;
@@ -306,8 +313,9 @@ export class PlayerTracker {
     }
     this.lastGood = Date.now();
     this.names.add(d.text);
-    if (d.text && d.text.last && (d.text.kind <= 1 || (d.text.kind === TEXT_KIND.STATS && d.text.key >= 8))) {
-      // a piece of your quests has come in, or of who your character is: is a whole new list there now?
+    if (d.text && d.text.last && (d.text.kind <= 1 || (d.text.kind === TEXT_KIND.STATS && d.text.key >= 8) || (d.text.kind === TEXT_KIND.TALK && d.text.key === 10))) {
+      // a piece of your quests has come in, or of who your character is, or the quests you have
+      // just handed in: is a whole new list there now?
       // (who you are goes with your quests: the two together say which quests are open to you)
       const q = this.names.quests(), who = this.names.self();
       const sig = `${q.sig}/${who?.gen ?? '-'}`;

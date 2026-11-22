@@ -213,22 +213,30 @@ export function readSelf(b) {
   return short ? null : { class: b[1], race: b[2], skills, reps, spells };
 }
 
+/** How long the quests you have just handed in are believed after they were last said (ms): the addon says them every round. */
+const HANDED_HELD = 10000;
+
 /**
  * Reassembles what arrives a few bytes per frame through the strip's text channel: party
  * members' names, and the travel facts (speeds, hearthstone, known flight points).
+ * @param clock  what the time is, in ms (a test's own; this computer's by default)
  */
 export class NameCache {
-  constructor() { this.names = new Map(); this.parts = new Map(); this.raw = new Map(); }
+  constructor(clock = () => Date.now()) { this.names = new Map(); this.parts = new Map(); this.raw = new Map(); this.at = new Map(); this.clock = clock; }
+  setClock(clock) { this.clock = clock; }
   add(t) {
     if (!t) return;
     const id = `${t.kind}:${t.key}`;
     let p = this.parts.get(id);
+    // (the piece that came last, again: the strip was read twice while it showed it - one piece, not a gap)
+    if (p && t.part > 0 && p.length === t.part + 1 && p[t.part].every((b, i) => b === t.bytes[i])) return;
     if (!p || t.part === 0) { p = []; this.parts.set(id, p); }
     if (p.length !== t.part) { this.parts.delete(id); return; } // missed a piece; wait for the next round
     p.push(t.bytes);
     if (!t.last) return;
     const bytes = p.flat();
     this.raw.set(id, Buffer.from(bytes)); // as sent (padded with zeros to a multiple of 9 bytes)
+    this.at.set(id, this.clock());
     while (bytes.length && bytes[bytes.length - 1] === 0) bytes.pop();
     this.names.set(id, Buffer.from(bytes).toString('utf8'));
     this.parts.delete(id);
@@ -240,8 +248,34 @@ export class NameCache {
    * in, 2 failed) }] | null, done: [quest ids] | null, sig }. Each list comes in pieces that
    * name the edition they belong to; a list is replaced only when every piece of a newer
    * edition is in, so what is returned is always one whole list as the game had it.
+   *
+   * A quest you have just handed in (handed) is out of the log and among those done from the
+   * moment that is said, which is long before the list of quests done has come round again.
    */
   quests() {
+    const q = this.#lists(), handed = this.handed();
+    if (!handed.length) return q;
+    const gone = new Set(handed);
+    const log = q.log && q.log.filter((x) => !gone.has(x.id));
+    const done = q.done && [...new Set([...q.done, ...handed])].sort((a, b) => a - b);
+    return { log, done, sig: `${q.sig}+${handed.join(',')}` };
+  }
+
+  /**
+   * The quests you have handed in in the last two minutes, as the addon says (addon version 35;
+   * an older one does not say): [quest ids], the newest last - or [] where none, or where it has
+   * not been said for a while (the addon has stopped saying it, or the game is gone).
+   */
+  handed() {
+    const id = `${TEXT_KIND.TALK}:10`, b = this.raw.get(id);
+    if (!b || !b.length || !(this.clock() - (this.at.get(id) ?? -Infinity) <= HANDED_HELD)) return [];
+    const n = Math.min(b[0], Math.floor((b.length - 1) / 3)), out = [];
+    for (let i = 0; i < n; i++) { const v = b[1 + i * 3] * 65536 + b[2 + i * 3] * 256 + b[3 + i * 3]; if (v > 0) out.push(v); }
+    return out;
+  }
+
+  /** The two lists as they have arrived, nothing laid over them (see quests). */
+  #lists() {
     const l0 = this.raw.get(`${TEXT_KIND.QLOG}:0`);
     if (l0 && l0.length >= 2) {
       const gen = l0[0], count = l0[1], list = [];
