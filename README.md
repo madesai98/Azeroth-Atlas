@@ -2067,7 +2067,8 @@ The game tracks a quest - its objectives in the list on the right of the screen 
 it in the quest log, and a right-click on a zone's name in the quest log tracks or untracks all
 of that zone's quests ("Track All", "Untrack All"). It has nothing for the whole log. The addon
 adds two entries for that (asked for on 20 November 2026: "a button that adds all completed
-quests to the tracked list would be sick, and also an untrack all button"):
+quests to the tracked list would be sick, and also an untrack all button"), and a third for the
+quests of where you are ([below](#track-location-quests-only-the-quests-of-where-you-are)):
 
 | | |
 |---|---|
@@ -2099,6 +2100,69 @@ once after it is put in (a new file: the game only looks for those when it start
 against a mocked game whose quest log, tracked list and menus behave as that code has them, with
 the quest log of the report that asked for it; not yet seen in the game itself when this was
 written.
+
+### Track Location Quests: only the quests of where you are
+
+A third entry in the same three menus, between the two above (asked for on 21 November 2026:
+"This should automatically clear tracked quests then add all quests that take place in the
+players current zone to the tracking list. This means quests that actually have tasks in that
+zone, not a quest that started in that zone but the task is actually in another zone. Dungeons
+count as their own zone"). Typed, it is `/atlas track here`.
+
+**Track Location Quests** makes the quests you track those with something to do where you are
+now, and nothing else: every other quest is untracked first, then these are tracked (as many as
+there is room for - the game tracks 25). Its tip names the place. In chat: "6 quests with
+something to do in Tanaris tracked (1 was already); 3 other quests untracked", or "no quest in
+your log has anything to do in Thousand Needles; 2 quests untracked".
+
+Where a quest has something to do, the game's own map says: it pins each quest of your log
+where its next objective is, or at whoever takes it once it is done. So a quest is of the place
+you are in when
+
+- the game's map of that place has a pin for it, in the place itself. A zone's map shows a strip
+  of its neighbours round its edges, and the towns within it, and the game puts their quests'
+  pins on it as well (what this addon had noted of the game's pins has the Badlands' on Loch
+  Modan's map). So each pin is asked about: which map the game names as its own, and what the
+  game's map has at that spot - the zone's own map, and the continent's, where the game lets
+  you click on a zone. Each of the two is first tried on the spot you stand on yourself, and
+  believed only if it puts you where you are: a zone the continent's map has no outline for
+  would otherwise have every pin of it put down to the zone round it;
+- or the map the game opens for the quest is of that place;
+- or the game has no place for the quest at all, and it stands under that place's name in your
+  quest log - the only thing left to go by.
+
+So a quest taken in Tanaris and done in Un'Goro is not Tanaris'; one filed under another zone
+with something to do here is; one that is done counts where it is handed in.
+
+**A dungeon is a place of its own.** The game pins a dungeon's quest to the dungeon's door for
+as long as there is something to do inside (Nekrum's Medallion stands at Zul'Farrak's door on
+Tanaris' map). So outside, a quest the game marks as a dungeon's or a raid's is left out until
+it is ready to hand in, when its pin is whoever takes it. Inside a dungeon, a raid or a
+battleground, the quests under its name in your quest log count - one that is done only where
+the game knows of no place outside to hand it in - and whatever the game pins to the dungeon's
+own maps, where it has any. "The Deadmines" and "Deadmines" are one name.
+
+To know:
+
+- It goes by what the game's map shows, and is as right as that: a quest the game pins nowhere
+  and files under another heading is not found, and a dungeon's quest filed under the zone
+  outside, with no pin inside, is found in neither place.
+- A quest of a dungeon with something to do outside it first (the game marks it a dungeon's
+  all the same) is left out outside until it is done.
+- In a fight it waits until the fight is over, like the other two, and then goes by where you
+  are at that moment.
+- In the game's first quests for a new player, where no quest can be untracked, the quests of
+  the place are tracked and the others stay.
+
+It needs version 38 of the addon; from 37 a `/reload` is enough. Tried against a mocked game (42
+checks) whose maps lie in one another and show a strip of their neighbours, with the quest log
+and the pins of the report that asked for it: in Tanaris, on Teldrassil, in a cave of a zone, in
+a town that is a zone within another, in a zone the continent's map does not know, in
+Zul'Farrak (which the game has no map of), in a dungeon of two floors, in a battleground; with
+more quests than the game tracks, in a fight, with a quest the game refuses and one it keeps,
+and in a game that pins no quests at all. **Not tried in the game itself**: what the game's map
+says of a spot at a zone's edge, what it marks a dungeon's quest with, and which map it is on
+inside a dungeon are as its interface code and this addon's own notes of its pins have them.
 
 ## Overlays: the map drawn over the game
 
@@ -2218,8 +2282,15 @@ handed one, and the last to speak would win - and a second set of everything on 
 card the game is using. For one version, 0.6.8, the minimap was such a copy, a light one in a
 window of its own, and could be up beside the full map: two pictures of one map. From 0.6.9 it
 is the map itself.) While the page is over the game, the application's own window says so and
-draws nothing, with a button that brings it back. "Report a problem" and anything that has
-gone wrong bring it back by themselves: their windows are the page's own.
+draws nothing, with a button that brings it back. "Report a problem" pressed over the game, and
+anything that has gone wrong, bring it back by themselves: their windows are the page's own,
+which only the application's window can show. A report's window that was left open in the
+application - after a report was saved, say - does not keep an overlay from coming up: it is
+left as it was, out of sight while the page is over the game, and is there again, with what you
+wrote, when the page is back. (Until 0.6.19 it did: every press of an overlay's key was undone a
+quarter of a second later, for as long as that window stood open. Reported on 21 November 2026:
+"Whenever theres a popup menu left open on the atlas desktop app it prevents you from opening
+atlas overlays in game".)
 
 **What it costs.** One picture, of the size it is shown at: a minimap 260 pixels a side is a
 ninth of the full map as it comes (960 by 640), and a smaller part still of the application's
@@ -2269,6 +2340,13 @@ strip says is kept waiting); and the application's own reckoning of where the mo
 through, by itself. **Not tried in the application itself, nor in the game**: that the game
 shows through the open parts as it does round the panels, and takes its clicks there, rests on
 their being the same see-through window and the same letting-through of the mouse.
+
+A report's window left open (0.6.19) was tried on the real page with the application stood in
+for (14 checks: the map's key and the sidebar's with the window left open, pressed again and
+again; the window there as it was left, with what was written, when they are put away; "Report
+a problem" pressed over the game, with its window open from before and without; something gone
+wrong). The same checks against the page as it was before fail as the report said: the map up
+and back again at every press.
 
 ## Live player link
 

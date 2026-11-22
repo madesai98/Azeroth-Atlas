@@ -1818,8 +1818,13 @@ SlashCmdList["AZEROTHATLAS"] = function(msg)
     return
   end
   if word == "track" or word == "untrack" then
-    -- /atlas track: every quest ready to hand in is tracked; /atlas untrack: every quest is untracked (Tracked.lua)
-    local run = word == "track" and shared.TrackReady or shared.UntrackAll
+    -- /atlas track: every quest ready to hand in is tracked; /atlas track here: the quests you track become those with
+    -- something to do where you are; /atlas untrack: every quest is untracked (Tracked.lua)
+    local run = shared.UntrackAll
+    if word == "track" then
+      run = shared.TrackReady
+      if rest == "here" or rest == "location" or rest == "zone" then run = shared.TrackHere end
+    end
     if run then run() else say("this copy of the addon cannot track or untrack all your quests at once: update it from the 3D map, and start the game again.") end
     return
   end

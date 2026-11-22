@@ -178,6 +178,7 @@ export function bindOverlays(app) {
     uiSaid: '',         // where the game's interface is, as last heard (see heard)
     holes: 0,           // how many parts of the map are left open for it just now
     cut: '',            // ...and the shape the map's box is cut to for that ('' whole)
+    left: false,        // "Report a problem" stood open when the page went over the game: left as it was (see own)
   };
   const html = document.documentElement, body = document.body;
   const over = () => !!st.told?.over;
@@ -527,11 +528,32 @@ export function bindOverlays(app) {
       : `No game window is to be seen: an overlay brought up now lies over the main screen (${t.game.w} × ${t.game.h}), to be set up there.`;
   }
 
+  // ---- the page's own windows -----------------------------------------------------------------
+  // "Report a problem" and "Something went wrong" are windows of the page's own, which only the
+  // application's window can show: over the game the page is its panels and nothing else. So
+  //   - "Report a problem" pressed while the page is over the game (it is in the sidebar): the
+  //     page goes back to its window for it;
+  //   - something gone wrong: the page goes back to say so, and stays there until it is put right;
+  //   - but a report's window that was LEFT open in the application - after a report was saved,
+  //     say - does not keep an overlay from coming up: the key you press in the game is what you
+  //     asked for last. The window is left as it was, out of sight while the page is over the
+  //     game, and is there again when the page is back. (Until 0.6.19 it brought the page back
+  //     a quarter of a second after every press of an overlay's key: the overlays could not be
+  //     opened at all until the window was shut. Reported on 21 November 2026.)
+  const open = (id) => $(id)?.style.display === 'flex';
+  function own() {
+    if (!over()) { st.left = false; return; }
+    if (!open('report')) st.left = false;
+    if (open('fatal') || (open('report') && !st.left)) api.dock();
+  }
+
   /** The application has said how things stand. */
   function take(t) {
     if (!t || typeof t !== 'object' || !t.settings) return;
     const was = st.told;
     st.told = t;
+    // (the page goes over the game with "Report a problem" standing open: it is left as it was)
+    if (!was?.over && t.over && open('report')) { st.left = true; note('overlay', 'a report\'s window stood open in the application: left as it was, out of sight while the page is over the game'); }
     // (over the game the keyboard is the game's: a key held as the page went there is never heard
     // let go of, and would drift the view from then on)
     if (!was?.over && t.over) app.camera?.keys.clear();
@@ -546,13 +568,15 @@ export function bindOverlays(app) {
     api.get().then(take, () => {});
     window.addEventListener('resize', () => { if (over()) lay(); });
     window.addEventListener('pagehide', keepRig);
+    // ("Report a problem" pressed over the game, with its window left open from before: asked for now, so the page goes back for it)
+    for (const id of ['btnReport', 'fatalReport']) $(id)?.addEventListener('click', () => { if (over()) st.left = false; });
     setInterval(() => {
       mood();
       // (as a minimap it is on you, whatever took the view elsewhere - a place searched for, a map chosen)
       if (app.miniForm) { const P = app.player; if (P?.live && !P.follow) P.setFollow(true); keepRig(); }
-      // (a window of the page's own that only the application's window can show - "Report a problem",
-      // something gone wrong: the page goes back there for it)
-      if (over() && ($('fatal').style.display === 'flex' || $('report').style.display === 'flex')) api.dock();
+      // (a window of the page's own that only the application's window can show - "Report a problem"
+      // pressed over the game, something gone wrong: the page goes back there for it)
+      own();
     }, 250);
   }
   return { heard, state: st, lay, take };
