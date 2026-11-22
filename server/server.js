@@ -22,6 +22,7 @@ import { AtlasDb } from './atlasdb.js';
 import { CombatLog } from './combatlog.js';
 import { Fights, measuredHealth } from './fights.js';
 import { Minimap } from './minimap.js';
+import { Dots } from './dots.js';
 import { clockFigures, writeClockAddon } from './boats.js';
 import { writeDropsAddon } from './drops.js';
 import { standinStatus, applyStandins, setWant, switchOn, pricesMode } from './standins.js';
@@ -138,6 +139,11 @@ setTimeout(applyDatabase, 8000).unref?.();
 // do not have, how far off the minimap's place is - goes to the Atlas database with the rest)
 const minimap = cfg.minimap === false ? null : new Minimap(cfg, { tracker, onLearned: () => atlas.nudge() });
 if (minimap) { tracker.eyes = minimap; minimap.start(); }
+// What the game's minimap shows as dots - what you track, your target, your pet - as places on
+// the map, read off the same picture (see dots.js). Only while a map page is open that shows
+// any of them. ("dots": false in config.json switches it off)
+const dots = cfg.dots === false ? null : new Dots({ tracker, inside: (map) => minimap?.where(map) ?? null });
+if (dots) tracker.dots = dots;
 // What the game's own combat log says of the creatures you fight: where each was, its level and
 // health, how it stands towards your side - and, inside a dungeon, where you are (see combatlog.js).
 // ("combatLog": false in config.json leaves the log unread)
@@ -171,8 +177,8 @@ const VIEWER_DIR = path.join(PROJECT_ROOT, 'viewer');
 // The page's own files, watched: a page that is open loads itself again when they change (changes.js).
 const changes = new Changes(VIEWER_DIR);
 // "Report a problem": everything that may explain one, in a zip (report.js)
-const reports = new Reports({ configFile, cfg, busy: (on) => { reporting = on; busy(); }, live: { status: () => status(), tracker, mail, atlas, auctions, minimap, addon: () => addonStatus(cfg), standins: () => standinStatus(cfg) } });
-note('server', 'the settings in use', { game: cfg.installRoot, found: !!cfg.foundGame, flavour: flavourFolder(cfg), data: cfg.dataDir, port: cfg.port, ingame: cfg.ingame !== false, minimap: cfg.minimap !== false, autoUpdate: cfg.autoUpdate ?? true, oldAddonInUse: oldAddon });
+const reports = new Reports({ configFile, cfg, busy: (on) => { reporting = on; busy(); }, live: { status: () => status(), tracker, mail, atlas, auctions, minimap, dots, addon: () => addonStatus(cfg), standins: () => standinStatus(cfg) } });
+note('server', 'the settings in use', { game: cfg.installRoot, found: !!cfg.foundGame, flavour: flavourFolder(cfg), data: cfg.dataDir, port: cfg.port, ingame: cfg.ingame !== false, minimap: cfg.minimap !== false, dots: cfg.dots !== false, autoUpdate: cfg.autoUpdate ?? true, oldAddonInUse: oldAddon });
 
 // ---- update job ---------------------------------------------------------------------------
 
@@ -246,6 +252,8 @@ function status() {
     game: { folder: cfg.installRoot, found: !!cfg.foundGame },
     // finding you on the game's minimap inside a dungeon (minimap.js): how it stands, and its last figures (null: switched off)
     minimap: minimap?.status() ?? null,
+    // the dots of the game's minimap, as places on the map (dots.js): how reading them stands, and what the last picture gave (null: switched off)
+    dots: dots?.status() ?? null,
   };
 }
 
@@ -289,6 +297,14 @@ const server = http.createServer((req, res) => {
   if (p === '/api/player/events') {
     if (req.method !== 'GET') { res.writeHead(405); res.end(); return; }
     tracker.subscribe(req, res);
+    return;
+  }
+  if (p === '/api/player/dots') {
+    // a map page says whether it shows any of the minimap's dots (what you track, your target, your pet): the minimap is looked at for them only while one does
+    if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
+    dots?.want(url.searchParams.get('on') !== '0');
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify({ on: dots ? dots.on : false, off: !dots }));
     return;
   }
   if (p === '/api/changes') {

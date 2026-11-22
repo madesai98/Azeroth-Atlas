@@ -414,6 +414,18 @@ export class Minimap {
     this.nudge = [cap(mx), cap(my)];
   }
 
+  /**
+   * For the dots on the minimap (dots.js): where you are in this dungeon and how its minimap lies,
+   * as the last picture gave it - { x, y, rotation (radians the map is turned clockwise by), radius
+   * (yards from the minimap's middle to its edge), cx, cy, half (the minimap in the game's picture) }
+   * - or null: you are not found just now.
+   */
+  where(map, now = Date.now()) {
+    const k = this.kept?.result;
+    if (!k?.ok || k.map !== map || !this.fresh(now) || !k.geo || !(k.scale > 0) || !Number.isFinite(k.rotation)) return null;
+    return { x: this.fix.x, y: this.fix.y, rotation: k.rotation, radius: k.geo.half / k.scale, cx: k.geo.cx, cy: k.geo.cy, half: k.geo.half };
+  }
+
   status() {
     const k = this.kept?.result, c = this.count;
     return {

@@ -122,7 +122,7 @@ const UI_KEY = 'wfmap.ui', VIEW_KEY = 'wfmap.view';
 // The switches and numbers kept under UI_KEY, by the id of their input. (The NPC panel, the
 // spawn zones, the figures and the route switches keep themselves, under keys of their own.)
 const REMEMBERED = ['optFollow', 'optTurn', 'optAuto', 'zoomIn', 'zoomTown', 'zoomOut', 'optBuildings', 'optObjects', 'optTrees', 'optCut', 'cutRadius',
-  'optLabels', 'optFlights', 'optTransit', 'optSlope', 'slopeDeg', 'optContours'];
+  'optLabels', 'optFlights', 'optTransit', 'optSlope', 'slopeDeg', 'optContours', 'optTracked', 'optPet'];
 /** Put the page's switches back as they were left. */
 function recall() {
   const saved = store.get(UI_KEY);
@@ -1361,6 +1361,28 @@ async function pollStatus(fast) {
 }
 
 // ---- live player link ---------------------------------------------------------------------
+/** Which of the minimap's dots this page shows, as its switches stand. */
+const dotsWanted = () => ({ tracked: $('optTracked').checked, pet: $('optPet').checked });
+/**
+ * The server is told whether this page shows any of the minimap's dots: it looks at the game's
+ * minimap for them only while a page does (server/dots.js).
+ */
+function tellDots() {
+  const o = app.opts.dots ?? dotsWanted();
+  fetch(`/api/player/dots?on=${o.tracked || o.pet ? 1 : 0}`, { method: 'POST' }).catch(() => { /* the server is away: told again when it is back */ });
+}
+/** Under "You": what the game's minimap is set to track, and how many of its dots are on the map. */
+function showDots() {
+  const el = $('dotsNow'), s = app.player?.state, o = app.opts.dots;
+  if (!el) return;
+  let text = '';
+  if (s?.status === 'live' && o && (o.tracked || o.pet)) {
+    const n = (s.dots ?? []).filter((d) => d.role === 'tracked' || d.role === 'target').length;
+    text = [s.tracking?.length ? s.tracking.join(', ') : null, o.tracked && n ? `${n} dot${n === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ');
+  }
+  if (el.textContent !== text) el.textContent = text;
+}
+
 function showPlayer() {
   const link = app.player, s = link.state, p = s.player;
   const dot = $('playerDot'), text = $('playerText');
@@ -1409,6 +1431,7 @@ function showPlayer() {
   $('btnFind').disabled = s.status !== 'live';
   syncDangerFromGame();
   showInGame();
+  showDots();
   showFollow();
   app.dirty = true;
 }
@@ -1794,6 +1817,11 @@ function bindSide() {
 function bindUI() {
   recall(); // (before anything reads the switches)
   bindSide();
+  // The dots of the game's minimap - what you track, your target, your pet: which of them are shown
+  const applyDots = () => { app.opts.dots = dotsWanted(); remember(); tellDots(); showDots(); app.dirty = true; };
+  for (const id of ['optTracked', 'optPet']) $(id).addEventListener('change', applyDots);
+  app.opts.dots = dotsWanted();
+  tellDots();
   showTrees();
   $('optFollow').addEventListener('change', (e) => { if (app.player && !app.miniForm) app.player.setFollow(e.target.checked); else { remember(); if (app.player) showFollow(); } });
   for (const id of ['optTurn', 'optAuto', ...ZOOMS.map((z) => z[1])]) $(id).addEventListener($(id).type === 'checkbox' ? 'change' : 'input', applyFollow);
@@ -2046,6 +2074,7 @@ async function main() {
   app.transit.setLayout(app.layout);
   app.player = new PlayerLink(app);
   app.player.onChange = () => { showPlayer(); app.overlays?.heard(); };
+  app.player.onOpen = tellDots; // (the server may have started again meanwhile: it is told anew what this page shows)
   // The following camera, as it was left: it takes hold when your character is first seen.
   app.player.onFollow = () => { showFollow(); remember(); };
   app.player.follow = $('optFollow').checked;

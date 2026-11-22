@@ -6,6 +6,8 @@
 // The same helper hands over the small square of the game's picture the minimap is in, while it
 // is asked to (look): inside a dungeon, where the game hides where you are, the minimap is what
 // shows it (minimap.js, which is told of every reading of the strip and of every such square).
+// And the dots on that minimap - what you track, your target, your pet - are read off the same
+// square, wherever you are (dots.js, told and handed the same).
 import { spawn, execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -69,7 +71,7 @@ export class PlayerTracker {
     this.names = new NameCache();
     this.lastGood = 0;
     this.pending = null;
-    this.state = { status: 'off', reason: null, window: null, capture: null, player: null, party: [], target: null, travel: null, transit: null, talk: null, quests: null, mail: null };
+    this.state = { status: 'off', reason: null, window: null, capture: null, player: null, party: [], target: null, travel: null, transit: null, talk: null, quests: null, mail: null, dots: [], tracking: null };
     this.mail = opts.mail ?? null; // the route's way into the game (mail.js), told what the addon says of it
     this.talk = null; // the last NPC you met in the game (or creature you fought), with when this server first heard of it
     this.quests = { rev: 0, log: null, done: null, me: null }; // your quest log, the quests you have done, and who your character is (see /api/player/quests)
@@ -83,6 +85,9 @@ export class PlayerTracker {
     this.eyes = null;
     this.square = null;   // the square of the game's picture the helper is asked for: [x, y, w, h, every ms] - or null
     this.squares = 0;     // how many have come
+    // What reads the dots off the same square (dots.js; server.js sets it): told and handed what the eyes are.
+    this.dots = null;
+    this.asked = { place: null, dots: null }; // the square each of the two asks for
   }
 
   // ---- subscribers (server-sent events) ---------------------------------------------------
@@ -113,7 +118,11 @@ export class PlayerTracker {
   #set(patch) {
     Object.assign(this.state, patch);
     // (the game no longer heard from: its minimap is no longer looked at)
-    if (this.state.status !== 'live' && 'status' in patch) { try { this.eyes?.quiet(); } catch { /* its own affair */ } }
+    if (this.state.status !== 'live' && 'status' in patch) {
+      try { this.eyes?.quiet(); } catch { /* its own affair */ }
+      try { this.dots?.quiet(); } catch { /* its own affair */ }
+      this.state.dots = []; // (dots are of the moment: none are shown from before the game went quiet)
+    }
     // (the route mailboxes are only kept filled while the game is being heard from)
     if (this.mail) {
       this.mail.setLive(this.state.status === 'live');
@@ -145,10 +154,21 @@ export class PlayerTracker {
    * Ask the helper for a square of the game's picture - the one the minimap is in - every so
    * many milliseconds, or (null) for none. [x, y, w, h], counted from the top left corner of
    * the area the game draws in.
+   * Two ask (who): what finds you inside a dungeon ('place'), and what reads the minimap's dots
+   * ('dots'). One square is sent for both: where both ask, the one for finding you - it has the
+   * minimap's rim on it, and the dots are inside the rim - as often as the keener of the two
+   * wants it.
    */
-  look(square, every = 200) {
-    this.square = square ? [...square.map(Math.round), every] : null;
+  look(square, every = 200, who = 'place') {
+    this.asked[who] = square ? [...square.map(Math.round), every] : null;
+    const a = this.asked.place ?? this.asked.dots;
+    this.square = a ? [...a.slice(0, 4), Math.min(...Object.values(this.asked).filter(Boolean).map((q) => q[4]))] : null;
     this.#ask();
+  }
+
+  /** The dots of the minimap as they are to be shown, and what is tracked (dots.js) - whatever goes wrong there must not stop the link. */
+  #dotsNow() {
+    try { return { dots: this.dots?.list() ?? [], tracking: this.dots?.tracking() ?? null }; } catch (err) { if (changed('dots list', err.message)) note('dots', 'the dots could not be told', { error: err.message }); return { dots: [], tracking: null }; }
   }
 
   #ask() {
@@ -196,6 +216,7 @@ export class PlayerTracker {
     const child = this.child;
     this.child = null;
     try { this.eyes?.quiet(); } catch { /* its own affair */ }
+    try { this.dots?.quiet(); } catch { /* its own affair */ }
     child?.kill();
     if (child) note('link', 'the game is no longer watched (no map page is open)');
     changed('link', 'off');
@@ -270,6 +291,7 @@ export class PlayerTracker {
       if (rgb.length !== W * H * 3) return;
       this.squares++;
       try { this.eyes?.crop({ x: X, y: Y, w: W, h: H, data: rgb }); } catch (err) { if (changed('eyes', err.message)) note('minimap', 'a picture of the minimap could not be taken in', { error: err.message }); }
+      try { this.dots?.crop({ x: X, y: Y, w: W, h: H, data: rgb }); } catch (err) { if (changed('dots crop', err.message)) note('dots', 'a picture of the minimap could not be looked at for its dots', { error: err.message }); }
       return;
     }
     if (!line.startsWith('P ')) return;
@@ -345,6 +367,8 @@ export class PlayerTracker {
     this.#noteGame(d, player);
     // (inside a dungeon the game hides where you are: its minimap is looked at - minimap.js)
     try { this.eyes?.heard(d, this.names.minimap(), this.state.window); } catch (err) { if (changed('eyes', err.message)) note('minimap', 'what the strip said could not be taken in', { error: err.message }); }
+    // (the dots on that minimap - what you track, your target, your pet - are read off the same picture, wherever you are: dots.js)
+    try { this.dots?.heard(d, this.names.minimap(), this.state.window, this.names.yours()); } catch (err) { if (changed('dots heard', err.message)) note('dots', 'what the strip said could not be taken in', { error: err.message }); }
     this.#set({
       status: 'live', reason: null, player, talk: this.talk, heads: this.names.heads(),
       // (the lists themselves are fetched when this changes: they are long, and this goes out many times a second)
@@ -358,6 +382,8 @@ export class PlayerTracker {
       // when the boats, zeppelins and tram run, as far as the addon knows (kept after the game is closed: boats sail on)
       transit: this.names.transit() ?? this.state.transit ?? null,
       party: d.party.map((m) => ({ slot: m.slot, name: this.names.party(m.slot), x: m.x, y: m.y, dead: m.dead })),
+      // what the game's minimap shows as dots, as places in the world, and what your tracking is set to (dots.js)
+      ...this.#dotsNow(),
     });
   }
 }

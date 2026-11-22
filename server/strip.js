@@ -394,6 +394,27 @@ export class NameCache {
   }
 
   /**
+   * Your pet, and what your minimap is set to track, as the addon says (Yours.lua) - or null from
+   * an addon that does not say (before version 34). The map names the dots of the game's minimap
+   * by it (dots.js).
+   * { pet: { name, dead, spot: { map, x, y } | null (the game does not say where it is) } | null (you have none),
+   *   tracking: [{ spell, name }] (the spells your minimap's tracking is set to) }
+   */
+  yours() {
+    const s = this.raw.get(`${TEXT_KIND.BINDPOS}:1`);
+    if (!s || s.length < 11 || !(s[0] & 128) || s[10] !== 1) return null;
+    const u16 = (b, o) => b[o] * 256 + b[o + 1], u24 = (b, o) => b[o] * 65536 + b[o + 1] * 256 + b[o + 2];
+    const name = (key) => this.names.get(`${TEXT_KIND.BIND}:${key}`) || null;
+    const pet = s[0] & 1 ? { name: name(1), dead: !!(s[0] & 2), spot: s[0] & 4 ? { map: u16(s, 2), x: u24(s, 4) / 128 - 32768, y: u24(s, 7) / 128 - 32768 } : null } : null;
+    const tracking = [];
+    for (let i = 1; i <= Math.min(3, s[1]); i++) {
+      const b = this.raw.get(`${TEXT_KIND.BINDPOS}:${1 + i}`);
+      if (b && b.length >= 4 && b[3] === 1) tracking.push({ spell: u24(b, 0), name: name(1 + i) });
+    }
+    return { pet, tracking };
+  }
+
+  /**
    * When the boats, zeppelins and tram run, as far as the addon knows (Transit.lua), or null
    * before it has said: { clock (the game server's time minus this computer's, in ms), lines:
    * { [the line's number in transit.json]: null (too unsure to name a moment by) or

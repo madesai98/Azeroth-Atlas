@@ -215,7 +215,7 @@ export function addonNotes(lua) {
 // ---- the report ------------------------------------------------------------------------------------
 /**
  * @param ctx  { configFile, cfg (the settings in use, or null where the game was not found), problem
- *             (why not, then), live: { status(), tracker, mail, atlas, auctions, minimap } (what the running
+ *             (why not, then), live: { status(), tracker, mail, atlas, auctions, minimap, dots } (what the running
  *             server has in hand; none of it when run from a terminal) }
  * @param ask  { text (what went wrong, in the reporter's words), when, include: { shot, cache,
  *             others (every addon's saved settings), hotfixes }, page: { state, log, shot (a
@@ -341,6 +341,18 @@ export async function buildReport(ctx, ask = {}) {
     const pic = include.shot ? mm.picture() : null;
     if (pic) add('atlas/minimap/last.png', pic.png, { text: false, at: new Date(pic.at), note: `the square of the game's picture last looked at: ${pic.w} x ${pic.h} pixels${pic.origin ? `, ${pic.origin[0]} across and ${pic.origin[1]} down` : ''}` });
     if (s.wanted || s.pictures) summary.push(`The minimap: ${s.state}${s.why ? ` (${s.why})` : ''}; ${s.found} of ${s.pictures} pictures of it gave a place`);
+  });
+  await part('the dots of the minimap', () => {
+    // What the game's minimap shows as dots is read off its picture (dots.js). What may explain a
+    // dot that is missing, or one that is none: how the reading stands, what the last picture gave,
+    // what the addon says is yours - and that picture itself, where the game's picture may go in.
+    const dd = live.dots;
+    if (!dd) return;
+    const s = dd.status();
+    add('atlas/dots/state.json', s);
+    const pic = include.shot ? dd.picture() : null;
+    if (pic) add('atlas/dots/last.png', pic.png, { text: false, at: new Date(pic.at), note: `the square of the game's picture last looked at for the minimap's dots: ${pic.w} x ${pic.h} pixels, ${pic.origin[0]} across and ${pic.origin[1]} down` });
+    if (s.pictures) summary.push(`The minimap's dots: ${s.state}${s.why ? ` (${s.why})` : ''}; ${s.withDots} of ${s.pictures} pictures of it had dots on them`);
   });
   await part('the notes of Azeroth Atlas', () => {
     for (const f of logFiles()) file(`atlas/logs/${path.basename(f)}`, f, { max: 3 * MB, text: true });

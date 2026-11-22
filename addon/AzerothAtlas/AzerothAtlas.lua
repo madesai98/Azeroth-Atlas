@@ -1189,6 +1189,14 @@ local function BuildMessages()
       for _, r in ipairs(reports) do list[#list + 1] = { T_STATS, r[1], r[2] } end
     end
   end
+  -- your pet (and where it is, should the game say) and what your minimap tracks: the 3D map names
+  -- the dots it reads off the minimap by it (Yours.lua, which says under which keys)
+  if shared.YoursReport then
+    local ok, reports = shared.Try("yours report", shared.YoursReport)
+    if ok and type(reports) == "table" then
+      for _, r in ipairs(reports) do list[#list + 1] = { r[1], r[2], r[3] } end
+    end
+  end
   messages = list
 end
 
@@ -1666,6 +1674,11 @@ SlashCmdList["AZEROTHATLAS"] = function(msg)
   if word == "me" or word == "self" then
     -- /atlas me: what the 3D map is told of your character, to tell which quests are open to you (Self.lua)
     if shared.SelfSay then shared.SelfSay() else say("this copy of the addon does not say who your character is: update it from the 3D map, and start the game again.") end
+    return
+  end
+  if word == "pet" or word == "yours" then
+    -- /atlas pet: what the 3D map is told of your pet and of what you track (Yours.lua)
+    if shared.YoursSay then shared.YoursSay() else say("this copy of the addon does not say anything of your pet: update it from the 3D map, and start the game again.") end
     return
   end
   if word == "learned" then

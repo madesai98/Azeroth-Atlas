@@ -152,7 +152,7 @@ opened again: after a restart of the server or the browser, after the page has r
 or opened afresh. That is every switch and number in the sidebar (Follow me,
 Turn with me, Auto-zoom and its three distances, the NPC filters, the spawn zones, each route's
 switch and colour, the figures, buildings, trees, cutaway, place names, flight masters, boats,
-slopes, contour lines), the sidebar itself (folded away or not, and which of its sections are
+slopes, contour lines, which of the minimap's dots are shown), the sidebar itself (folded away or not, and which of its sections are
 open), and where you were looking: the map, the spot, the direction and tilt. It is
 kept per browser (in its storage for `localhost:5173`); another browser, or a private window,
 starts from the defaults. The application counts as a browser of its own: it keeps these with
@@ -295,6 +295,7 @@ The map only redraws when the view changes, so it uses no GPU while you are just
 | `referenceFile` | A copy of that database of your own to use instead of downloading one |
 | `ingame` | `false` = never write the route into the game's route mailboxes (see "The same route in the game") |
 | `minimap` | `false` = never look at the game's minimap to find you inside a dungeon (see "Inside a dungeon: your place, read off the game's minimap") |
+| `dots` | `false` = never look at the game's minimap for its dots: what you track, your target, your pet (see "The dots of the game's minimap") |
 | `autoUpdate` | `false` = the map tool only says when a newer version of itself is out, and puts it in when you press the button (see "Updates"). `"never"` = it is never put in, whatever is pressed |
 | `auctions` | Auction prices (see "Auction prices"): `{ "house": "us-110" }` = the auction house this copy shows (chosen on the page); `false` = off altogether |
 | `combatLog` | `false` = the game's combat log is never read (see "What a fight shows"); the quest times then go by a round figure for your level, not your own pace |
@@ -2260,6 +2261,8 @@ What you get:
   (`viewer/js/mount.js`): the game's creature models stand in one stiff pose without their
   animations.
 - **Party members**: green dots with names (grey when dead), while they are on your map.
+- **The dots of the game's minimap**: what you track, your target and your pet, each where it
+  is (see "The dots of the game's minimap").
 - **Spawn zones**, the NPC filters and the quest explorer use your real level and faction.
 - **Where you could be heading**: your guide's step, your own waypoint, your body while you
   are a ghost, and the quest you are tracking are each reported, for the routes - the quest
@@ -2568,6 +2571,78 @@ Cases a walk does not have, tried in Gnomeregan:
   summons, which leads from anywhere, does not.
 - An addon older than version 6 of the strip does not say how fast you move: then every picture
   is taken on its own, as before.
+
+### The dots of the game's minimap: what you track, your target, your pet
+
+The game puts a dot on its minimap for every creature or thing your tracking finds - Track
+Beasts, Track Humanoids, Track Hidden, Find Herbs, whatever it is set to - and for your target
+and your pet. The map shows them where they are. Under **You**:
+
+| Switch | What it shows |
+| --- | --- |
+| **What I track, and my target** | every dot of your tracking: red for what is hostile to you, yellow for neutral, green for friendly - and your target, in a gold ring |
+| **My pet** | your pet - a hunter's pet, a warlock's demon - by its name |
+
+Both are on until you turn them off. The line above them says what your tracking is set to and
+how many dots are on the map.
+
+**How.** The game tells an addon nothing of where a dot is. But the minimap is on the screen,
+and the helper that reads the strip has the game's picture: while one of the two switches is
+on, the small square of that picture the minimap is in is looked at four times a second
+(`server/dots.js`), and the dots are found on it by their look (`server/minimap-dots.js`): a
+disc of one colour, a ring round it - silver, gold on your target - and a black edge. The game
+draws every one of them from one sheet of icons, which is where the measures are from; how big
+they come out goes by the scale of your interface, so that is measured off the dots themselves.
+A dot so many pixels from the minimap's middle is so many yards from you: the addon says where
+the minimap is on the screen, how many yards it shows and whether it turns with you, as it does
+for finding you inside a dungeon. Each dot is followed from picture to picture, so that it is
+one thing for as long as it is seen, and one picture's mistake is never shown. Inside a dungeon,
+where the game hides where you are, your place is the one found on the minimap itself. Only the
+picture of the game's own window is read; nothing is sent into the game, and nothing of the
+picture is kept or leaves this computer.
+
+**What a dot is.** The picture says a colour and a ring, and no name. The addon says what else
+can be known (`addon/AzerothAtlas/Yours.lua`, from version 34; `/atlas pet` in the game says
+what it tells): that you have a pet and what it is called, and which spells your minimap's
+tracking is set to. A blue dot is yours, or one of your party's. Your party is shown already,
+so a blue dot where one of them stands is left out. Of the others, one is your pet: the one
+that has been there longest. Whatever else of yours the game puts on its minimap - a hunter's
+hawks, for their eighteen seconds - is not shown.
+
+**Does the game say where your pet is?** To an addon it says so of you and of your party;
+whether it does of a pet in this game nobody has tried yet. The addon asks, and where the game
+answers, that is gone by: the pet is then shown where the game says even with no dot to see -
+beyond the minimap's edge, or under your own arrow - and the blue dot at that place is the pet,
+however many blue dots there are (`/atlas pet` says whether it answered). The game's combat
+log does say where a pet is, with each blow it strikes or takes; that is not used here: it
+comes in bursts, late, and only in a fight.
+
+What it cannot do:
+
+- Name what a tracked dot is. The game's own tooltip does, with the mouse on the dot; its
+  picture does not.
+- See what the minimap does not show: a dot beyond its edge (zoom the minimap out to see
+  further), one wholly under another, your pet at heel right under your own arrow. A dot half
+  under another is found by the half that shows, to a yard or two.
+- Read a minimap that is hidden, covered by another window's overlay, or whose dots an addon
+  has given another look. A dot under seven pixels across (a very small interface on a small
+  screen) is often missed.
+- Tell how high anything is: a dot is drawn on the ground where it is - or, while you are
+  indoors or under ground yourself, as high as you are.
+- Tell your pet from a hawk of yours for sure, where the game does not say where the pet is:
+  with the pet out of sight (at heel, under your arrow) a hawk's dot is taken for it while the
+  hawk lasts.
+- Read anything but the ringed dots. Should the game show a herb or a vein as a little picture
+  of its own, that is not read yet.
+
+It was tried against the game itself - a creature coming at its hunter, as the target in its
+gold ring, and the pet running in to it; a pet on the creature it fought; a pet half under its
+owner's arrow - and on some eight hundred made-up pictures: the game's own dots drawn at six
+sizes onto real pictures of the minimap, alone and one over another, and other icons of the
+game's, which are no dots. The addon's half ran in a made-up game. What a tracking spell shows
+was not seen in the game itself.
+
+`"dots": false` in `config.json` switches it off.
 
 ### The camera that follows you
 
@@ -3640,7 +3715,7 @@ out, and why):
 | `report.txt` | what you wrote, and a summary of all the rest |
 | `timeline.txt` | every note below as one list, in the order things happened: the server's, the page's and the addon's own, side by side |
 | `computer/` | the version of Windows, processor, memory, graphics card and its driver, drives and how full they are, the antivirus program, and the names of the programs running (an overlay or a capture program can be in the strip's way) |
-| `atlas/` | this copy of Azeroth Atlas: its version, a digest of each of its own files (a file gone wrong in an update shows), `config.json`, what the server knew at that moment (the game, the addon, your character as the game reported it, your quest log), its notes, what the page was showing (where you were, each route and how it was taken to go, what the game had been handed) with a picture of the map, the route mailboxes as they stood, and - where you were looked for on the game's minimap inside a dungeon - `atlas/minimap/`: the last small square of the game's picture that was looked at (`last.png`), where the minimap was taken to be in it (by its rim, and by the addon's word), the figures of the last look, and how it has agreed with the combat log (`state.json`), and what each of the last 1,500 pictures gave (`trail.json`: five minutes of them, a line of figures apiece - when, whether a place was found and how, where, how well it fitted, how far you had gone - and nothing of the pictures themselves); and what following you has taught the map of the dungeons (`atlas/data/dungeon-doors.json`, `dungeon-ways.json`, `dungeon-checks.json`: places and counts) |
+| `atlas/` | this copy of Azeroth Atlas: its version, a digest of each of its own files (a file gone wrong in an update shows), `config.json`, what the server knew at that moment (the game, the addon, your character as the game reported it, your quest log), its notes, what the page was showing (where you were, each route and how it was taken to go, what the game had been handed) with a picture of the map, the route mailboxes as they stood, and - where you were looked for on the game's minimap inside a dungeon - `atlas/minimap/`: the last small square of the game's picture that was looked at (`last.png`), where the minimap was taken to be in it (by its rim, and by the addon's word), the figures of the last look, and how it has agreed with the combat log (`state.json`), and what each of the last 1,500 pictures gave (`trail.json`: five minutes of them, a line of figures apiece - when, whether a place was found and how, where, how well it fitted, how far you had gone - and nothing of the pictures themselves); and what following you has taught the map of the dungeons (`atlas/data/dungeon-doors.json`, `dungeon-ways.json`, `dungeon-checks.json`: places and counts); and - where the minimap's dots are read - `atlas/dots/`: how that stands, what the last picture gave and what the addon says is yours (`state.json`), and the last small square of the game's picture that was looked at for them (`last.png`) |
 | `game/` | the game's build and its settings, the addons installed and which are switched on, what the Azeroth Atlas addon has saved (its own notes among it), what the addons it works with have saved (Questie, Guidelime and guide packs, TomTom, ShortestPathForever, DockWatch and the like), the game's own logs about itself and its addons, the beginning of its last three crash reports, and its cache of what the server told it about creatures, objects and quests |
 
 **What never goes in:** account names (an account's folder is called `account-1` in the zip,
@@ -3749,3 +3824,7 @@ The 3D map shows them, the game does not. In the order worth looking:
   QuestieDB and the map's prices through a real Auctionator were run in a made-up game - the
   first two against the real QuestieDB addon, the last against an Auctionator made up from the
   names other addons call it by - and not in the game itself.
+- The dots of the game's minimap are read off its picture: what a tracked dot is called is not
+  known; a dot the minimap does not show (beyond its edge, under another, under your own arrow)
+  is not shown; and what a tracking spell shows was not seen in the game itself (see "The dots
+  of the game's minimap").

@@ -64,6 +64,7 @@ export class PlayerLink {
   connect() {
     const es = new EventSource('/api/player/events');
     es.onmessage = (e) => { this.receive(JSON.parse(e.data)); };
+    es.onopen = () => { this.onOpen?.(); };
     es.onerror = () => {
       // The server is away. For a moment, most likely: it starts itself again when the map is
       // updated (server/watch.js). So you stay where you were last seen, as with any lost signal,
@@ -406,7 +407,7 @@ export class PlayerLink {
 
   /** What to draw on the map this frame. */
   markers() {
-    const out = { player: null, party: [] };
+    const out = { player: null, party: [], dots: [] };
     if (!this.app.scene) return out;
     const s = this.state;
     if (this.shown && this.onThisMap) {
@@ -424,6 +425,13 @@ export class PlayerLink {
       for (const m of s.party ?? []) {
         if (m.x === null) continue;
         out.party.push({ x: m.x, y: m.y, z: this.#ground(m.x, m.y), name: m.name ?? `Party ${m.slot}`, dead: m.dead });
+      }
+      // What the game's minimap shows as dots - what you track, your target, your pet
+      // (server/dots.js): each where it is. The game says nothing of how high: on the ground there -
+      // or, where you are indoors or under ground yourself, as high as you are.
+      const show = this.app.opts?.dots, level = s.player.indoors && this.shown ? this.shown[2] : null;
+      for (const d of show ? s.dots ?? [] : []) {
+        if (d.role === 'pet' ? show.pet : show.tracked) out.dots.push({ ...d, z: level ?? this.#ground(d.x, d.y) });
       }
     }
     return out;
