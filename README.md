@@ -1006,7 +1006,7 @@ section, where each also says how long it is:
 | **Guide objective** | green | your guide's current step |
 | **Tracked quest** | yellow | the quest you are tracking in the game (the one its objective tracker has picked out): the nearest of what it still has you kill, use, collect or go and look at, or, once it is ready to hand in, who takes it |
 | **Waypoint** | blue | the last waypoint you placed yourself: a Ctrl-click or Shift-click on the game's map, or a click on this one |
-| **Corpse run** | red | your body, while you are a ghost. On foot all the way: a ghost takes no flight |
+| **Corpse run** | red | your body, while you are a ghost: on the level it lies on (see "Your body, on the level it lies on" below). On foot all the way: a ghost takes no flight |
 | **Party members** | purple | each member of your party who is on your map |
 
 - **The colours are yours to change**: click the swatch beside a route. A flight is always a
@@ -1157,6 +1157,95 @@ Two more rules hold for every walk:
   the search used to begin on whatever did, at any height: in the Wizard's Sanctum under
   Stormwind that was the earth under the streets thirty yards overhead, and the route walked
   off along it. You can drop down from where you are; you cannot rise to a floor overhead.
+- **Under water, a walk begins at the surface over you.** Water has one floor, its surface, and a
+  diver is under it: eight yards down in a pool in Felwood there was no floor within a step of
+  you, so "no way out of where you are on foot" - and, a moment later, a journey by hearthstone
+  and boat to a place forty yards off (a report of 22 November 2026). While the game says you
+  are swimming or under water, the surface over you is where the walk begins, however deep you
+  are. Only then: on dry ground a floor overhead is still no place to begin.
+
+### A long walk
+
+The search goes over the ground a yard at a time. That finds any way of a few hundred yards in
+no time, and no way at all across a zone or two: with a mountain range between you and where
+you are heading it looked at two million floors on the near side and gave up, "too far to work
+out on foot". Reported on 22 November 2026 as "Router doesnt always track the currently selected
+and followed quest": with a quest picked out whose place was a zone away - handed in in Felwood,
+from Auberdine and then from Astranaar - the page noted "quest: no way (too far to work out on
+foot)" time after time, and the game was sent no route for it for as long as it was tracked; a
+waypoint put down by hand in Felwood got the same.
+
+So the map's data has the same ground once more in the large (`maps/<id>/nav/coarse.bin`:
+`extractor/jobs/navcoarse.js`). Every tile is cut into squares of some 67 yards; within a square,
+the floors that can be walked between, there and back, are one **stretch** - the two banks of a
+ravine, the street and the roofs over it, a hall and its cellar are a stretch each - and each
+stretch is written as one place and the stretches you can step on to from it. That is some
+370,000 places for Kalimdor and 300,000 for the Eastern Kingdoms, four megabytes each, searched
+from one end of a continent to the other in a few hundredths of a second.
+
+A long walk is then found in two steps (`viewer/js/navworker.js`: farRoute):
+
+1. **the way through the stretches** from where you are to where you are heading - which says
+   through which valleys, over which passes, round which mountain the walk goes;
+2. **the walk itself over the real ground, a piece at a time**: from where you are to a stretch's
+   place some 650 yards along that way, from there to the next, and so on to the end. Each piece
+   is a search like any other, short and along ground known to lead through. Where two pieces
+   meet, the ninety yards either side are worked out once more from one to the other, so that
+   the way does not bend to pass through a place it has no reason to pass through.
+
+A walk of 1,500 yards and more as the crow flies is looked for this way first; a nearer one that
+the search over the real ground gives up on (round a mountain, a few hundred yards off) is
+looked for this way then. What comes back is a walk like any other: drawn, followed, sent to the
+game, used for a journey's legs (the walk from the last flight master to a far place used to be
+a guess with no line; it is the real way now).
+
+Measured on the real ground, the same seventeen walks looked for both ways (the old search, and
+with the ground in the large to go by):
+
+| | old search | now |
+|---|---|---|
+| Astranaar to Impsy in Felwood (the report) | none: too far | 4,831 yd, found in 0.6 s |
+| Auberdine to Impsy in Felwood (the report) | none: too far | 9,253 yd, in 0.9 s |
+| Kharanos to Menethil Harbor, round by Loch Modan | none: too far | 6,735 yd, in 0.6 s |
+| Auberdine to Gadgetzan, the length of Kalimdor | 22,445 yd, 1,640 s | 17,316 yd, 1,237 s |
+| Stormwind to Booty Bay | 6,341 yd, 501 s | 6,144 yd, 451 s |
+| Gadgetzan to the ramp into Un'Goro | 5,369 yd, 766 s | 4,943 yd, 704 s |
+| the walks under 1,500 yards (eight of them) | as now | the same, to the yard |
+
+Four walks that had no way have one; none is lost; none is longer. The long ones are shorter
+than before: to get anywhere at all over such a distance the old search leaned hard toward the
+goal and took the first way it met.
+
+To know:
+
+- **It needs the map built again once** ("Update map": the page offers it after this update, and
+  it takes a minute or two - only the new files are made). Until then walks are looked for as
+  before, and a long one fails as before.
+- **Falls are not in it.** The pieces take falls within themselves, as any walk does; a way
+  that is quicker only by a drop somewhere far off the way in the large is not found.
+- **Lifts are**: from the stretch a lift stops by to the stretches at its other stops.
+- A stretch that nothing leads on to and that leads on to nothing (a roof, a tree top, a ledge:
+  half of them) is left out; where you stand on one, the way in the large begins at a stretch
+  beside it, and the first piece of the walk begins where you really are.
+
+### Your body, on the level it lies on
+
+The game says where your body lies on its flat map, and nothing of how high. A body in a cave
+lies under the hill the map shows at that spot, and the run back led up the hill: reported on 22
+November 2026, "i died in the cave but my corpse route is taking me above the cave" (a cave in
+Dun Morogh; the body 56 yards under the hilltop the route ended on).
+
+This map followed you to the spot and knows how high you were. The moment the game first says
+you are dead you still lie where you fell (a ghost is at the graveyard only once you let go), so
+that moment's place is your body's and the height is the one you were followed to. It is kept
+(`viewer/js/player.js`: died), also across the page loading itself again, and the run back goes
+to that level where the game's place for your body is the place you died. Alive again, it is
+forgotten.
+
+- Where the game has your body somewhere else than you died (another death's, with the page not
+  watching), no height is made up for it: the way goes by the map alone, as before.
+- A body inside a dungeon is another matter: the run back leads to the dungeon's door (see
+  "Dungeons").
 
 With **more than one level**, the choice is yours:
 
@@ -2067,20 +2156,23 @@ The game tracks a quest - its objectives in the list on the right of the screen 
 it in the quest log, and a right-click on a zone's name in the quest log tracks or untracks all
 of that zone's quests ("Track All", "Untrack All"). It has nothing for the whole log. The addon
 adds two entries for that (asked for on 20 November 2026: "a button that adds all completed
-quests to the tracked list would be sick, and also an untrack all button"), and a third for the
-quests of where you are ([below](#track-location-quests-only-the-quests-of-where-you-are)):
+quests to the tracked list would be sick, and also an untrack all button"), a third for the
+quests of where you are ([below](#track-location-quests-only-the-quests-of-where-you-are)) and a
+fourth for the quests of a dungeon
+([below that](#track-dungeon-quests-a-dungeons-quests-and-those-that-lead-up-to-them)):
 
 | | |
 |---|---|
-| **Track All Completed Quests** | Every quest in your log that is ready to hand in is tracked, in every zone, as far as there is room: the game tracks 25 quests at most. What you tracked already stays tracked. |
+| **Track All Completed Quests** | The quests you track become those of your log that are ready to hand in, in every zone: every other quest is untracked first (asked for on 22 November 2026: "the tracklog should be cleared first then filled with completed quest"), then these are tracked, as many as there is room for - the game tracks 25 quests at most. With none ready to hand in, the list is left as it is. |
 | **Untrack All Quests** | Every quest you track is untracked. The quest the game focuses is let go of too, as the game itself does when that quest is untracked. |
 
 They stand in three of the game's own menus, below what the game has there: the quest log's
 options (the button by its search box), the right-click on a zone's name in the quest log (under
 the game's own two, which are for that zone only), and the right-click on a quest in the list on
 the right of the screen. Typed, they are `/atlas track` and `/atlas untrack`. What was done is
-said in chat: "6 quests ready to hand in tracked, 1 was already", "no room to track 4 quests
-ready to hand in: the game tracks 25 quests at most", "10 quests untracked".
+said in chat: "7 quests ready to hand in tracked, the most rewarding at the top; 3 other quests
+untracked", "5 quests ready to hand in tracked, the most rewarding at the top; 2 more could not
+be, as the game tracks 5 quests at most", "10 quests untracked".
 
 - **Not in a fight.** The list on the right lays itself out again whenever a quest is tracked or
   untracked, and it holds buttons (a quest's item) that an addon may not have moved in a fight.
@@ -2101,6 +2193,47 @@ against a mocked game whose quest log, tracked list and menus behave as that cod
 the quest log of the report that asked for it; not yet seen in the game itself when this was
 written.
 
+### The most rewarding at the top
+
+Whatever one of the entries tracks stands in the list with the quest that gives most at the top
+(asked for on 22 November 2026: "the quest with the highest returns appear at the top of the
+track list (last in). XP is prioritized first, once quests in the list reach less than half of
+the xp the top quest gives prioritize gold after that. for gold, it should be based on total
+gold which is gold rewarded plus the gold received from the highest vendor selling items offered
+in the quest"):
+
+- first the quests that give **at least half the experience of the one that gives most**, by
+  their experience, the most first (of two that give the same, the one worth more gold);
+- then the rest, **by what they are worth in gold**, the most first (of two alike, by experience);
+- with no experience to be had from any of them (at the highest level), all go by gold.
+
+A quest's **gold** is the money it pays and what a vendor pays for what it hands you: everything
+it gives outright and, of the things it lets you choose one of, the one a vendor pays most for.
+
+What a quest gives is the game's own word, for your character as it is now (a quest's
+experience falls as you outgrow it): the calls the game's own tooltips use (`GetQuestLogRewardXP`,
+`GetQuestLogRewardMoney`, the lists of what it hands out and lets you choose from, and
+`C_Item.GetItemInfo` for what a vendor pays). Where the game does not say - it has not been sent
+a quest's rewards, or it has not been shown a thing yet and so has no price for it - **the Atlas
+database says**: the 3D map writes what each quest gives, what a vendor pays for each of those
+things (as read out of the game's own files) and which quests lead to which dungeon as a small
+addon of its own beside this one, `AzerothAtlas_Quests` (`server/questbook.js`: 5,600 quests,
+2,400 things priced, 30 dungeons; written when the map starts, after each time the database is
+fetched and when the addon is installed, like the drop rates).
+
+**Which end of the list a newly tracked quest goes to** is the game's affair: in this game the
+last one tracked stands at the top, as the report has it, so the quests are tracked from the
+least rewarding to the most. That is not taken on trust. Once they are tracked the game is asked
+how they stand; if it has them the other way round they are untracked and tracked once more the
+other way, and which way it was is kept (`AzerothAtlasDB.trackedTop`), to be right at once the
+next time. The list is cleared and tracked anew each time, so that the order holds: the quest
+the game focuses, if it is one of those tracked, is focused again afterwards (the game lets go
+of it when it is untracked).
+
+To know: with more quests than the game has room for, the most rewarding are the ones tracked.
+The game sorts its list itself when you cross into another zone (its own code asks it to); what
+it makes of the order then is the game's doing - press the entry again for this order.
+
 ### Track Location Quests: only the quests of where you are
 
 A third entry in the same three menus, between the two above (asked for on 21 November 2026:
@@ -2112,7 +2245,7 @@ count as their own zone"). Typed, it is `/atlas track here`.
 **Track Location Quests** makes the quests you track those with something to do where you are
 now, and nothing else: every other quest is untracked first, then these are tracked (as many as
 there is room for - the game tracks 25). Its tip names the place. In chat: "6 quests with
-something to do in Tanaris tracked (1 was already); 3 other quests untracked", or "no quest in
+something to do in Tanaris tracked, the most rewarding at the top; 3 other quests untracked", or "no quest in
 your log has anything to do in Thousand Needles; 2 quests untracked".
 
 Where a quest has something to do, the game's own map says: it pins each quest of your log
@@ -2163,6 +2296,45 @@ more quests than the game tracks, in a fight, with a quest the game refuses and 
 and in a game that pins no quests at all. **Not tried in the game itself**: what the game's map
 says of a spot at a zone's edge, what it marks a dungeon's quest with, and which map it is on
 inside a dungeon are as its interface code and this addon's own notes of its pins have them.
+
+### Track Dungeon Quests: a dungeon's quests, and those that lead up to them
+
+A fourth entry in the same menus (asked for on 22 November 2026: "Add button to untrack all and
+track dungeon quests and their prerequisite quests. I want to be able to track all my chain
+quests for a specific dungeon, i dont know how the ui would be for this to select a specific
+dungeon as i dont want the list to be full of 50 options"). Typed, it is `/atlas track dungeon`,
+with a dungeon's name after it for that one alone (the beginning of the name, or a part of it,
+is enough: `/atlas track dungeon zul`).
+
+**The entry opens a list of only the dungeons your quest log has something for** - a handful,
+not every dungeon of the game - each with how many quests that is, and above them all of them
+at once where there is more than one. With the quest log of the report that asked for it (37
+quests): Maraudon (1), The Temple of Atal'Hakkar (2), Blackrock Depths (1), Blackrock Spire (1).
+Choosing one makes the quests you track that dungeon's quests and the quests leading up to them,
+and nothing else, the most rewarding at the top. With nothing for any dungeon the entry says so
+and does nothing.
+
+- **A dungeon's quests** are those the Atlas database files under the dungeon's own area, and
+  whatever stands under the dungeon's name in your quest log, whether the database knows it or not.
+- **The quests that lead up to them** are every quest one of them asks for first (one of several,
+  or all of a set), every quest that names one as what comes next or as what it sends you on to,
+  and so on back along the chain: a quest in Darkshire that is five quests before the one done
+  in the dungeon counts.
+- Only quests of your log are tracked: the game tracks no quest you do not have.
+- A dungeon is one the game counts as a dungeon or a raid (the Deeprun Tram, which the map leads
+  you into like one, is none).
+- Which quests lead to which dungeon comes with `AzerothAtlas_Quests` (see above): after this
+  update the game has to be started again once before it is there (a new folder: the game only
+  looks for those when it starts). Until then the entry says "Not known yet: start the game
+  again".
+
+Both need version 40 of the addon. Tried against a mocked game (90 checks, with the game's
+calls for what a quest gives, a list that takes a new quest at its top and one that takes it at
+its foot, the database's word where the game says nothing, at the highest level, with more
+quests than there is room for, the dungeon list by menu and typed, in a fight) and with the
+whole addon loaded (140 checks). **Not tried in the game itself**: that its list takes the last
+quest tracked at the top is the report's word, and is checked against the game each time; that
+its menus open a list within a list for an addon is as its interface code has them.
 
 ## Overlays: the map drawn over the game
 
@@ -3231,6 +3403,7 @@ The extractor keeps what a pathfinder needs, in `dataDir`:
 | `maps/<id>/areas.bin` | Area id per terrain chunk for the whole map |
 | `maps/<id>/wmos.bin` | Every building placement (position, rotation, scale, world bounds) |
 | `maps/<id>/nav/<col>_<row>.bin` (`WFN1`) | Where a character can stand, and what can only be slid or fallen down, per tile, on a 512 x 512 grid (1.04 yd). Sections (each deflated): 2 number of surfaces per cell (at most 14, lowest first), 3 their heights (uint16, 1/8 yd, +2048, stored as differences), 4 flags per surface (1 swim, 2 lava, 4 terrain, 8 steep ground: nowhere to stand, only a way down; 16 / 32 / 64 / 128 = a floor you walk on from to the cell east / west / south / north), 5 links per surface (uint16: four bits each for east, west, south, north, lowest first: 0 leads nowhere that way, 1 to 14 the surface of the next cell it leads on to, counted from 1, by a step where the flag for that side is set and by a fall where it is not, 15 open on that side at the edge of the tile), 6 the room over each surface along the tile's four edges (uint16, 1/8 yd, 65535 open sky, 0 not open on that side: for the east, west, south and north edge in turn, each cell along it, each surface of that cell - what a fall across the seam of two tiles is checked against). Steep ground is kept only where it is part of a way from a floor down to a floor. Tiles built before 0.5.1 have sections 2 to 4 only and are still read. A map that is one building has no tiles: it has one such file for each square of the same grid that its building reaches into, and `maps/<id>/map.json` lists them (`nav.at`: `[col, row]` each) |
+| `maps/<id>/nav/coarse.bin` (`WFNC`) | The same ground in the large, for walks too long to search a yard at a time (see "A long walk"): the map's "stretches" - within each square of 64 x 64 cells of a tile, the floors that can be walked between, there and back - each with a place of its own and the stretches it leads on to. Sections: 1 JSON (`cells`: squares to a tile's side, `tiles`, `stretches`, `links`, `leftOut`), 2 the tiles (uint16 col, row, uint32 the number of the tile's first stretch; a last entry closes the list), and, each deflated, 3 the places (float32 x, y, z: a floor of the stretch, the one nearest its middle), 4 which square of its tile each is in, 5 its kind (1 swum, 2 lava), 6 how many floors it has (uint16), 7 where its links begin (uint32, one more than there are stretches) in 8 the links (uint32: the stretch stepped on to; one way where the step cannot be taken back). Not for a map of fewer than four tiles. `maps/<id>/map.json` says it is there (`nav.coarse`: its revision) |
 | `maps/<id>/creatures.bin` (`WFC1`) | Stationed creatures: section 1 JSON (`creatures`: name, `min`/`max` level, `rank`, reaction to Alliance `a` and Horde `h` (0 friendly, 1 neutral, 2 hostile), `est` level estimated, `u` = no side recorded (new to this game: shown only when asked for), `t` = these spawn points are inside a town or city of the Alliance (1) or the Horde (2) and make no zone for that side), 2 spawn points (float32 world x, y), 3 creature index per spawn point, 4 patrol route points, 5 routes (`creature, firstPoint, count`) |
 | `models/wmo/<id>.bin` (`WFM1`) | Section 1 header (JSON: its groups with the game's flags, box and run of vertices; `left`: the groups left out and why - see "What of a building or an object is not drawn"), 2 vertices (36-byte stride, position first), 5 collision triangle indices, 6 the game's per-triangle flags (`0x08` collision, `0x20` render, `0x04` detail, `0x02` no-camera-collide), 7 interior object placements, 8/9 interior liquid surfaces |
 | `models/m2/<id>.bin` (`WFM1`) | Section 4 collision vertices, 5 collision triangles |

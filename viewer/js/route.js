@@ -92,7 +92,8 @@ export class RoutePlanner {
   setMap(map) {
     this.mapId = map.id;
     this.navigable = !!map.nav;
-    this.info = map.nav ? { map: map.id, rev: map.nav.rev, tiles: navTiles(map) } : null;
+    // (coarse: the same ground in the large, where the map's data has it - for long walks: navworker.js)
+    this.info = map.nav ? { map: map.id, rev: map.nav.rev, tiles: navTiles(map), coarse: map.nav.coarse ?? null } : null;
     this.infos.set(map.id, this.info);
     this.#clear('');
   }
@@ -112,8 +113,8 @@ export class RoutePlanner {
     const to = a && !/^ally/.test(this.label) ? [a.toMap, whole(a.to[0]), whole(a.to[1]), whole(a.to[2])] : null;
     if (!changed(`way.${this.label}`, { to, way: r ? legs : null, lifts, none: r ? null : this.status || '-', first: !!r?.provisional })) return;
     const more = { to, from: a ? a.from.map(whole) : null, onMap: a?.map, hearthstoneLeadsNobodyKnowsWhere: this.noBind || undefined };
-    if (r) note('route', `${this.label}: ${r.provisional ? 'a first answer, on foot (quicker ways are still looked for)' : legs.length > 1 ? legs.join(', then ') : 'on foot'}`, { ...more, seconds: whole(r.seconds), yards: whole(r.length), lifts, onFootAllTheWay: whole(r.walking) ?? undefined, detached: r.detached || undefined, tookMs: a ? whole(performance.now() - a.time) : null });
-    else note('route', `${this.label}: ${a ? `no way${this.status ? ` (${this.status})` : ''}` : `heading nowhere${this.status ? ` (${this.status})` : ''}`}`, more);
+    if (r) note('route', `${this.label}: ${r.provisional ? 'a first answer, on foot (quicker ways are still looked for)' : legs.length > 1 ? legs.join(', then ') : 'on foot'}`, { ...more, seconds: whole(r.seconds), yards: whole(r.length), lifts, onFootAllTheWay: whole(r.walking) ?? undefined, detached: r.detached || undefined, aLongWalkInPieces: r.far || undefined, tookMs: a ? whole(performance.now() - a.time) : null });
+    else note('route', `${this.label}: ${a ? `no way${this.status ? ` (${this.status})` : ''}` : `heading nowhere${this.status ? ` (${this.status})` : ''}`}`, { ...more, inTheLarge: a?.large ?? undefined });
   }
 
   /** One search, for callers that want the answer itself (tests, the travel planner). */
@@ -123,7 +124,7 @@ export class RoutePlanner {
       this.hub.waiters.set(id, resolve);
       // (with the lifts of that map: a walk takes them like any other step - navworker.js)
       const nav = opts.nav ?? this.info;
-      this.hub.worker.postMessage({ type: 'route', id, from, to, run: opts.run, swim: opts.swim, nav: nav ? { ...nav, lifts: this.#liftsOn(nav.map) } : nav, landFrom: !!opts.landFrom, landTo: !!opts.landTo, levels: !!opts.levels });
+      this.hub.worker.postMessage({ type: 'route', id, from, to, run: opts.run, swim: opts.swim, nav: nav ? { ...nav, lifts: this.#liftsOn(nav.map) } : nav, landFrom: !!opts.landFrom, landTo: !!opts.landTo, levels: !!opts.levels, wet: !!opts.wet });
     });
   }
 
@@ -158,7 +159,7 @@ export class RoutePlanner {
   async #walk(info, from, to, opts) {
     if (!info) return { ok: false, reason: 'no walking data for this map' };
     const q = (v, step = 1) => (v === null || v === undefined ? 'n' : Math.round(v / step));
-    const tail = `${q(to[0])},${q(to[1])},${q(to[2])},${+!!opts.landFrom}${+!!opts.landTo},${Math.round((opts.run ?? 7) * 10)},${Math.round((opts.swim ?? 0) * 10)}`;
+    const tail = `${q(to[0])},${q(to[1])},${q(to[2])},${+!!opts.landFrom}${+!!opts.landTo}${+!!opts.wet},${Math.round((opts.run ?? 7) * 10)},${Math.round((opts.swim ?? 0) * 10)}`;
     const key = `${info.map},${info.rev},${q(from[0])},${q(from[1])},${q(from[2])},${tail}`;
     const near = `!${info.map},${info.rev},${q(from[0], FAIL_CELL)},${q(from[1], FAIL_CELL)},${tail}`;
     const now = performance.now();
@@ -180,6 +181,8 @@ export class RoutePlanner {
     const planned = (this.route?.legs?.length ?? 0) > 1; // a journey by other means is showing
     const elsewhere = asked.map !== asked.toMap;
     let direct = null;
+    // (large: what became of looking for a long walk by way of the ground in the large - navworker.js - where that came to nothing)
+    asked.large = m.ok ? null : m.large ?? null;
     if (!m.ok) { if (!planned) this.route = null; this.status = elsewhere ? '' : m.reason; }
     else {
       const n = m.points.length / 3, cum = new Float32Array(n);
@@ -187,6 +190,8 @@ export class RoutePlanner {
       for (let i = 1; i < n; i++) cum[i] = cum[i - 1] + (m.kinds[i] & LIFTED ? 0 : Math.hypot(m.points[i * 3] - m.points[i * 3 - 3], m.points[i * 3 + 1] - m.points[i * 3 - 2], m.points[i * 3 + 2] - m.points[i * 3 - 1]));
       direct = {
         points: m.points, kinds: m.kinds, length: m.length, seconds: m.seconds, cum, time: this.#times(m.points, m.kinds, m.rides), target: asked.to, at: 0, ms: m.ms, expanded: m.expanded,
+        // (far: a long walk, found by way of the ground in the large, in so many pieces)
+        far: m.far ? m.pieces ?? 1 : 0,
         rides: m.rides ?? [], // (the lifts it takes: [{ at (the point come to on one), seconds, from, to, name }])
         // (end: the last point of the line that belongs to this part; lastWalk: where the walk to the waypoint itself begins)
         legs: [{ mode: 'walk', yards: m.length, seconds: m.seconds, end: n - 1 }], lastWalk: { map: asked.map, from: asked.from, land: false },
@@ -302,7 +307,7 @@ export class RoutePlanner {
       const entry = this.app.manifest.maps.find((m) => m.id === id);
       if (entry) {
         const map = await (await fetch(`/data/maps/${id}/map.json?v=${entry.rev}`)).json();
-        if (map.nav) info = { map: id, rev: map.nav.rev, tiles: navTiles(map) };
+        if (map.nav) info = { map: id, rev: map.nav.rev, tiles: navTiles(map), coarse: map.nav.coarse ?? null };
       }
     } catch { /* treated as a map with no walking data */ }
     this.infos.set(id, info);
@@ -934,7 +939,8 @@ export class RoutePlanner {
       // (on another map there is no walking it: straight to the journey by other means; and
       // while something carries you there is no walking from where you are, either)
       const walk = elsewhere ? Promise.resolve({ ok: false }) : ride ? Promise.resolve({ ok: false, reason: 'the way there is worked out when you land' })
-        : this.#walk(this.info, asked.from, asked.to, { run: speeds?.run, swim: speeds?.swim });
+        // (wet: you are in the water, as the game says - a walk from under it begins at its surface: navworker.js)
+        : this.#walk(this.info, asked.from, asked.to, { run: speeds?.run, swim: speeds?.swim, wet: !this.fixed && !!(this.app.player?.me?.submerged || this.app.player?.me?.swimming) });
       walk.then((m) => this.#answer(asked, m));
     }
   }

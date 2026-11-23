@@ -32,6 +32,7 @@ import { NPCS_VERSION, QUESTS_VERSION, placeNpcs, resolveHeights, writeNpcs, bui
 import { fetchReference, readReference } from './reference.js';
 import { NavReader } from './navread.js';
 import { NAV_VERSION, BUILDING_NAV_VERSION } from './jobs/nav.js';
+import { NAVCOARSE_VERSION, COARSE_FILE } from './jobs/navcoarse.js';
 import { MINIMAP_VERSION } from './jobs/minimap.js';
 import { parseWmoRoot } from './formats/wmo.js';
 import { loadTable } from './tables.js';
@@ -348,6 +349,27 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
       for (const n of map.nav) next.artifacts[n.rel] = { sig: n.sig, meta: n.meta };
     }
 
+    // ---- the same ground in the large, a file to a map: for walks too long to search a yard at a time ----
+    // Made from the ground of the map's tiles and nothing else (jobs/navcoarse.js), and so made
+    // again when any of them is. Not for a map of a tile or two - a dungeon, a cellar: no walk
+    // there is long.
+    const coarseJobs = [];
+    for (const map of maps) {
+      map.coarse = null;
+      if (map.nav.length < 4) continue;
+      const rel = `maps/${map.id}/nav/${COARSE_FILE}`;
+      const entry = { map, rel, sig: sig(NAVCOARSE_VERSION, map.nav.map((n) => n.sig)), meta: null };
+      if (fresh(rel, entry.sig)) { entry.meta = prev.artifacts[rel].meta; stats.reused++; } else coarseJobs.push(entry);
+      map.coarse = entry;
+    }
+    await runJobs('Mapping long walks', coarseJobs, async (c) => {
+      c.meta = await pool.run('navcoarse', { dir: abs(`maps/${c.map.id}/nav`), tiles: c.map.nav.map((n) => (n.e ? [n.e.x, n.e.y] : [n.x, n.y])), out: abs(c.rel) });
+    });
+    for (const map of maps) {
+      // (nothing written: ground from before its links were kept)
+      if (map.coarse?.meta?.stretches) next.artifacts[map.coarse.rel] = { sig: map.coarse.sig, meta: map.coarse.meta }; else map.coarse = null;
+    }
+
     // ---- the minimap's plan of every map that is one building (a dungeon, the Deeprun Tram) ----
     // Inside a dungeon the game says nothing of where you are, and its minimap shows it: the map
     // server finds the minimap's picture on the building's plan (server/minimap.js). The plan is
@@ -625,6 +647,8 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
     // the walkable-ground data has its own revision (it changes when a building model does)
     const navRev = map.nav?.length ? sig(map.nav.map((n) => n.sig)) : null;
     if (navRev) rev = sig(rev, navRev);
+    // ...and so has the same ground in the large
+    if (map.coarse) rev = sig(rev, map.coarse.sig);
     // ...and so has the minimap's plan of a map that is one building
     if (map.planEntry?.meta) rev = sig(rev, map.planEntry.sig);
     const mapJson = {
@@ -641,7 +665,8 @@ export async function runExtraction(cfg, opts = {}, report = () => {}) {
       npcs: map.npcsEntry?.meta ?? null, // maps/<id>/npcs.bin
       // maps/<id>/nav/<col>_<row>.bin: one for each of the map's tiles. A map that is one building
       // has no tiles, so it says which squares there are (`at`: [col, row] each).
-      nav: navRev ? { tiles: map.nav.length, rev: navRev, cells: 512, ...(map.tiles.length ? {} : { at: map.nav.map((n) => [n.x, n.y]) }) } : null,
+      // coarse: the same ground in the large (maps/<id>/nav/coarse.bin, jobs/navcoarse.js), by its own revision - where the map has it
+      nav: navRev ? { tiles: map.nav.length, rev: navRev, cells: 512, ...(map.tiles.length ? {} : { at: map.nav.map((n) => [n.x, n.y]) }), ...(map.coarse ? { coarse: map.coarse.sig.slice(0, 10) } : {}) } : null,
       // maps/<id>/minimap.bin: the minimap's plan of a map that is one building, for finding you on it
       // (jobs/minimap.js): how many rooms the building has and how many of them have a picture,
       // how big the plan is (two pixels a yard). null: there is none.

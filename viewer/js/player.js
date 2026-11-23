@@ -26,6 +26,10 @@ const LOOK_MS = 250;         // how often the kind of place is looked at
 export const ZOOM_DEFAULT = { in: 35, town: 110, out: 300 }; // yards from you, by the kind of place
 
 const INSIDE_KEY = 'wfmap.inside';     // the dungeon you were last in, kept across reloads of the page
+const DIED_KEY = 'wfmap.died';         // where you died, and how high (see #died), kept across reloads of the page
+const DIED_FOR = 3 * 3600 * 1000;      // ...for this long: a ghost does not wait longer than that
+const DIED_NEAR = 12;                  // yards: the game's place for your body is the place you died within this far (it is read off a map, to a yard or so)
+const ALIVE_FOR = 20000;               // ms: where you were last heard from alive counts for where you died this long after
 const PLACED_FOR = 15000;             // ms: how long where the combat log or the minimap last had you counts as where you are
 const PLACED_STALE = 3000;            // ...and after this long with no new place from the minimap, the figure is drawn as one last seen there
 const STEP_MOST = 700;                // ms: from one place read off the minimap to the next, at most (longer: no gliding between them)
@@ -59,6 +63,13 @@ export class PlayerLink {
     // the last two places read off the minimap, for gliding from one to the next (see #glide): { from, to, at, span }
     this.walk = null;
     try { const s = JSON.parse(localStorage.getItem(INSIDE_KEY)); if (s && Number.isInteger(s.map) && Date.now() - s.at < INSIDE_FOR) this.inside = s; } catch { /* nothing kept */ }
+    // Where you died, and how high: { map, x, y, z, at }. The game says where your body lies on
+    // its flat map and nothing of how high - and a body in a cave lies under the hill the map
+    // shows. This map followed you to the spot, and knows (see #died, and bodyHeight).
+    this.died = null;
+    this.alive = null;     // where you were last heard from alive: { map, x, y, z, at }
+    this.wasDead = null;   // what the reading before said (null: none yet - a page opened on a ghost saw nobody die)
+    try { const s = JSON.parse(localStorage.getItem(DIED_KEY)); if (s && Number.isInteger(s.map) && [s.x, s.y, s.z].every(Number.isFinite) && Date.now() - s.at < DIED_FOR) this.died = s; } catch { /* nothing kept */ }
   }
 
   connect() {
@@ -80,6 +91,46 @@ export class PlayerLink {
     if ((this.inside?.map ?? null) === map) return;
     this.inside = map === null ? null : { map, at: Date.now() };
     try { if (this.inside) localStorage.setItem(INSIDE_KEY, JSON.stringify(this.inside)); else localStorage.removeItem(INSIDE_KEY); } catch { /* not kept */ }
+  }
+
+  /**
+   * Alive or dead, as the reading in hand has it: where you died is kept, with the height this
+   * map had you at. The moment the game first says you are dead you still lie where you fell
+   * (a ghost is only at the graveyard once you let go), so that reading's place is your body's -
+   * and the height is the one you were followed to. Where the page was not on your map then
+   * (no height), the last place it had you alive, if that was a moment ago and beside it.
+   * Alive again, it is forgotten.
+   */
+  #died(p) {
+    const me = this.me, z = this.height.z;
+    const outdoors = !!me && !p.inInstance && !me.placed;
+    if (!p.dead) {
+      if (this.died) { this.died = null; try { localStorage.removeItem(DIED_KEY); } catch { /* not kept */ } }
+      if (outdoors && this.onThisMap && Number.isFinite(z)) this.alive = { map: me.map, x: me.x, y: me.y, z, at: Date.now() };
+      this.wasDead = false;
+      return;
+    }
+    if (this.wasDead === false && outdoors) {
+      const a = this.alive, beside = !!a && a.map === me.map && Date.now() - a.at < ALIVE_FOR && Math.hypot(a.x - me.x, a.y - me.y) <= DIED_NEAR * 2;
+      const high = this.onThisMap && Number.isFinite(z) ? z : beside ? a.z : null;
+      if (high !== null) {
+        this.died = { map: me.map, x: me.x, y: me.y, z: high, at: Date.now() };
+        try { localStorage.setItem(DIED_KEY, JSON.stringify(this.died)); } catch { /* not kept */ }
+        note('route', 'you died: the height you were at is kept, for the way back to your body', { at: [Math.round(me.x), Math.round(me.y), Math.round(high * 10) / 10], indoors: !!p.indoors });
+      } else note('route', 'you died where the map had no height for you: the way back to your body goes by the map alone', { at: [Math.round(me.x), Math.round(me.y)] });
+    }
+    this.wasDead = true;
+  }
+
+  /**
+   * How high your body lies, where the game says it is at { map, x, y }: the height you died at,
+   * when that is the place you died - or null (the page did not see you die, or the game has
+   * your body somewhere else: carried off, or another death's).
+   */
+  bodyHeight(corpse) {
+    const d = this.died;
+    if (!d || !corpse || d.map !== corpse.map || Date.now() - d.at > DIED_FOR) return null;
+    return Math.hypot(d.x - corpse.x, d.y - corpse.y) <= DIED_NEAR ? d.z : null;
   }
 
   get live() { return this.state.status === 'live'; }
@@ -152,6 +203,7 @@ export class PlayerLink {
       if (p.inInstance) this.#wasIn(p.map);
       else if (!p.dead) this.#wasIn(null);
       this.bodyIn = p.dead && !p.inInstance && this.inside ? this.inside.map : null;
+      this.#died(p);
     }
     // Where you are heading (your guide's current step, or a pin on the game's map) and how you
     // can travel: run and swim speed, hearthstone, the flight points you know.

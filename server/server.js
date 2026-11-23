@@ -25,6 +25,7 @@ import { Minimap } from './minimap.js';
 import { Dots } from './dots.js';
 import { clockFigures, writeClockAddon } from './boats.js';
 import { writeDropsAddon } from './drops.js';
+import { writeBookAddon } from './questbook.js';
 import { standinStatus, applyStandins, setWant, switchOn, pricesMode } from './standins.js';
 import { writePricesAddon } from './prices.js';
 import { writeFactsAddon } from './facts.js';
@@ -87,6 +88,15 @@ const handDrops = () => {
     return r;
   } catch (err) { note('database', 'the drop rates could not be written for the addon', { error: err.message }); return null; }
 };
+// (and what each quest gives and which quests lead to which dungeon, by which the addon orders the quests it tracks for
+// you and tracks a dungeon's quests with those leading up to them - questbook.js. Looked at when the drop rates are.)
+const handBook = () => {
+  try {
+    const r = writeBookAddon(cfg, cfg.dataDir);
+    if (r?.written) note('database', 'quests: what each gives and which lead to which dungeon, as the Atlas database has it, written for the addon', { quests: r.quests, itemsPriced: r.items, dungeons: r.dungeons, fresh: r.fresh || undefined });
+    return r;
+  } catch (err) { note('database', 'what quests give could not be written for the addon', { error: err.message }); return null; }
+};
 // (and what the database knows beyond QuestieDB, laid over the QuestieDB in the game for every addon that reads it -
 // facts.js, where the box "QuestieDB" or "Questie" on the page is ticked. Worked out in a thread of its own; looked
 // at when the map starts, each time the database has been fetched, when a box is ticked, and by "Check for updates".)
@@ -126,10 +136,11 @@ const applyDatabase = () => {
     startUpdate(false);
   } catch (err) { note('map', 'the map could not be updated with the Atlas database by itself', { error: err.message }); }
 };
-const atlas = new AtlasDb(cfg, configFile, { hold: () => job.running, after: () => { handBoats(); handDrops(); handFacts(); applyDatabase(); } });
+const atlas = new AtlasDb(cfg, configFile, { hold: () => job.running, after: () => { handBoats(); handDrops(); handBook(); handFacts(); applyDatabase(); } });
 atlas.start();
 handBoats();
 handDrops();
+handBook();
 handFacts();
 setTimeout(applyDatabase, 8000).unref?.();
 // Where you are inside a dungeon, read off the game's minimap: the game hides it from the addon
@@ -434,6 +445,8 @@ const server = http.createServer((req, res) => {
       if (install) mail.use(ADDON);
       // (the drop rates go in with it: a folder of their own, which the game finds when it next starts)
       if (install && handDrops()?.fresh) st.restart = true;
+      // (and what quests give, likewise)
+      if (install && handBook()?.fresh) st.restart = true;
       if (install) note('addon', `the addon was installed in the game's folder: version ${st.installedVersion ?? '?'}`, { restartNeeded: st.restart, carriedOver: st.carried ?? undefined, current: st.current, mailboxes: st.mail });
       else if (guides) note('addon', st.taught ? 'guide addons taught about floors' : 'guide addons put back as their makers wrote them', { changed: st.done, asTheyAre: st.guides?.addons });
       else if (changedAddon(st)) note('addon', 'the addon in the game\'s folder', { installed: st.installed, version: st.installedVersion, brought: st.version, current: st.current, mailboxes: st.mail, oldCopy: st.legacy || undefined, guides: st.guides, why: st.reason });

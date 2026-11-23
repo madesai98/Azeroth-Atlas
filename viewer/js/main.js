@@ -670,7 +670,13 @@ function step(now, seen) {
         // (g.map: a dungeon's door on another map than this one - the way there is a journey)
         if (g) want.quest = { map: g.map ?? here, x: g.x, y: g.y, z: g.z ?? undefined, name: `${app.npcs.quests?.quests?.[heads.quest]?.n ?? 'Quest'}: ${g.done ? 'hand in to ' : ''}${g.name}`, source: 'quest' };
       }
-      if (heads.corpse && P.state.player?.dead) want.death = { ...heads.corpse, name: 'Your body', source: 'corpse' };
+      if (heads.corpse && P.state.player?.dead) {
+        // (the game says where your body lies on its flat map, and nothing of how high: in a cave
+        // that spot is the hill over it too, and the run back led up there. The height you died
+        // at is the body's - player.js: bodyHeight - and the way goes to that level.)
+        const high = P.bodyHeight(heads.corpse);
+        want.death = { ...heads.corpse, ...(high === null ? {} : { z: high }), name: 'Your body', source: 'corpse' };
+      }
       else if (P.state.player?.dead && Number.isInteger(P.bodyIn)) {
         // (dead outside the dungeon your body is in, and the game has no word of where that is: the run back is to the dungeon's door)
         const door = app.npcs.bodyDoor(P.bodyIn, me);

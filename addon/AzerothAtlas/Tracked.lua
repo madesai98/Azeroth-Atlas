@@ -6,8 +6,8 @@
 -- for the whole log. Asked for on 20 November 2026 ("a button that adds all completed quests to
 -- the tracked list would be sick, and also an untrack all button"), this adds two:
 --
---   Track All Completed Quests   every quest in your log that is ready to hand in is tracked
---                                (as many of them as the game has room for: it tracks 25 at most)
+--   Track All Completed Quests   the quests you track become those of your log that are ready to
+--                                hand in (as many as the game has room for: it tracks 25 at most)
 --   Untrack All Quests           every quest you track is untracked - and so none is focused,
 --                                as the game itself has it when the quest it focuses is untracked
 --
@@ -39,11 +39,24 @@
 -- where the game knows of no place outside for them), and whatever the game pins to the
 -- dungeon's own maps.
 --
+-- And, asked for on 22 November 2026:
+--
+--   Track Dungeon Quests         the quests you track become those of one dungeon, with the
+--                                quests of your log that lead up to them (further down: a
+--                                dungeon's quests, and the quests that lead up to them)
+--
+--   - Track All Completed Quests clears the list first, as the other two do ("the tracklog
+--     should be cleared first then filled with completed quest");
+--   - whatever one of the three tracks stands with the most rewarding quest at the top of the
+--     list: by experience and then by gold (further down: what a quest gives, and the order
+--     that makes).
+--
 -- They are in three of the game's own menus, after what the game has there: the quest log's
 -- options (the button by its search box), the right-click on a zone's name in the quest log
 -- (below the game's own two, which are for that zone only), and the right-click on a quest in
--- the list on the right. Typed, they are /atlas track, /atlas track here and /atlas untrack.
--- What was done is said in chat.
+-- the list on the right. Typed, they are /atlas track, /atlas track here, /atlas track dungeon
+-- (and a dungeon's name after it, for that one alone) and /atlas untrack. What was done is said
+-- in chat.
 --
 -- What is not done:
 --   - nothing in a fight. The game's list of tracked quests lays itself out again when one is
@@ -166,17 +179,6 @@ local function Tracked()
   return list
 end
 
--- These quests, tracked: how many are tracked now, were already, found no room, and were refused.
-local function Take(list, most)
-  local added, already, full, refused = 0, 0, 0, 0
-  for _, id in ipairs(list) do
-    if IsTracked(id) then already = already + 1
-    elseif Tracking() >= most then full = full + 1
-    elseif yes(call(Q.AddQuestWatch, id)) or IsTracked(id) then added = added + 1
-    else refused = refused + 1 end
-  end
-  return added, already, full, refused
-end
 -- These quests, untracked: how many are, and how many the game kept tracked.
 local function Drop(list)
   local focus = C_SuperTrack and plain(call(C_SuperTrack.GetSuperTrackedQuestID)) or nil
@@ -194,24 +196,305 @@ local function Drop(list)
   return gone, kept
 end
 
+-- ---- what a quest gives, and the order that makes ------------------------------------------------
+-- Asked for on 22 November 2026: "When using any of the auto track buttons we made, the quests
+-- should track so that the quest with the highest returns appear at the top of the track list
+-- (last in). XP is prioritized first, once quests in the list reach less than half of the xp the
+-- top quest gives prioritize gold after that. for gold, it should be based on total gold which is
+-- gold rewarded plus the gold received from the highest vendor selling items offered in the quest".
+--
+-- So the quests one of the three entries tracks stand in this order, from the top of the list:
+--   - first those that give at least half the experience of the one that gives most, by their
+--     experience, the most first (of two that give the same, the one worth more gold);
+--   - then the rest, by what they are worth in gold, the most first (of two alike, by experience).
+-- With no experience to be had from any of them (at the highest level), all go by gold.
+-- A quest's gold is the money it pays and what a vendor pays for what it hands you: everything
+-- it gives outright, and of the things it lets you choose one of, the one a vendor pays most for.
+--
+-- What a quest gives is the game's own word, for your character as it is now (the experience a
+-- quest gives falls as you outgrow it): GetQuestLogRewardXP and the calls beside it, as the
+-- game's own tooltips use them. Where the game does not say - it has not been sent a quest's
+-- rewards yet, or has not been shown an item and so has no price for it - the Atlas database
+-- says: the 3D map writes what each quest gives and what a vendor pays for each thing as a small
+-- addon of its own beside this one (AzerothAtlas_Quests: the map's server/questbook.js).
+local BOOK = "AzerothAtlasQuests"
+local function Book()
+  local book = rawget(_G, BOOK)
+  if type(book) == "table" then return book end
+  return nil
+end
+local function Global(name)
+  local fn = rawget(_G, name)
+  if type(fn) == "function" then return fn end
+  return nil
+end
+-- The things of a list as the book writes one ("item item*how many ..."): each handed to `each`.
+local function Things(list, each)
+  for item, many in string.gmatch(list, "(%d+)%*?(%d*)") do each(tonumber(item), tonumber(many) or 1) end
+end
+-- What a vendor pays for one of a thing, in copper: the game's word where it has one, else the book's.
+local function Sell(item)
+  local fn = type(C_Item) == "table" and C_Item.GetItemInfo or Global("GetItemInfo")
+  if type(fn) == "function" then
+    local ok, _, _, _, _, _, _, _, _, _, _, price = pcall(fn, item)
+    price = ok and plain(price) or nil
+    if price and price >= 0 then return price end
+  end
+  local book = Book()
+  local price = book and type(book.sell) == "table" and plain(book.sell[item]) or nil
+  return price or 0
+end
+-- What the book has a quest giving: experience, copper, and what its things fetch at a vendor - or nothing.
+local function Said(id)
+  local book = Book()
+  local line = book and type(book.gives) == "table" and book.gives[id] or nil
+  if type(line) ~= "string" then return nil end
+  local xp, money, rest = string.match(line, "^(%d+) (%d+) ?(.*)$")
+  if not xp then return nil end
+  local goods = 0
+  local given, choice = string.match(rest, "^([^|]*)|(.*)$")
+  if given then
+    local best = 0
+    Things(given, function(item, many) goods = goods + Sell(item) * many end)
+    Things(choice, function(item, many) local worth = Sell(item) * many if worth > best then best = worth end end)
+    goods = goods + best
+  end
+  return tonumber(xp), tonumber(money), goods
+end
+-- What the game says a quest's things fetch at a vendor - or nothing, where it lists none.
+local function Goods(id)
+  local count, one, choices, choice = Global("GetNumQuestLogRewards"), Global("GetQuestLogRewardInfo"), Global("GetNumQuestLogChoices"), Global("GetQuestLogChoiceInfo")
+  if not (count and one and choices and choice) then return nil end
+  local n, m = plain(call(count, id)) or 0, plain(call(choices, id)) or 0
+  if n + m <= 0 then return nil end
+  local total, best = 0, 0
+  for i = 1, math.min(n, 12) do
+    local ok, _, _, many, _, _, item = pcall(one, i, id)
+    item, many = ok and plain(item) or nil, ok and plain(many) or nil
+    if not item or item <= 0 then return nil end  -- (a thing the game does not name yet: the book says)
+    total = total + Sell(item) * math.max(1, many or 1)
+  end
+  for i = 1, math.min(m, 12) do
+    local ok, _, _, many, _, _, item = pcall(choice, i, id)
+    item, many = ok and plain(item) or nil, ok and plain(many) or nil
+    if not item or item <= 0 then return nil end
+    local worth = Sell(item) * math.max(1, many or 1)
+    if worth > best then best = worth end
+  end
+  return total + best
+end
+-- Can your character still gain experience? (Not at the highest level: a quest's experience is nothing then.)
+local function Learning()
+  local rules = rawget(_G, "GameRulesUtil")
+  local fn = type(rules) == "table" and rules.IsPlayerAtEffectiveMaxLevel or Global("IsPlayerAtEffectiveMaxLevel")
+  if type(fn) == "function" then
+    local ok, capped = pcall(fn)
+    if ok and not secret(capped) then return capped ~= true end
+  end
+  return true
+end
+-- What a quest of your log gives: experience, and gold (in copper: its money, and what its things fetch).
+local function Worth(id)
+  local bookXp, bookMoney, bookGoods = Said(id)
+  -- (the game's word counts where it has been sent what the quest gives: asked, where it can be)
+  local have = Global("HaveQuestRewardData")
+  local told = true
+  if have then local ok, has = pcall(have, id) told = not ok or secret(has) or has ~= false end
+  local xp, money, goods = nil, nil, nil
+  if told then
+    local fn = Global("GetQuestLogRewardXP")
+    if fn then xp = plain(call(fn, id)) end
+    fn = Global("GetQuestLogRewardMoney")
+    if fn then money = plain(call(fn, id)) end
+    goods = Goods(id)
+  end
+  if not xp or xp <= 0 then xp = Learning() and bookXp or 0 end
+  if not money or (money <= 0 and not told) then money = bookMoney end
+  if money == nil then money = 0 end
+  if goods == nil then goods = bookGoods or 0 end
+  return xp or 0, math.max(0, money) + goods
+end
+
+-- The quests in the order they are to stand from the top of the list (see above), and, for the
+-- addon's notes, what each was taken to give.
+local function Ranked(list)
+  local rows, top = {}, 0
+  for k, id in ipairs(list) do
+    local xp, gold = Worth(id)
+    rows[k] = { id = id, xp = xp, gold = gold, at = k }
+    if xp > top then top = xp end
+  end
+  local half = top / 2
+  table.sort(rows, function(a, b)
+    local first, second = top > 0 and a.xp >= half, top > 0 and b.xp >= half
+    if first ~= second then return first end
+    if first then
+      if a.xp ~= b.xp then return a.xp > b.xp end
+      if a.gold ~= b.gold then return a.gold > b.gold end
+    else
+      if a.gold ~= b.gold then return a.gold > b.gold end
+      if a.xp ~= b.xp then return a.xp > b.xp end
+    end
+    return a.at < b.at
+  end)
+  local order, words = {}, {}
+  for k, row in ipairs(rows) do
+    order[k] = row.id
+    if k <= 30 then words[k] = format("%d (%d xp, %d copper)", row.id, row.xp, row.gold) end
+  end
+  return order, table.concat(words, ", ")
+end
+
+-- Which end of the game's list a newly tracked quest goes to. In this game the last one tracked
+-- stands at the top (as the report has it: "(last in)"), so the quests are tracked from the
+-- least rewarding to the most. That is not taken on trust: once they are tracked the game is
+-- asked how they stand, and if it has them the other way round they are untracked and tracked
+-- once more, the other way - and which way it was is kept, to be right at once the next time.
+local function LastOnTop()
+  local db = rawget(_G, "AzerothAtlasDB")
+  return not (type(db) == "table" and db.trackedTop == "first")
+end
+local function SetLastOnTop(on)
+  if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end
+  AzerothAtlasDB.trackedTop = on and "last" or "first"
+end
+-- Those of `list` that are tracked, as the game's list has them from its top.
+local function Standing(list)
+  local among, out = {}, {}
+  for _, id in ipairs(list) do among[id] = true end
+  for i = 1, Tracking() do
+    local id = plain(call(Q.GetQuestIDForQuestWatchIndex, i))
+    if id and among[id] then
+      out[#out + 1] = id
+      among[id] = nil
+    end
+  end
+  return out
+end
+local function Alike(a, b, turned)
+  if #a ~= #b then return false end
+  for i = 1, #a do
+    if a[i] ~= b[turned and (#b + 1 - i) or i] then return false end
+  end
+  return true
+end
+-- These quests - `order`, the most rewarding first - tracked so that they stand in that order
+-- from the top of the game's list: as many as there is room for, the most rewarding of them.
+-- Returns how many found no room, how many the game refused, and how they stand: true as asked,
+-- false in an order of the game's own, nil where there were not two to tell by.
+local function Arrange(order, most)
+  local room = math.max(0, most - Tracking())
+  local take, full = {}, 0
+  for _, id in ipairs(order) do
+    if not IsTracked(id) then
+      if #take < room then take[#take + 1] = id else full = full + 1 end
+    end
+  end
+  local function put(lastOnTop)
+    for k = 1, #take do
+      local id = take[lastOnTop and (#take + 1 - k) or k]
+      if not IsTracked(id) then call(Q.AddQuestWatch, id) end
+    end
+  end
+  -- (those the game took: as they stand, and as they should)
+  local function taken()
+    local got, has, want = Standing(take), {}, {}
+    for _, id in ipairs(got) do has[id] = true end
+    for _, id in ipairs(take) do
+      if has[id] then want[#want + 1] = id end
+    end
+    return got, want
+  end
+  local last = LastOnTop()
+  put(last)
+  local got, want = taken()
+  local stands = nil
+  if #got >= 2 then
+    if Alike(got, want) then
+      stands = true
+      SetLastOnTop(last)
+    elseif Alike(got, want, true) and CanUntrack() then
+      Drop(got)
+      put(not last)
+      got, want = taken()
+      stands = #got >= 2 and Alike(got, want)
+      if stands then SetLastOnTop(not last) end
+      shared.Log(format("tracked: the game's list had them the other way round: tracked once more, %s; they %s", last and "the most rewarding first" or "the most rewarding last", stands and "stand as asked now" or "still do not stand as asked"))
+    else
+      stands = false
+    end
+  end
+  return full, #take - #got, stands
+end
+
+-- The quests you track become these, the most rewarding at the top. Every quest you track is
+-- untracked first: the others to make room (the game tracks 25 at most), and these to be tracked
+-- again in their order. The quest the game focused is focused again if it is one of them (the
+-- game lets go of it when it is untracked). What was done:
+--   { order, worth (for the notes), added, already (tracked before, and still), gone (others
+--     untracked), kept (others the game kept tracked), full, refused, stands, can (the game lets
+--     quests be untracked), most }
+local function Become(wanted)
+  local order, worth = Ranked(wanted)
+  local want, was = {}, {}
+  for _, id in ipairs(order) do want[id] = true end
+  local before = Tracked()
+  for _, id in ipairs(before) do was[id] = true end
+  local focus = C_SuperTrack and plain(call(C_SuperTrack.GetSuperTrackedQuestID)) or nil
+  local can = CanUntrack()
+  if can and #before > 0 then Drop(before) end
+  local most = Most()
+  local full, refused, stands = Arrange(order, most)
+  if focus and focus > 0 and want[focus] and IsTracked(focus) and C_SuperTrack and (plain(call(C_SuperTrack.GetSuperTrackedQuestID)) or 0) == 0 then
+    call(C_SuperTrack.SetSuperTrackedQuestID, focus)
+  end
+  local done = { order = order, worth = worth, added = 0, already = 0, gone = 0, kept = 0, full = full, refused = refused, stands = stands, can = can, most = most }
+  for _, id in ipairs(order) do
+    if IsTracked(id) then
+      if was[id] then done.already = done.already + 1 else done.added = done.added + 1 end
+    end
+  end
+  for _, id in ipairs(before) do
+    if not want[id] then
+      if IsTracked(id) then done.kept = done.kept + 1 else done.gone = done.gone + 1 end
+    end
+  end
+  return done
+end
+-- What is said of it after "N quests ... tracked": their order, and what became of the others.
+local function Rest(done)
+  local out = ""
+  if done.stands == true then out = out .. ", the most rewarding at the top"
+  elseif done.stands == false then out = out .. " (the game put them in an order of its own)" end
+  if done.gone > 0 then out = out .. format("; %s untracked", count(done.gone, "other quest", "other quests")) end
+  if done.kept > 0 then out = out .. format("; the game kept %d tracked", done.kept) end
+  if not done.can then out = out .. "; the game lets no quest be untracked yet" end
+  if done.full > 0 then out = out .. format("; %d more could not be, as the game tracks %d quests at most", done.full, done.most) end
+  if done.refused > 0 then out = out .. format("; the game would not track %d of them", done.refused) end
+  return out
+end
+local function Noted(done)
+  return format("%d tracked now, %d were, %d untracked, %d kept by the game, %d no room (%d at most), %d refused, order %s: %s",
+    done.added, done.already, done.gone, done.kept, done.full, done.most, done.refused,
+    done.stands == true and "as asked" or done.stands == false and "the game's own" or "not to be told", done.worth)
+end
+
+-- Track All Completed Quests. The list is cleared first (asked for on 22 November 2026: "When
+-- clicking track completed quests, the tracklog should be cleared first then filled with
+-- completed quest"): what you track becomes the quests ready to hand in, and nothing else.
+-- With none ready, the list is left as it is: there is nothing to put in its place.
 local function TrackReady()
   local ready = Quests(true)
-  if #ready == 0 then say("no quest in your log is ready to hand in.") shared.Log("tracked: none ready to hand in") return end
-  local most = Most()
-  local added, already, full, refused = Take(ready, most)
-  shared.Log(format("tracked: %d ready to hand in, %d tracked now, %d were, %d no room (%d at most), %d refused", #ready, added, already, full, most, refused))
-  local room = format("the game tracks %d quests at most (untrack some first: /atlas untrack untracks them all)", most)
-  if added == 0 and refused == 0 and full == 0 then
-    say(#ready == 1 and "the one quest ready to hand in is tracked already." or format("all %d quests ready to hand in are tracked already.", #ready))
-  elseif added == 0 and refused == 0 then
-    say(format("no room to track %s ready to hand in: %s.", count(full, "quest", "quests"), room))
-  else
-    local out = format("%s ready to hand in tracked", count(added, "quest", "quests"))
-    if already > 0 then out = out .. format(", %d %s already", already, already == 1 and "was" or "were") end
-    if full > 0 then out = out .. format("; %d more could not be, as %s", full, room) end
-    if refused > 0 then out = out .. format("; the game would not track %d of them", refused) end
-    say(out .. ".")
+  if #ready == 0 then
+    say("no quest in your log is ready to hand in: the quests you track are left as they are.")
+    shared.Log("tracked: none ready to hand in")
+    return
   end
+  local done = Become(ready)
+  shared.Log(format("tracked: %d ready to hand in, %s", #ready, Noted(done)))
+  local got = done.added + done.already
+  if got == 0 then say(format("no quest ready to hand in could be tracked%s.", Rest(done))) return end
+  say(format("%s ready to hand in tracked%s.", count(got, "quest", "quests"), Rest(done)))
 end
 
 local function UntrackAll()
@@ -454,37 +737,148 @@ local function TrackHere()
     return
   end
   local here, how, all = Takes(place)
-  local want = {}
-  for _, id in ipairs(here) do want[id] = true end
-  -- every other quest untracked first (there is room for 25 at most), then these tracked
-  local can = CanUntrack()
-  local gone, kept = 0, 0
-  if can then
-    local others = {}
-    for _, id in ipairs(Tracked()) do
-      if not want[id] then others[#others + 1] = id end
-    end
-    if #others > 0 then gone, kept = Drop(others) end
-  end
-  local most = Most()
-  local added, already, full, refused = Take(here, most)
-  shared.Log(format("tracked here: %s%s (maps %s): %d of %d quests (%d by the map's pins, %d by the map of the quest, %d by their heading), %d tracked now, %d were, %d untracked, %d kept by the game, %d no room (%d at most), %d refused",
-    place.name, place.dungeon and ", inside" or "", #place.maps > 0 and table.concat(place.maps, ",") or "none", #here, all, how.pin, how.map, how.heading, added, already, gone, kept, full, most, refused))
-  local out
+  -- every quest untracked first (there is room for 25 at most), then these tracked, the most rewarding at the top
+  local done = Become(here)
+  shared.Log(format("tracked here: %s%s (maps %s): %d of %d quests (%d by the map's pins, %d by the map of the quest, %d by their heading), %s",
+    place.name, place.dungeon and ", inside" or "", #place.maps > 0 and table.concat(place.maps, ",") or "none", #here, all, how.pin, how.map, how.heading, Noted(done)))
+  local got = done.added + done.already
   if #here == 0 then
-    out = format("no quest in your log has anything to do in %s", place.name)
-    if gone > 0 then out = out .. format("; %s untracked", count(gone, "quest", "quests")) end
+    local out = format("no quest in your log has anything to do in %s", place.name)
+    if done.gone > 0 then out = out .. format("; %s untracked", count(done.gone, "quest", "quests")) end
+    if done.kept > 0 then out = out .. format("; the game kept %d tracked", done.kept) end
+    if not done.can then out = out .. "; the game lets no quest be untracked yet" end
+    say(out .. ".")
+  elseif got == 0 then
+    say(format("no quest with something to do in %s could be tracked%s.", place.name, Rest(done)))
   else
-    out = format("%s with something to do in %s tracked", count(added + already, "quest", "quests"), place.name)
-    if added + already == 0 then out = format("no quest with something to do in %s could be tracked", place.name) end
-    if already > 0 and added > 0 then out = out .. format(" (%d %s already)", already, already == 1 and "was" or "were") end
-    if gone > 0 then out = out .. format("; %s untracked", count(gone, "other quest", "other quests")) end
+    say(format("%s with something to do in %s tracked%s.", count(got, "quest", "quests"), place.name, Rest(done)))
   end
-  if kept > 0 then out = out .. format("; the game kept %d tracked", kept) end
-  if not can then out = out .. "; the game lets no quest be untracked yet" end
-  if full > 0 then out = out .. format("; %d more could not be, as the game tracks %d quests at most", full, most) end
-  if refused > 0 then out = out .. format("; the game would not track %d of them", refused) end
-  say(out .. ".")
+end
+
+-- ---- a dungeon's quests, and the quests that lead up to them --------------------------------------
+-- Asked for on 22 November 2026: "Add button to untrack all and track dungeon quests and their
+-- prerequisite quests. I want to be able to track all my chain quests for a specific dungeon".
+--
+-- The quests of a dungeon are those the Atlas database files under it, and the quests that lead
+-- up to them are those one of them asks for first, and so on back along the chain: both as the
+-- 3D map writes them for the game (AzerothAtlas_Quests, see above; the map's server/questbook.js).
+-- Of those, the ones in your quest log are tracked - the game tracks no quest you do not have.
+-- And whatever stands under the dungeon's name in your quest log is the dungeon's too, whether
+-- the database knows it or not.
+local dungeons = nil  -- the dungeons of the book, as read once: { { name, plain, level, own = { [quest] = true }, up = { [quest] = true } } }
+local function Dungeons()
+  if dungeons then return dungeons end
+  local book = Book()
+  local list = book and book.dungeons
+  if type(list) ~= "table" then return {} end
+  dungeons = {}
+  for _, d in ipairs(list) do
+    local name = type(d) == "table" and text(d.name) or nil
+    if name then
+      local one = { name = name, plain = Plain(name), level = plain(d.level) or 0, own = {}, up = {} }
+      if type(d.own) == "string" then Things(d.own, function(id) one.own[id] = true end) end
+      if type(d.up) == "string" then Things(d.up, function(id) one.up[id] = true end) end
+      dungeons[#dungeons + 1] = one
+    end
+  end
+  return dungeons
+end
+-- The quests of your log that are a dungeon's or lead up to it, in the order of your log; how
+-- many are its own, and how many lead up to it.
+local function OfDungeonNow(d, list, under)
+  local out, own, up = {}, 0, 0
+  for _, id in ipairs(list) do
+    if d.own[id] or under[id] == d.plain then
+      out[#out + 1] = id
+      own = own + 1
+    elseif d.up[id] then
+      out[#out + 1] = id
+      up = up + 1
+    end
+  end
+  return out, own, up
+end
+-- The dungeons your quest log has something for, in the book's order (by the level of their
+-- quests): { { name, plain, quests, own, up } }; and your log, for whoever goes on with it.
+local function Mine()
+  local list, under = Quests(false)
+  local out = {}
+  for _, d in ipairs(Dungeons()) do
+    local quests, own, up = OfDungeonNow(d, list, under)
+    if #quests > 0 then out[#out + 1] = { name = d.name, plain = d.plain, quests = quests, own = own, up = up } end
+  end
+  return out, list, under
+end
+-- The dungeon meant by what was typed or chosen: the one of that name, else the one whose name
+-- begins with it, else the one with it in its name - where that is one and no more.
+local function Meant(words)
+  local want = Plain(words)
+  if want == "" then return nil end
+  local all = Dungeons()
+  for _, d in ipairs(all) do
+    if d.plain == want then return d end
+  end
+  local found, several = nil, false
+  for pass = 1, 2 do
+    for _, d in ipairs(all) do
+      local at = string.find(d.plain, want, 1, true)
+      if at and (pass == 2 or at == 1) then
+        if found and found ~= d then several = true end
+        found = found or d
+      end
+    end
+    if found then break end
+  end
+  if several then return nil, true end
+  return found
+end
+-- `which`: a dungeon's name (or part of it); nothing: every dungeon your log has something for.
+local function TrackDungeon(which)
+  if #Dungeons() == 0 then
+    say("which quests lead to which dungeon comes from the 3D map, and is not here yet: open Azeroth Atlas, press Check for updates there, and start the game again.")
+    shared.Log("tracked dungeon: no book of quests (AzerothAtlas_Quests is not loaded)")
+    return
+  end
+  local mine, list, under = Mine()
+  local wanted, name, own, up = {}, nil, 0, 0
+  if which and which ~= "" then
+    local d, several = Meant(which)
+    if not d then
+      local names = {}
+      for _, m in ipairs(mine) do names[#names + 1] = m.name end
+      say(format(several and "more than one dungeon is called something like \"%s\"" or "no dungeon is called \"%s\"", which)
+        .. (#names > 0 and (": your quest log has something for " .. table.concat(names, ", ") .. ".") or ": and your quest log has nothing for any dungeon."))
+      shared.Log(format("tracked dungeon: \"%s\" is %s", which, several and "more than one dungeon" or "no dungeon"))
+      return
+    end
+    name = d.name
+    wanted, own, up = OfDungeonNow(d, list, under)
+  else
+    local seen = {}
+    for _, m in ipairs(mine) do
+      own, up = own + m.own, up + m.up
+      for _, id in ipairs(m.quests) do
+        if not seen[id] then seen[id] = true end
+      end
+    end
+    -- (in the order of your log; a quest that leads up to two dungeons is one quest)
+    for _, id in ipairs(list) do
+      if seen[id] then wanted[#wanted + 1] = id end
+    end
+    name = #mine == 1 and mine[1].name or nil
+  end
+  local where = name or "a dungeon"
+  if #wanted == 0 then
+    say(format("no quest in your log is %s's or leads up to it: the quests you track are left as they are.", name or "a dungeon"))
+    shared.Log(format("tracked dungeon: %s: none of %d quests", where, #list))
+    return
+  end
+  local done = Become(wanted)
+  shared.Log(format("tracked dungeon: %s: %d of %d quests (%d its own, %d leading up to it), %s", which and which ~= "" and where or "every dungeon", #wanted, #list, own, up, Noted(done)))
+  local got = done.added + done.already
+  local what = name and format("of %s and leading up to it", name) or "of your dungeons and leading up to them"
+  if got == 0 then say(format("no quest %s could be tracked%s.", what, Rest(done))) return end
+  say(format("%s %s tracked%s.", count(got, "quest", "quests"), what, Rest(done)))
 end
 
 -- ---- when ----------------------------------------------------------------------------------------
@@ -493,12 +887,23 @@ end
 -- leaves none). And not in the very frames the height is being measured (Height.lua), which
 -- points the game's marker at a flight master for a moment and then back at the quest it was on:
 -- untracked in those frames, that quest would be focused again.
-local DO = { track = TrackReady, untrack = UntrackAll, here = TrackHere }
-local LATER = {
-  track = "in a fight: the quests ready to hand in are tracked the moment it is over.",
-  untrack = "in a fight: your quests are untracked the moment it is over.",
-  here = "in a fight: the quests with something to do where you are then are tracked, and the others untracked, the moment it is over.",
-}
+-- (what is asked for is a word: "track", "untrack", "here", or "dungeon" - every dungeon - or
+-- "dungeon:" and a dungeon's name)
+local function Do(what)
+  if what == "track" then TrackReady()
+  elseif what == "untrack" then UntrackAll()
+  elseif what == "here" then TrackHere()
+  else
+    local which = string.match(what, "^dungeon:?(.*)$")
+    if which then TrackDungeon(which) end
+  end
+end
+local function Later(what)
+  if what == "track" then return "in a fight: the quests ready to hand in are tracked, and the others untracked, the moment it is over." end
+  if what == "untrack" then return "in a fight: your quests are untracked the moment it is over." end
+  if what == "here" then return "in a fight: the quests with something to do where you are then are tracked, and the others untracked, the moment it is over." end
+  return "in a fight: the dungeon's quests and those leading up to them are tracked, and the others untracked, the moment it is over."
+end
 local queue = {}  -- asked for in a fight, in order
 local waiter = CreateFrame("Frame")
 local function Go(list, waited)
@@ -506,7 +911,7 @@ local function Go(list, waited)
     for _, what in ipairs(list) do
       if queue[#queue] ~= what then
         queue[#queue + 1] = what
-        say(LATER[what])
+        say(Later(what))
       end
     end
     waiter:RegisterEvent("PLAYER_REGEN_ENABLED")
@@ -517,7 +922,7 @@ local function Go(list, waited)
     C_Timer.After(WAIT, function() shared.Try("tracked: later", Go, list, waited + 1) end)
     return
   end
-  for _, what in ipairs(list) do shared.Try("tracked: " .. what, DO[what]) end
+  for _, what in ipairs(list) do shared.Try("tracked: " .. what, Do, what) end
 end
 waiter:SetScript("OnEvent", function(self)
   self:UnregisterEvent("PLAYER_REGEN_ENABLED")
@@ -527,12 +932,21 @@ waiter:SetScript("OnEvent", function(self)
 end)
 
 local function Unable() say("this game has no way for an addon to track or untrack quests.") end
--- /atlas track, /atlas track here, /atlas untrack (and the menus)
+-- /atlas track, /atlas track here, /atlas track dungeon [its name], /atlas untrack (and the menus)
 function shared.TrackReady() if able then shared.Try("tracked: track", Go, { "track" }) else Unable() end end
 function shared.UntrackAll() if able then shared.Try("tracked: untrack", Go, { "untrack" }) else Unable() end end
 function shared.TrackHere() if able then shared.Try("tracked: here", Go, { "here" }) else Unable() end end
--- (for the tests: where you are, and which quests are taken to be of that place and why)
+function shared.TrackDungeon(which)
+  if not able then Unable() return end
+  which = type(which) == "string" and string.gsub(string.gsub(which, "^%s+", ""), "%s+$", "") or ""
+  shared.Try("tracked: dungeon", Go, { which ~= "" and ("dungeon:" .. which) or "dungeon" })
+end
+-- (for the tests: where you are, and which quests are taken to be of that place and why; the
+-- dungeons your log has something for; what a quest is taken to give; and the order that makes)
 function shared.TrackedPlace() local place = Where() local here, how = Takes(place) return place, here, how end
+function shared.TrackedDungeons() return (Mine()) end
+function shared.TrackedWorth(id) return Worth(id) end
+function shared.TrackedOrder(list) return (Ranked(list)) end
 
 -- ---- the game's menus ----------------------------------------------------------------------------
 -- The game builds each of its menus anew when it opens, and then lets whoever asked add to it.
@@ -544,15 +958,49 @@ local MENUS = {
 local function Tip(button, title, words)
   if type(button) == "table" and type(button.SetTitleAndTextTooltip) == "function" then pcall(button.SetTitleAndTextTooltip, button, title, words) end
 end
+local ORDER = " They stand with the most rewarding at the top: by experience, then - below half of what the best gives - by gold."
+-- "Track Dungeon Quests": it opens a list of its own, and the list holds only the dungeons your
+-- quest log has something for (a quest of the dungeon's, or one leading up to it) - a handful,
+-- not every dungeon of the game - each with how many quests that is, and above them all of them
+-- at once where there is more than one. With nothing for any dungeon, the entry says so and
+-- does nothing.
+local function AddDungeons(root)
+  local mine = Mine()
+  local entry = root:CreateButton("Track Dungeon Quests")
+  Tip(entry, "Track Dungeon Quests",
+    "The quests you track become those of one dungeon, with the quests of your log that lead up to them: every other quest is untracked. The dungeons listed are those your quest log has something for." .. ORDER .. " Azeroth Atlas; also /atlas track dungeon, and a dungeon's name after it.")
+  if type(entry) ~= "table" or type(entry.CreateButton) ~= "function" then return end
+  if #mine == 0 then
+    local none = entry:CreateButton(#Dungeons() == 0 and "Not known yet: start the game again" or "Your quest log has nothing for a dungeon")
+    if type(none) == "table" and type(none.SetEnabled) == "function" then pcall(none.SetEnabled, none, false) end
+    return
+  end
+  if #mine > 1 then
+    local all = {}
+    for _, m in ipairs(mine) do
+      for _, id in ipairs(m.quests) do all[id] = true end
+    end
+    local n = 0
+    for _ in pairs(all) do n = n + 1 end
+    entry:CreateButton(format("All of them (%d)", n), function() shared.TrackDungeon() end)
+    if type(entry.CreateDivider) == "function" then entry:CreateDivider() end
+  end
+  for _, m in ipairs(mine) do
+    local name = m.name
+    Tip(entry:CreateButton(format("%s (%d)", name, #m.quests), function() shared.TrackDungeon(name) end), name,
+      format("%s of your log: %d of the dungeon itself, %d leading up to it.", count(#m.quests, "quest", "quests"), m.own, m.up))
+  end
+end
 local function Add(_, root)
   if type(root) ~= "table" or type(root.CreateButton) ~= "function" then return end
   if type(root.CreateDivider) == "function" then root:CreateDivider() end
   Tip(root:CreateButton("Track All Completed Quests", function() shared.TrackReady() end), "Track All Completed Quests",
-    "Every quest in your log that is ready to hand in, in every zone, is tracked - as many as there is room for (the game tracks " .. Most() .. " at most). Azeroth Atlas; also /atlas track.")
+    "The quests you track become those ready to hand in, in every zone: every other quest is untracked, and these are tracked - as many as there is room for (the game tracks " .. Most() .. " at most)." .. ORDER .. " Azeroth Atlas; also /atlas track.")
   local at = Where().name
   Tip(root:CreateButton("Track Location Quests", function() shared.TrackHere() end), "Track Location Quests",
     "The quests you track become those with something to do where you are" .. (at and (" - " .. at .. " just now") or "")
-    .. ": every other quest is untracked, and these are tracked. Where a quest has something to do is as the game's own map pins it; a dungeon is a place of its own. Azeroth Atlas; also /atlas track here.")
+    .. ": every other quest is untracked, and these are tracked. Where a quest has something to do is as the game's own map pins it; a dungeon is a place of its own." .. ORDER .. " Azeroth Atlas; also /atlas track here.")
+  AddDungeons(root)
   if CanUntrack() then
     Tip(root:CreateButton("Untrack All Quests", function() shared.UntrackAll() end), "Untrack All Quests",
       "Every quest you track, in every zone, is untracked. Azeroth Atlas; also /atlas untrack.")
@@ -565,5 +1013,10 @@ if able and type(Menu) == "table" and type(Menu.ModifyMenu) == "function" then
   end
 end
 shared.Log(not able and "tracked: this game has no way for an addon to track or untrack quests"
-  or hooked == 0 and "tracked: this game lets no addon add to its menus: /atlas track, /atlas track here and /atlas untrack only"
-  or format("tracked: Track All Completed Quests, Track Location Quests and Untrack All Quests added to %d of the game's menus", hooked))
+  or hooked == 0 and "tracked: this game lets no addon add to its menus: /atlas track, /atlas track here, /atlas track dungeon and /atlas untrack only"
+  or format("tracked: Track All Completed Quests, Track Location Quests, Track Dungeon Quests and Untrack All Quests added to %d of the game's menus", hooked))
+do
+  local book = Book()
+  shared.Log(book and format("tracked: what %s quests give and the quests of %d dungeons, as the 3D map wrote them from the Atlas database", tostring(book.quests), type(book.dungeons) == "table" and #book.dungeons or 0)
+    or "tracked: nothing from the 3D map of what quests give or which lead to which dungeon (AzerothAtlas_Quests is not loaded): quests are ordered by the game's word alone")
+end

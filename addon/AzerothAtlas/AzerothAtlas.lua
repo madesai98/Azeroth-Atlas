@@ -1824,14 +1824,18 @@ SlashCmdList["AZEROTHATLAS"] = function(msg)
     return
   end
   if word == "track" or word == "untrack" then
-    -- /atlas track: every quest ready to hand in is tracked; /atlas track here: the quests you track become those with
-    -- something to do where you are; /atlas untrack: every quest is untracked (Tracked.lua)
-    local run = shared.UntrackAll
+    -- /atlas track: the quests you track become those ready to hand in; /atlas track here: those with something to do
+    -- where you are; /atlas track dungeon [its name]: those of a dungeon and leading up to it; /atlas untrack: every
+    -- quest is untracked (Tracked.lua)
+    local run, which = shared.UntrackAll, nil
     if word == "track" then
       run = shared.TrackReady
       if rest == "here" or rest == "location" or rest == "zone" then run = shared.TrackHere end
+      -- (a dungeon's name may be several words: all of what was typed after "dungeon")
+      local kind, name = string.match(string.lower(msg or ""), "^%s*track%s+(%a+)%s*(.-)%s*$")
+      if kind == "dungeon" or kind == "dungeons" or kind == "instance" then run, which = shared.TrackDungeon, name end
     end
-    if run then run() else say("this copy of the addon cannot track or untrack all your quests at once: update it from the 3D map, and start the game again.") end
+    if run then run(which) else say("this copy of the addon cannot track or untrack all your quests at once: update it from the 3D map, and start the game again.") end
     return
   end
   if word == "log" then

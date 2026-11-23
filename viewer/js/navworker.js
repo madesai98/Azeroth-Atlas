@@ -59,6 +59,7 @@ const DOCK_LEVEL = 12;   // yards above or below a boat's or zeppelin's stop tha
 const COVERED = 75;      // seconds: how much quicker buried ground must be before it is taken for the floor built over it
 const SPARE = 900;       // seconds: how much quicker another floor at the spot must be before it is taken for the one at the height asked for
 const SEED_OVER = 4;     // yards: a walk begins on no floor further than this above the height you are at
+const DIVE_MOST = 90;    // ...but under water, on the water's surface over you, this far up at the most
 const EXTRA = 400000;    // floors looked at, at most, for the floor over buried ground once the ground has been reached
 const WIDE = 5;          // cells: something built over the ground this far to each side is a street or a hall, not an awning
 // "Which levels are there at this spot?" (a waypoint is a spot on a map: under it there can be a
@@ -533,7 +534,11 @@ async function findRoute(req) {
   const seeds = [];
   for (const c of starts.slice(0, 400)) {
     if (seeds.length && (!loose || c.d > seeds[0].d + 1.6)) break;
-    if (slots[c.slot].z[c.node] > over) continue;
+    // (Under water - the page says so, by the game's own word that you swim - the surface over you
+    // is where a walk begins, however deep you are: the water's floor is its surface, and a diver
+    // eight yards down had no floor within a step, and so "no way out of where you are" - and a
+    // route by hearthstone and boat to a place forty yards off: a report of 22 November 2026.)
+    if (slots[c.slot].z[c.node] > over && !(req.wet && slots[c.slot].flags[c.node] & F_SWIM && slots[c.slot].z[c.node] <= req.from[2] + DIVE_MOST)) continue;
     if (!(await enclosed(c, goals[0] ?? spare[0] ?? { slot: -1, node: -1 }, true))) seeds.push(c);
   }
   // On a lift, between its stops: no floor is under you, and the lift puts you down at one of
@@ -939,6 +944,244 @@ async function findRoute(req) {
   return { ok: true, points, kinds, length, seconds, expanded, tiles: slots.length, fall: furthest, hurt: Math.min(1, costs), rides };
 }
 
+// ---- the way in the large ----------------------------------------------------------------------
+// The search above goes over the ground a yard at a time. That finds a way of a few hundred
+// yards in no time, and no way at all across a zone or two: with a mountain range between you
+// and where you are heading it floods the near side, two million floors of it, and gives up -
+// "too far to work out on foot" (Astranaar to Felwood, Auberdine round by Ashenvale: a report of
+// 22 November 2026, where a quest a zone away got no route at all, for as long as it was tracked).
+//
+// The map's data has the same ground once more in the large (maps/<id>/nav/coarse.bin, from
+// extractor/jobs/navcoarse.js): its "stretches" - the floors of a square of some 67 yards that
+// can be walked between, there and back - each with a place of its own and the stretches it
+// leads on to. That is a few hundred thousand places to a continent, searched from one end to
+// the other in a blink. So a long walk is found in two steps: the way through the stretches,
+// and then the walk itself over the real ground, a piece at a time, from one stretch's place to
+// one some hundreds of yards further on. Each piece is a search like any other, short and
+// along ground that is known to lead through. Where two pieces meet the way would pass through
+// a place it has no reason to pass through, so the yards either side of it are worked out once
+// more from one to the other, and the kink is gone.
+//
+// Not in the large: falls (the pieces take them, within themselves: a long way round where a
+// far-off cliff would have been quicker is not found). Lifts are: from the stretch a lift stops
+// by to the stretches at its other stops.
+const FAR_FIRST = 1500;   // yards as the crow flies from which a walk is looked for in the large first (nearer: over the real ground, and in the large only if that gives up)
+const LEG = 650;          // yards of the way from one place the walk is worked out by to the next, about
+const LEG_END = 240;      // ...and none nearer than this to where the walk begins or ends
+const JOIN = 90;          // yards of the way either side of where two pieces meet that are worked out once more
+const NEAR_MOST = 240;    // stretches by a spot that the way may begin or end at: every one of the squares round it (most are scraps - a step, a roof, a ledge - and the one you stand on is not told from them here: the walk over the real ground begins where you are, whichever the way in the large began at)
+const LIFT_BY = 110;      // yards from a lift's middle within which the place of the stretch it stops by lies...
+const LIFT_LEVEL = 9;     // ...and yards above or below the stop
+const coarses = new Map(); // "map/rev" -> the ground in the large (a promise of it; null: there is none)
+
+async function readCoarse(map, rev) {
+  const res = await fetch(`/data/maps/${map}/nav/coarse.bin?v=${rev}`);
+  if (!res.ok) return null;
+  const buf = await res.arrayBuffer(), dv = new DataView(buf);
+  if (dv.getUint32(0, true) !== 0x434e4657 || dv.getUint32(4, true) !== 1) return null; // "WFNC", version 1
+  const sections = new Map();
+  for (let i = 0, n = dv.getUint32(8, true); i < n; i++) sections.set(dv.getUint32(12 + i * 12, true), new Uint8Array(buf, dv.getUint32(16 + i * 12, true), dv.getUint32(20 + i * 12, true)));
+  const meta = JSON.parse(new TextDecoder().decode(sections.get(1)));
+  const [pb, sq, kd, sz, ob, lb] = await Promise.all([3, 4, 5, 6, 7, 8].map((id) => inflate(sections.get(id))));
+  const as = (T, b) => new T(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
+  const table = sections.get(2), tv = new DataView(table.buffer, table.byteOffset, table.byteLength), first = new Map();
+  for (let i = 0; i + 1 < table.byteLength / 8; i++) first.set(tv.getUint16(i * 8, true) * 128 + tv.getUint16(i * 8 + 2, true), [tv.getUint32(i * 8 + 4, true), tv.getUint32(i * 8 + 12, true)]);
+  const G = { cells: meta.cells, span: N / meta.cells, n: meta.stretches, place: as(Float32Array, pb), square: sq, kind: kd, size: as(Uint16Array, sz), off: as(Uint32Array, ob), to: as(Uint32Array, lb), first, lifts: null, liftsFor: null };
+  return G.place.length === G.n * 3 && G.off.length === G.n + 1 ? G : null;
+}
+/** The ground of the map in hand in the large - or null: its data has none (built before there was any). */
+function coarseGraph() {
+  if (!ctx.coarse) return Promise.resolve(null);
+  const key = `${ctx.map}/${ctx.coarse}`;
+  if (!coarses.has(key)) coarses.set(key, readCoarse(ctx.map, ctx.coarse).catch(() => null));
+  return coarses.get(key);
+}
+/** The stretches by a spot ([x, y, z or null]), nearest first - where the height is known, those at that height first: [{ id, d }]. */
+function coarseNear(G, p, most = NEAR_MOST) {
+  const out = [], seen = new Set(), wide = G.span * CELL, high = p[2] === null || p[2] === undefined ? null : p[2];
+  for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+    const x = p[0] - dj * wide, y = p[1] - di * wide;
+    const col = Math.floor(32 - y / TILE), row = Math.floor(32 - x / TILE), range = G.first.get(col * 128 + row);
+    if (!range) continue;
+    const i = Math.min(N - 1, Math.max(0, Math.floor(((32 - col) * TILE - y) / CELL))), j = Math.min(N - 1, Math.max(0, Math.floor(((32 - row) * TILE - x) / CELL)));
+    const square = ((j / G.span) | 0) * G.cells + ((i / G.span) | 0), key = (col * 128 + row) * 256 + square;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    for (let s = range[0]; s < range[1]; s++) {
+      if (G.square[s] !== square) continue;
+      out.push({ id: s, d: Math.hypot(G.place[s * 3] - p[0], G.place[s * 3 + 1] - p[1]) + (high === null ? 0 : Math.abs(G.place[s * 3 + 2] - high) * 3) });
+    }
+  }
+  return out.sort((a, b) => a.d - b.d).slice(0, most);
+}
+/** From the stretch a lift stops by to the stretches at its other stops: Map<stretch, [{ to, seconds }]>. */
+function coarseLifts(G, lifts) {
+  if (G.liftsFor === lifts) return G.lifts;
+  const extra = new Map();
+  for (const L of lifts ?? []) {
+    const stops = stopsOf(L);
+    const at = stops.map((z) => coarseNear(G, [L.x, L.y, z], 4).find((c) => Math.abs(G.place[c.id * 3 + 2] - z) <= LIFT_LEVEL && Math.hypot(G.place[c.id * 3] - L.x, G.place[c.id * 3 + 1] - L.y) <= LIFT_BY)?.id ?? -1);
+    for (let a = 0; a < at.length; a++) for (let b = 0; b < at.length; b++) {
+      if (a === b || at[a] < 0 || at[b] < 0 || at[a] === at[b]) continue;
+      let list = extra.get(at[a]);
+      if (!list) extra.set(at[a], (list = []));
+      list.push({ to: at[b], seconds: liftSeconds(L, a, b) });
+    }
+  }
+  G.lifts = extra; G.liftsFor = lifts;
+  return extra;
+}
+/** The way through the stretches from one spot to another: the stretches gone through, in order - or null (none leads there). */
+function coarseWay(G, from, to, run, swim, lifts) {
+  const starts = coarseNear(G, from), ends = coarseNear(G, to);
+  if (!starts.length || !ends.length) return null;
+  const P = G.place, vmax = Math.max(run, swim), tx = to[0], ty = to[1];
+  const g = new Float32Array(G.n).fill(Infinity), parent = new Int32Array(G.n).fill(-1), closed = new Uint8Array(G.n);
+  const endAt = new Map(ends.map((c) => [c.id, c.d / run]));
+  const extra = coarseLifts(G, lifts);
+  const heap = new Heap();
+  const h = (s) => Math.hypot(P[s * 3] - tx, P[s * 3 + 1] - ty) / vmax;
+  for (const c of starts) { const g0 = c.d / run; if (g0 < g[c.id]) { g[c.id] = g0; heap.push(g0 + h(c.id), c.id, 0); } }
+  let best = -1, bestCost = Infinity;
+  while (heap.n > 0) {
+    if (heap.key[0] >= bestCost) break;
+    const u = heap.id[0];
+    heap.pop();
+    if (closed[u]) continue;
+    closed[u] = 1;
+    const last = endAt.get(u);
+    if (last !== undefined && g[u] + last < bestCost) { bestCost = g[u] + last; best = u; }
+    const ux = P[u * 3], uy = P[u * 3 + 1], uz = P[u * 3 + 2];
+    for (let e = G.off[u]; e < G.off[u + 1]; e++) {
+      const v = G.to[e];
+      if (closed[v]) continue;
+      const kind = G.kind[v];
+      const c = g[u] + (Math.hypot(P[v * 3] - ux, P[v * 3 + 1] - uy, P[v * 3 + 2] - uz) / (kind & 1 ? swim : run)) * (kind & 2 ? LAVA_COST / 3 : 1);
+      if (c < g[v]) { g[v] = c; parent[v] = u; heap.push(c + h(v), v, 0); }
+    }
+    for (const x of extra.get(u) ?? []) {
+      if (closed[x.to]) continue;
+      const c = g[u] + x.seconds;
+      if (c < g[x.to]) { g[x.to] = c; parent[x.to] = u; heap.push(c + h(x.to), x.to, 0); }
+    }
+  }
+  if (best < 0) return null;
+  const way = [];
+  for (let s = best; s >= 0; s = parent[s]) way.push(s);
+  return way.reverse();
+}
+/** The places along a way through the stretches that the walk is worked out by, one after the other: [[x, y, z], ...]. */
+function coarseStops(G, way) {
+  const P = G.place, n = way.length, along = new Float32Array(n);
+  for (let i = 1; i < n; i++) along[i] = along[i - 1] + Math.hypot(P[way[i] * 3] - P[way[i - 1] * 3], P[way[i] * 3 + 1] - P[way[i - 1] * 3 + 1]);
+  const total = along[n - 1], out = [];
+  for (let i = 1, next = Math.max(LEG_END, Math.min(LEG, total / 2)); i < n - 1; i++) {
+    if (along[i] < next || total - along[i] < LEG_END) continue;
+    // (of the stretches just here, the roomiest: its place is the surest to lie on open ground, not on a ledge beside the way)
+    let pick = i;
+    for (let k = i + 1; k < n - 1 && along[k] < along[i] + 70 && total - along[k] >= LEG_END; k++) if (G.size[way[k]] > G.size[way[pick]]) pick = k;
+    out.push([P[way[pick] * 3], P[way[pick] * 3 + 1], P[way[pick] * 3 + 2]]);
+    next = along[pick] + LEG;
+    i = pick;
+  }
+  return out;
+}
+/** Several walks, each beginning where the one before ended, as one: the answer findRoute would have given for the whole. */
+function joinWalks(pieces, run, swim, more = {}) {
+  const P = [], K = [], rides = [];
+  let expanded = 0, fall = 0, costs = 0, tiles = 0;
+  for (const r of pieces) {
+    const n = r.points.length / 3, skip = P.length ? 1 : 0, base = P.length / 3 - skip;
+    for (const ride of r.rides ?? []) rides.push({ ...ride, at: ride.at + base });
+    for (let i = skip; i < n; i++) { P.push(r.points[i * 3], r.points[i * 3 + 1], r.points[i * 3 + 2]); K.push(r.kinds[i]); }
+    expanded += r.expanded ?? 0; fall = Math.max(fall, r.fall ?? 0); costs += r.hurt ?? 0; tiles = Math.max(tiles, r.tiles ?? 0);
+  }
+  const points = new Float32Array(P), kinds = new Uint8Array(K), ride = new Map(rides.map((x) => [x.at, x.seconds]));
+  let length = 0, seconds = 0;
+  for (let i = 1; i < kinds.length; i++) {
+    const dx = points[i * 3] - points[i * 3 - 3], dy = points[i * 3 + 1] - points[i * 3 - 2], dz = points[i * 3 + 2] - points[i * 3 - 1];
+    if (kinds[i] & LIFTED) { seconds += ride.get(i) ?? 0; continue; }
+    const d = Math.hypot(dx, dy, dz);
+    length += d;
+    seconds += kinds[i] & FELL ? Math.hypot(dx, dy) / run + Math.max(0, -dz) / FALL_SPEED : d / (kinds[i] & 1 ? swim : run);
+  }
+  return { ok: true, points, kinds, length, seconds, expanded, tiles, fall, hurt: Math.min(1, costs), rides, ...more };
+}
+/** The spot some yards of the way from one end of a walk (`back`: from its last point), and which point it is: { at, p: [x, y, z] } - or null where a fall or a lift lies between. */
+function alongWalk(r, yards, back) {
+  const n = r.points.length / 3, p = r.points;
+  let gone = 0;
+  for (let k = 1; k < n; k++) {
+    const i = back ? n - 1 - k : k, j = back ? i + 1 : i - 1;
+    if (r.kinds[back ? j : i] & (FELL | LIFTED)) return null;
+    gone += Math.hypot(p[i * 3] - p[j * 3], p[i * 3 + 1] - p[j * 3 + 1], p[i * 3 + 2] - p[j * 3 + 2]);
+    if (gone >= yards) return { at: i, p: [p[i * 3], p[i * 3 + 1], p[i * 3 + 2]], gone };
+  }
+  return null;
+}
+const cutWalk = (r, from, to) => ({ ...r, points: r.points.slice(from * 3, (to + 1) * 3), kinds: r.kinds.slice(from, to + 1), rides: (r.rides ?? []).filter((x) => x.at > from && x.at <= to).map((x) => ({ ...x, at: x.at - from })) });
+/**
+ * A long walk, by way of the ground in the large (see above): the answer findRoute gives, with
+ * `far` (it was found this way) and `pieces` (in how many) - or { ok: false, why }: the map has no
+ * such data, or it knows no way, or a piece of the way could not be walked after all.
+ */
+async function farRoute(req) {
+  const G = await coarseGraph();
+  if (!G) return { ok: false, why: ctx.coarse ? 'the ground in the large could not be read' : 'the data of this map has no ground in the large (built before there was any: Update map)' };
+  const run = req.run > 0 ? req.run : 7, swim = req.swim > 0 ? req.swim : run * 0.67;
+  const way = coarseWay(G, req.from, req.to, run, swim, req.noLifts ? [] : ctx.lifts);
+  if (!way) return { ok: false, why: 'no way through the ground in the large' };
+  const stops = coarseStops(G, way), pieces = [];
+  let at = req.from, missed = 0;
+  for (let i = 0; i <= stops.length; i++) {
+    const last = i === stops.length;
+    const r = await findRoute({ ...req, from: at, to: last ? req.to : stops[i], landFrom: pieces.length ? false : req.landFrom, wet: pieces.length ? false : req.wet, landTo: last ? req.landTo : false });
+    if (!r.ok) {
+      // (a place that could not be walked to after all - on a ledge of its stretch, say: on to the next, from where the walk has got to)
+      if (last || ++missed > 3) return { ok: false, why: `piece ${i + 1} of ${stops.length + 1} of the way in the large could not be walked (${r.reason ?? 'no way'})` };
+      continue;
+    }
+    pieces.push(r);
+    const n = r.points.length / 3;
+    at = [r.points[n * 3 - 3], r.points[n * 3 - 2], r.points[n * 3 - 1]];
+  }
+  // where two pieces meet, the yards either side are walked straight from one to the other
+  for (let i = 0; i + 1 < pieces.length; i++) {
+    const a = alongWalk(pieces[i], JOIN, true), b = alongWalk(pieces[i + 1], JOIN, false);
+    if (!a || !b || a.at < 1) continue;
+    const r = await findRoute({ ...req, from: a.p, to: b.p, landFrom: false, landTo: false, wet: false });
+    if (!r.ok || r.length >= a.gone + b.gone - 1 || (r.rides ?? []).length) continue;
+    const n = r.points.length / 3;
+    if (Math.hypot(r.points[n * 3 - 3] - b.p[0], r.points[n * 3 - 2] - b.p[1], r.points[n * 3 - 1] - b.p[2]) > 1.5) continue; // (it ended on another floor of that spot)
+    const before = cutWalk(pieces[i], 0, a.at), after = cutWalk(pieces[i + 1], b.at, pieces[i + 1].points.length / 3 - 1);
+    pieces.splice(i, 2, before, r, after);
+    i++; // (the piece after is as it was, from that spot on: its far end meets the next)
+  }
+  return joinWalks(pieces, run, swim, { far: true, pieces: stops.length + 1 - missed });
+}
+
+/**
+ * A walk asked for: over the real ground, and - a long one - by way of the ground in the large.
+ * A walk of FAR_FIRST yards and more is looked for in the large first: over the real ground it
+ * is the one that takes seconds to find, or to give up on. A nearer one that the search gives
+ * up on as too far (round a mountain, a few hundred yards off as the crow flies) is looked for
+ * in the large then.
+ */
+async function answer(m) {
+  if (m.levels) return findRoute(m);
+  const far = Math.hypot(m.to[0] - m.from[0], m.to[1] - m.from[1]) >= FAR_FIRST;
+  // (large: what became of looking in the large, where that came to nothing - for the page's notes)
+  let out = far ? await farRoute(m) : null, large = null;
+  if (out && !out.ok) { large = out.why; out = null; }
+  if (!out) out = await findRoute(m);
+  if (!out.ok && !far && /too far/.test(out.reason ?? '')) {
+    const r = await farRoute(m);
+    if (r.ok) out = r; else large = r.why;
+  }
+  if (large && !out.ok) out.large = large;
+  return out;
+}
+
 let chain = Promise.resolve();
 self.onmessage = (e) => {
   const m = e.data;
@@ -955,9 +1198,11 @@ self.onmessage = (e) => {
         if (!c || c.rev !== nav.rev) { c = { map: nav.map, rev: nav.rev, have: new Set(nav.tiles), lifts: [] }; maps.set(nav.map, c); }
         // (the lifts of this map, as the page has them now: a list of a few)
         c.lifts = Array.isArray(nav.lifts) ? nav.lifts : [];
+        // (the ground in the large, where the map's data has it: see farRoute)
+        c.coarse = nav.coarse ?? null;
         ctx = c;
       }
-      try { if (!out) out = await findRoute(m); } catch (err) { out = { ok: false, reason: String(err?.message ?? err) }; }
+      try { if (!out) out = await answer(m); } catch (err) { out = { ok: false, reason: String(err?.message ?? err) }; }
       out.type = 'route'; out.id = m.id; out.ms = Math.round(performance.now() - t0);
       self.postMessage(out, out.points ? [out.points.buffer, out.kinds.buffer] : []);
     });
