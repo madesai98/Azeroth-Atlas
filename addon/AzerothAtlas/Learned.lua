@@ -40,6 +40,8 @@
 --     you open its map, and this does no asking of its own.
 --
 -- shared.LearnedSay()   says how many vendors, trainers and quests are noted (for /atlas to call)
+-- shared.AreasTest(rest)  /atlas areas: where the game's map shades the quests of your log, asked
+--                       of the game itself - a test (see "the game's quest areas" below)
 local shared = AzerothAtlas
 if type(shared) ~= "table" then return end
 
@@ -443,6 +445,422 @@ local function Look()
     looking = true
     Later(AGAIN, Look)
   end
+end
+
+-- ---- the game's quest areas: a test (/atlas areas) -----------------------------------------------
+-- The game's map shades where a quest of your log has something to do: its quest areas. They are
+-- in no file of the game - its server sends them as you play - and the game hands them to no
+-- addon. But its own map asks the frame that draws them which quest's area is under the mouse
+-- (QuestBlobDataProvider.lua: UpdateMouseOverTooltip, with the place as fractions of the map, and
+-- GetTooltipIndex for each of that quest's areas there). Whether the frame answers as well for a
+-- place the mouse is not at, nobody knows yet: this tries it. /atlas areas takes the quests of
+-- your log - first those the game's map pins on the map you are on - and, one quest at a time,
+-- has a frame of its own draw that quest's areas, unseen, and asks it about places all over the
+-- map (a coarse grid), then finely where it found something and round the quest's pin. The ways
+-- the frame may be drawn are tried in turn until one answers. It takes a few milliseconds a
+-- frame, so the game goes on as smoothly, and never runs in a fight: one that begins stops it,
+-- as /atlas areas stop does, and what it found by then is kept.
+--
+-- What it found is in AzerothAtlasDB.areaTest (the game writes it when you /reload or log out):
+--   { v = 1, at = when, map = the map, corners = { "x,y" of the world at the map's top left, at
+--     its bottom right }, me = "x,y" where you were on the map, log = how many quests your log
+--     has, pinned = how many of them the map pins, look = the way of drawing that answered (1 the
+--     frame unseen, 2 the frame shown and its areas see-through, 3 the areas all but see-through),
+--     asked = places asked about, ms = how long that took, looked = quests gone through,
+--     done = true once it got to the end, else why it stopped,
+--     quests = { [quest] = {
+--       pin = "x,y" where the map pins it; inside = whether the game says you stand in one of its
+--       areas; first = how many of 25 places round its pin answered in the very frame it was
+--       drawn; atPin, atMe = which of its areas the frame says are at its pin, and at you;
+--       coarse = places of the coarse grid that answered for it, other = for another quest;
+--       box = "x0,y0,step,columns,rows" of the fine grid;
+--       areas = { [the game's number for the area, "a" where it gives none] = { "row:from-to,...", ... } };
+--       goals = { [that number] = "finished,type,text" as the game's map says that area's objective };
+--       wants = { "type,done/needed,finished,text" of each objective of the quest } } } }
+-- (places are fractions of the map, across and down, as the game's map has them)
+local AREAS = {
+  coarse = 40,        -- the coarse grid: places across and down
+  finest = 1 / 400,   -- the fine grid's step at its finest, of the map's width and height...
+  most = 16000,       -- ...coarser where the box is so large that it would be more places than this
+  around = 0.03,      -- round a quest's pin the box always reaches this far
+  slice = 5,          -- milliseconds a frame
+  batch = 3000,       -- places asked about in one frame, at most
+  longest = 240,      -- seconds, at most
+}
+-- the ways of drawing, tried until one answers: { the frame's alpha, the areas' alpha (0-255) }
+local LOOKS = { { 0, 0 }, { 1, 0 }, { 1, 1 } }
+local areaFrames = {}   -- way of drawing -> its frame (false: none could be made)
+local probe = nil       -- the test under way
+
+local function Say(text) print("|cff7fd4ffAzeroth Atlas|r: " .. text) end
+-- (milliseconds, as finely as the game says them)
+local function Clock()
+  local ms = plain(ask(_G.debugprofilestop))
+  if type(ms) == "number" then return ms end
+  return (plain(ask(GetTime)) or 0) * 1000
+end
+
+-- A frame of the kind the game's map draws quest areas with, drawn the given way - or nothing,
+-- where this game has no such frame for an addon.
+local function AreaFrame(look)
+  local f = areaFrames[look]
+  if f ~= nil then return f or nil end
+  areaFrames[look] = false
+  local ok, made = pcall(CreateFrame, "QuestPOIFrame", nil, UIParent)
+  if not ok or type(made) ~= "table" then return nil end
+  for _, name in ipairs({ "DrawBlob", "DrawNone", "SetMapID", "UpdateMouseOverTooltip", "GetTooltipIndex" }) do
+    if type(made[name]) ~= "function" then return nil end
+  end
+  local alpha, fill = LOOKS[look][1], LOOKS[look][2]
+  -- (the game's own look for them, as QuestBlobDataProvider.lua sets it - see-through here)
+  pcall(made.SetFillTexture, made, "Interface\\WorldMap\\UI-QuestBlob-Inside")
+  pcall(made.SetBorderTexture, made, "Interface\\WorldMap\\UI-QuestBlob-Outside")
+  pcall(made.SetFillAlpha, made, fill)
+  pcall(made.SetBorderAlpha, made, fill)
+  pcall(made.SetFrameStrata, made, "BACKGROUND")
+  pcall(made.EnableMouse, made, false)
+  pcall(made.SetSize, made, 600, 400)
+  pcall(made.SetPoint, made, "CENTER", UIParent, "CENTER", 0, 0)
+  pcall(made.SetAlpha, made, alpha)
+  pcall(made.Hide, made)
+  areaFrames[look] = made
+  return made
+end
+
+-- What the frame says is at (x, y) of its map: the quest whose area is there, and which of its
+-- areas they are ("a" where it gives no number) - or nothing.
+local function Under(f, x, y)
+  local ok, quest, n = pcall(f.UpdateMouseOverTooltip, f, x, y)
+  if not ok then return nil end
+  quest = whole(quest, 1, ID_MOST)
+  if not quest then return nil end
+  local keys = {}
+  for i = 1, whole(n, 0, 64) or 0 do
+    local ok2, k = pcall(f.GetTooltipIndex, f, i)
+    k = ok2 and whole(k, -1, 1000) or nil
+    if k then keys[#keys + 1] = tostring(k) end
+  end
+  if #keys == 0 then keys[1] = "a" end
+  return quest, keys
+end
+
+-- The same, asked as part of the test: once this frame's share of time is used up, the rest
+-- waits for the next frame. (The test waits only here and in LookAt, never inside a pcall: the
+-- game's Lua cannot wait inside one.)
+local function Ask(x, y)
+  local run = probe
+  run.asked, run.slice = run.asked + 1, run.slice + 1
+  if run.slice % 32 == 0 and (run.slice >= AREAS.batch or Clock() - run.from > AREAS.slice) then coroutine.yield() end
+  return Under(run.f, x, y)
+end
+
+-- Which of the quest's areas the frame says are at (x, y): their numbers, "none", or the other quest there.
+local function Which(quest, x, y)
+  local q, keys = Under(probe.f, x, y)
+  if q == quest then return table.concat(keys, " ") end
+  return q and ("quest " .. q) or "none"
+end
+
+-- The coarse grid over the whole map: how many places answered for the quest, and the box round
+-- them, a place wider on each side (nothing where none answered).
+local function Coarse(rec, quest)
+  local n = AREAS.coarse
+  local hits, other, c0, r0, c1, r1 = 0, 0, n, n, -1, -1
+  for r = 0, n - 1 do
+    for c = 0, n - 1 do
+      local q = Ask((c + 0.5) / n, (r + 0.5) / n)
+      if q == quest then
+        hits = hits + 1
+        if c < c0 then c0 = c end
+        if c > c1 then c1 = c end
+        if r < r0 then r0 = r end
+        if r > r1 then r1 = r end
+      elseif q then
+        other = other + 1
+      end
+    end
+  end
+  rec.coarse, rec.other = hits, other
+  if hits == 0 then return nil end
+  return math.max(0, (c0 - 1) / n), math.max(0, (r0 - 1) / n), math.min(1, (c1 + 2) / n), math.min(1, (r1 + 2) / n)
+end
+
+-- The fine grid over a box of the map: the quest's areas found there, each as runs of columns in
+-- each row. Returns true where it found any.
+local function Fine(rec, quest, x0, y0, x1, y1)
+  local step = math.max(AREAS.finest, math.sqrt((x1 - x0) * (y1 - y0) / AREAS.most))
+  local cols, rows = math.max(1, math.ceil((x1 - x0) / step)), math.max(1, math.ceil((y1 - y0) / step))
+  rec.box = string.format("%.5f,%.5f,%.6f,%d,%d", x0, y0, step, cols, rows)
+  -- (filled row by row: a test stopped half way keeps the rows it got to)
+  local areas, any = {}, false
+  rec.areas = areas
+  for r = 0, rows - 1 do
+    local y = y0 + (r + 0.5) * step
+    local open, runs = {}, {}   -- area -> the column its run began at; area -> its runs in this row
+    for c = 0, cols do
+      local here = nil
+      if c < cols then
+        local q, keys = Ask(x0 + (c + 0.5) * step, y)
+        if q == quest then
+          here = {}
+          for k = 1, #keys do here[keys[k]] = true end
+        end
+      end
+      for key, began in pairs(open) do
+        if not (here and here[key]) then
+          local list = runs[key]
+          if not list then list = {} runs[key] = list end
+          list[#list + 1] = began .. "-" .. (c - 1)
+          open[key] = nil
+        end
+      end
+      if here then
+        for key in pairs(here) do
+          if open[key] == nil then open[key] = c end
+        end
+      end
+    end
+    for key, list in pairs(runs) do
+      local rowsOf = areas[key]
+      if not rowsOf then rowsOf = {} areas[key] = rowsOf end
+      rowsOf[#rowsOf + 1] = r .. ":" .. table.concat(list, ",")
+      any = true
+    end
+  end
+  return any
+end
+
+-- What the game says of the quest's objectives, and of the objective of each area found (as its own map says it).
+local function Goals(rec, quest)
+  local list = plain(ask(from("C_QuestLog", "GetQuestObjectives"), quest))
+  if type(list) == "table" then
+    rec.wants = {}
+    for i = 1, min(#list, 20) do
+      local o = plain(list[i])
+      if type(o) == "table" then
+        rec.wants[#rec.wants + 1] = tostring(plain(o.type)) .. "," .. tostring(plain(o.numFulfilled)) .. "/" .. tostring(plain(o.numRequired)) .. "," .. tostring(plain(o.finished)) .. "," .. tostring(plain(o.text))
+      end
+    end
+  end
+  local index = whole(ask(from("C_QuestLog", "GetLogIndexForQuestID"), quest), 1, 10000)
+  local board = _G.GetQuestPOILeaderBoard
+  if not rec.areas or not index or type(board) ~= "function" then return end
+  rec.goals = {}
+  for key in pairs(rec.areas) do
+    local k = tonumber(key)
+    if k then
+      local ok, text, kind, finished = pcall(board, k, index)
+      if ok then rec.goals[key] = tostring(plain(finished)) .. "," .. tostring(plain(kind)) .. "," .. tostring(plain(text)) end
+    end
+  end
+end
+
+-- One quest, with the frame in use: its areas drawn, and the frame asked about them. Returns what
+-- was found, and whether the frame answered for the quest at all.
+local function LookAt(quest)
+  local run = probe
+  local f, pin = run.f, run.pins[quest]
+  local rec = { pin = pin and string.format("%.4f,%.4f", pin[1], pin[2]) or nil }
+  -- (kept at once, and filled as it goes: a test stopped half way keeps what it got to)
+  run.out.quests[quest] = rec
+  local inside = plain(ask(from("C_Minimap", "IsInsideQuestBlob"), quest))
+  if type(inside) == "boolean" then rec.inside = inside end
+  pcall(f.DrawNone, f)
+  if not pcall(f.DrawBlob, f, quest, true) then
+    rec.drawn = false
+    return rec, false
+  end
+  -- (in the very frame it was drawn: the places round its pin)
+  local first = 0
+  if pin then
+    for dy = -2, 2 do
+      for dx = -2, 2 do
+        if Under(f, pin[1] + dx * 0.004, pin[2] + dy * 0.004) == quest then first = first + 1 end
+      end
+    end
+  end
+  rec.first = first
+  -- (the rest in the frames after it)
+  coroutine.yield()
+  if pin then rec.atPin = Which(quest, pin[1], pin[2]) end
+  if run.me then rec.atMe = Which(quest, run.me[1], run.me[2]) end
+  local x0, y0, x1, y1 = Coarse(rec, quest)
+  if pin then
+    local a = AREAS.around
+    x0, y0 = math.min(x0 or 1, math.max(0, pin[1] - a)), math.min(y0 or 1, math.max(0, pin[2] - a))
+    x1, y1 = math.max(x1 or 0, math.min(1, pin[1] + a)), math.max(y1 or 0, math.min(1, pin[2] + a))
+  end
+  local found = x0 ~= nil and Fine(rec, quest, x0, y0, x1, y1)
+  Goals(rec, quest)
+  return rec, found or rec.coarse > 0 or first > 0
+end
+
+-- The frame drawn the given way put to use: shown, on the test's map. False where there is none.
+local function Use(look)
+  local f = AreaFrame(look)
+  if not f then return false end
+  local was = probe.f
+  if was and was ~= f then
+    pcall(was.DrawNone, was)
+    pcall(was.Hide, was)
+  end
+  probe.f = f
+  pcall(f.Show, f)
+  pcall(f.SetMapID, f, probe.map)
+  return true
+end
+
+-- The test itself, a frame's share at a time (a coroutine: Drive takes it on each frame).
+local function Body()
+  local run = probe
+  local tries = 0   -- quests the map pins here that every way of drawing was tried on, none answering
+  for i = 1, #run.list do
+    local quest = run.list[i]
+    local rec, found
+    local first, last = 1, 1
+    if run.look then
+      first, last = run.look, run.look
+    elseif run.pins[quest] and tries < 3 then
+      last = #LOOKS
+    end
+    for look = first, last do
+      if Use(look) then
+        rec, found = LookAt(quest)
+        rec.look = look
+        if found then
+          run.look = look
+          break
+        end
+      end
+    end
+    if not run.look and last > first then tries = tries + 1 end
+    run.out.quests[quest] = rec or { drawn = false }
+    run.out.looked = i
+  end
+end
+
+-- The test's end: the frame cleared and hidden, and how it went said.
+local function Finish(why)
+  local run = probe
+  if not run then return end
+  probe = nil
+  if run.f then
+    pcall(run.f.DrawNone, run.f)
+    pcall(run.f.Hide, run.f)
+  end
+  local out = run.out
+  out.asked, out.ms, out.look, out.done = run.asked, floor(run.ms + 0.5), run.look, why or true
+  local looked, answered = 0, 0
+  for _, rec in pairs(out.quests) do
+    looked = looked + 1
+    if (rec.coarse or 0) > 0 or (rec.first or 0) > 0 or (rec.areas and next(rec.areas)) then answered = answered + 1 end
+  end
+  local said
+  if answered > 0 then
+    said = string.format("quest areas: the game showed where %d of the %d quests looked at have an area on this map (%d places asked about, in %.1f s).", answered, looked, run.asked, run.ms / 1000)
+  else
+    said = string.format("quest areas: the game showed no area for any of the %d quests looked at (%d places asked about).", looked, run.asked)
+  end
+  if why then said = said .. " It stopped early: " .. why .. "." end
+  Say(said .. " Type /reload to keep what it found.")
+end
+
+-- Each frame: the test's next share - unless a fight has begun, or it has gone on too long.
+local function Drive()
+  local run = probe
+  if not run then return end
+  if plain(ask(InCombatLockdown)) == true then Finish("a fight began") return end
+  if (plain(ask(GetTime)) or 0) - run.started > AREAS.longest then Finish("it took too long") return end
+  run.slice, run.from = 0, Clock()
+  local ok, err = coroutine.resume(run.co)
+  run.ms = run.ms + (Clock() - run.from)
+  if probe ~= run then return end
+  if not ok then
+    shared.Log("ERROR the game's quest areas: " .. tostring(err))
+    Finish("something went wrong (" .. tostring(err) .. ")")
+    return
+  end
+  if coroutine.status(run.co) == "dead" then Finish() return end
+  Later(0, Drive)
+end
+
+-- "x,y" of the world at a place of the map (fractions across and down) - or nothing.
+local function Corner(map, x, y)
+  local make, toWorld = _G.CreateVector2D, from("C_Map", "GetWorldPosFromMapPos")
+  if type(make) ~= "function" or type(toWorld) ~= "function" then return nil end
+  local ok, v = pcall(make, x, y)
+  if not ok or type(v) ~= "table" then return nil end
+  local ok2, _, pos = pcall(toWorld, map, v)
+  if not ok2 or type(pos) ~= "table" then return nil end
+  local px, py = plain(pos.x), plain(pos.y)
+  if type(px) ~= "number" or type(py) ~= "number" then return nil end
+  return string.format("%.1f,%.1f", px, py)
+end
+
+-- The quests of your log (no headings, none the game hides), and where the map pins them on `map`.
+local function LogAndPins(map)
+  local log, have, pins = {}, {}, {}
+  local info = from("C_QuestLog", "GetInfo")
+  for i = 1, whole(ask(from("C_QuestLog", "GetNumQuestLogEntries")), 0, 200) or 0 do
+    local e = plain(ask(info, i))
+    if type(e) == "table" and plain(e.isHeader) ~= true and plain(e.isHidden) ~= true then
+      local q = whole(e.questID, 1, ID_MOST)
+      if q and not have[q] then
+        have[q] = true
+        log[#log + 1] = q
+      end
+    end
+  end
+  local list = plain(ask(from("C_QuestLog", "GetQuestsOnMap"), map))
+  if type(list) == "table" then
+    for k = 1, min(#list, 300) do
+      local e = plain(list[k])
+      if type(e) == "table" then
+        local q, x, y = whole(e.questID, 1, ID_MOST), plain(e.x), plain(e.y)
+        if q and have[q] and not pins[q] and type(x) == "number" and type(y) == "number" and x > 0 and x < 1 and y > 0 and y < 1
+          and plain(e.isQuestStart) ~= true and plain(e.isMapIndicatorQuest) ~= true then pins[q] = { x, y } end
+      end
+    end
+  end
+  return log, pins
+end
+
+-- /atlas areas (rest "stop": stops it)
+function shared.AreasTest(rest)
+  if rest == "stop" then
+    if probe then Finish("you stopped it") else Say("quest areas: nothing is being looked at.") end
+    return
+  end
+  if probe then Say("quest areas: already looking (/atlas areas stop stops it).") return end
+  if plain(ask(InCombatLockdown)) == true then Say("quest areas: not in a fight - try again once it is over.") return end
+  local map = whole(ask(from("C_Map", "GetBestMapForUnit"), "player"), 1, ID_MOST)
+  if not map then Say("quest areas: the game does not say which map you are on here.") return end
+  if not AreaFrame(1) then Say("quest areas: this game has no frame an addon can draw quest areas with, so there is nothing to look at.") return end
+  local log, pins = LogAndPins(map)
+  if #log == 0 then Say("quest areas: there are no quests in your log to look at.") return end
+  local list, pinned = {}, 0
+  for _, q in ipairs(log) do
+    if pins[q] then
+      list[#list + 1] = q
+      pinned = pinned + 1
+    end
+  end
+  for _, q in ipairs(log) do if not pins[q] then list[#list + 1] = q end end
+  local me = nil
+  local pos = plain(ask(from("C_Map", "GetPlayerMapPosition"), map, "player"))
+  if type(pos) == "table" and type(pos.GetXY) == "function" then
+    local ok, x, y = pcall(pos.GetXY, pos)
+    x, y = ok and plain(x) or nil, ok and plain(y) or nil
+    if type(x) == "number" and type(y) == "number" then me = { x, y } end
+  end
+  local out = { v = 1, at = plain(ask(time)), map = map, corners = { Corner(map, 0, 0), Corner(map, 1, 1) },
+    me = me and string.format("%.4f,%.4f", me[1], me[2]) or nil, log = #log, pinned = pinned, looked = 0, done = false, quests = {} }
+  if type(AzerothAtlasDB) ~= "table" then AzerothAtlasDB = {} end
+  AzerothAtlasDB.areaTest = out
+  probe = { map = map, list = list, pins = pins, me = me, out = out, asked = 0, ms = 0, slice = 0, from = 0, started = plain(ask(GetTime)) or 0 }
+  probe.co = coroutine.create(Body)
+  Say(string.format("quest areas: looking at the %d quests of your log (%d pinned on this map). It takes some seconds; play on as you like, but a fight stops it.", #list, pinned))
+  Later(0, Drive)
 end
 
 -- ---- how many, and when --------------------------------------------------------------------------

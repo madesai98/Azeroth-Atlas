@@ -1807,6 +1807,12 @@ SlashCmdList["AZEROTHATLAS"] = function(msg)
     if shared.LearnedSay then shared.LearnedSay() else say("this copy of the addon does not note vendors, trainers and quest pins: update it from the 3D map, and start the game again.") end
     return
   end
+  if word == "areas" then
+    -- /atlas areas: where the game's map shades the quests of your log, asked of the game itself - a test
+    -- (Learned.lua); /atlas areas stop
+    if shared.AreasTest then shared.Try("/atlas areas", shared.AreasTest, rest) else say("this copy of the addon cannot look at the game's quest areas: update it from the 3D map, and type /reload.") end
+    return
+  end
   if word == "measure" then
     -- /atlas measure, /atlas measure off, /atlas measure on: your height as the game measures it (Height.lua)
     if shared.MeasureSay then shared.MeasureSay(rest) else say("this copy of the addon does not measure your height: update it from the 3D map, and start the game again.") end

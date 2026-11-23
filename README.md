@@ -3390,6 +3390,18 @@ the two that you have switched off is switched on for the read and off again in 
 moment. None of the three has been tried in the game by the map's maker: they go by the game's
 own window code, read out of the installed game, and by what other addons do in this client.
 
+**The game's quest areas: a test.** The game's map shades where a quest of your log has
+something to do. Those areas are in no file of the game (its files have them for 22 quests):
+the server sends them as you play, and the game hands them to no addon. The game's own map asks
+the frame that draws them which quest's area is under the mouse; `/atlas areas` tries whether
+that frame answers an addon asking about places of its own choosing. For each quest of your log
+it draws that quest's areas on a frame of its own, unseen, and asks about a grid of places over
+the map you are on, then finely where it found something: a few milliseconds a frame, never in a
+fight (`/atlas areas stop` stops it). What it finds stays in the addon's saved settings
+(`areaTest`, replaced by the next run) and the map does not use it yet. If the game answers,
+the map can mark a quest's targets only inside the game's own areas, rather than at every spot
+QuestieDB has for them.
+
 **The insides of the dungeons.** Besides the three kinds of thing there is one record per
 dungeon (`/truth/place`, made by `atlasdb/places.js`): the doors copies were found at having
 come in that the map's own data has no spot for, the ways they went that its floors do not
