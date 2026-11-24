@@ -2269,9 +2269,15 @@ the kinds and the bands of item level, and not what each gives. That is taken fr
 original game's tables as the Warcraft Wiki has them (warcraft.wiki.gg/wiki/Disenchanting_tables,
 read 23 November 2026; the bands are the same as this game's) - NOT checked for this game.
 What your own disenchanting gives is noted (the spell you cast, the thing it was cast at, and
-what came of it as loot), kept in the addon's saved settings by band, and leaned on more and
-more as it mounts up: the table counts for as much as twenty disenchantings of your own. Where
-you are no enchanter, the lines are listed as needing one, and are never the advice.
+what came of it as loot) and kept in the addon's saved settings by band: how many times, and
+how many pieces of each material in all. The 3D map sends that count to the Atlas database
+with the rest of what it sends - "things of this kind and quality, in this band of item level,
+gave these materials, so many times", not which things, when, or whose (`atlasdb/yields.js`) -
+where every copy's count is added up (`/truth/yield`, a record a band), and it comes back to
+every copy's game with the prices. The tables are leaned on that count more and more as it
+mounts up: they count for as much as twenty disenchantings. (Your own count is gone by where
+it is ahead of what has come back.) Where you are no enchanter, the lines are listed as
+needing one, and are never the advice.
 
 **What it does not do.**
 
@@ -2289,7 +2295,8 @@ you are no enchanter, the lines are listed as needing one, and are never the adv
 off` (and `on`), `/atlas advice gain 10`, `/atlas advice risk 20`, `/atlas advice least 10`,
 `/atlas advice reset`. It needs version 41 of the addon (**Check for updates**) and the game
 started again once: the addon has a new file and the prices a new folder, and the game only
-looks for either when it starts.
+looks for either when it starts. Everybody's count of what disenchanting gives needs version
+42; from 41 a `/reload` is enough.
 
 Tried on this computer's own prices, 23 November 2026, the real addon file over all 7,466
 items of one house: for someone who is no enchanter it advised a vendor for 4,218 and a
@@ -2297,7 +2304,8 @@ items of one house: for someone who is no enchanter it advised a vendor for 4,21
 not known how often they sell); for an enchanter, disenchanting for 258 of them. And against
 a mocked game with a made-up auction house; not yet seen in the game itself when this was
 written - nor has the noting of your own disenchanting, which goes by what this game says of
-a spell being cast.
+a spell being cast; from the saved settings on, its way through the database to another copy's
+game is tried against a stand-in database.
 
 ## Tracking all your completed quests at once
 
@@ -3736,6 +3744,14 @@ often it found it, and never for more than five findings: one copy does not carr
 believe first; the record is what the copies sent, put together. What it is for is under
 "Inside a dungeon: your place, read off the game's minimap".
 
+**What disenchanting gives.** And one record per band of things that can be disenchanted
+(`/truth/yield`, made by `atlasdb/yields.js`): a weapon or armour, of a quality, in a band of
+item level - how many times the copies' players disenchanted one, and how many pieces of each
+material that gave in all. A copy sends the whole of what it has counted of a band each time
+that grows, and its fullest count stands for its earlier ones; every copy's is added up. No
+other source says what disenchanting gives in this game. What it is for is under "What to do
+with a thing you are getting rid of, in its tooltip".
+
 **What a copy sends.** While the map runs it reads the game's cache, its own sightings, what a
 fight showed and whom the addon met (above: "a creature of this kind was here", "at this level
 it has this much health", "it is hostile to this side"), which level a creature is on where a
@@ -3744,7 +3760,8 @@ windows showed ("this vendor sells this for so much", "this trainer teaches this
 skill", "the game's map puts this quest here"), what following you through a dungeon taught
 the map of the dungeon ("this door puts you here", "from here one gets to there", "in this
 part of it the minimap's place is this far off": not when you were in it, how the run went, or
-which way you took through it), and what
+which way you took through it), what your own disenchanting gave ("things of this kind gave
+these materials, so many times": not which things, when, or whose), and what
 the addon has seen of the boats (see "Boats, zeppelins and the tram, live": a boat sighting
 is a line, a stop and a moment, with no names; of a ride of your own, that does say this copy's
 player was aboard then), and

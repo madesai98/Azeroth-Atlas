@@ -12,6 +12,8 @@
 //   - who the addon met (the creatures you targeted, had the mouse on or saw a name plate of):
 //     each one's health at a level and how it stood towards your side, which the addon keeps in
 //     the game's saved settings (addon/AzerothAtlas/Met.lua; the same file as the boats). Read only.
+//   - what your own disenchanting gave, by the kind of thing disenchanted, which the addon counts
+//     in the same file (addon/AzerothAtlas/Advice.lua, read by yields.js). Read only.
 //   - what the addon noted in windows the game opened for you: what a vendor sells and for how
 //     much, what a trainer teaches and asks, and where the game's own map puts the quests in
 //     your log (addon/AzerothAtlas/Learned.lua, read by learned.js; the same file again). Read only.
@@ -32,8 +34,10 @@
 // here", "at this level it has this much health", "it is hostile to this side" - not who fought
 // it, when, how the fight went, or anything else of the log. Of a dungeon: "this door puts you
 // here", "from here one gets to there", "in this part of it the minimap's place is this far off" -
-// not when you were in it, how often you died there, or which way you went through it. A sighting of a boat goes as "a craft of this
-// line left this stop at this moment, by this way" (a ride, or which addon passed it on), with
+// not when you were in it, how often you died there, or which way you went through it. Of
+// disenchanting: "things of this kind and quality, in this band of item level, gave these
+// materials, so many times" - not which things, when, or whose they were. A sighting of a boat
+// goes as "a craft of this line left this stop at this moment, by this way" (a ride, or which addon passed it on), with
 // no names, yours or anybody's: the moment is the whole of what it says, so it has to go, and
 // of a ride of your own it does say that this copy's player was aboard then. What is sent is
 // filed under a made-up name this copy is signed in under (signin.js), which says nothing
@@ -45,6 +49,7 @@ import { fromCache, hashOf } from './records.js';
 import { SERVER_TIME } from './rtdb.js';
 import { sightingsIn, metIn, pack, unpack } from './boats.js';
 import { learnedIn } from './learned.js';
+import { yieldsIn, yieldLines } from './yields.js';
 import { placeLines } from './places.js';
 
 const BATCH = 400 * 1024; // bytes of facts to one delivery
@@ -146,7 +151,7 @@ export async function gather(cfg, dataDir) {
   // the boats: what the addon has kept for sending, in every account's saved settings
   try {
     const accounts = path.join(cfg.installRoot, folder, 'WTF', 'Account');
-    const all = new Set(), met = new Set();
+    const all = new Set(), met = new Set(), gave = [];
     for (const account of fs.readdirSync(accounts)) {
       let text;
       try { text = fs.readFileSync(path.join(accounts, account, 'SavedVariables', 'AzerothAtlas.lua'), 'utf8'); } catch { continue; }
@@ -155,7 +160,10 @@ export async function gather(cfg, dataDir) {
       for (const line of metIn(text)) met.add(line);
       // (and what it noted at vendors and trainers, and of the game's own quest pins: learned.js)
       for (const line of learnedIn(text)) met.add(line);
+      // (and what disenchanting gave: counted per account, sent as one count for this computer - yields.js)
+      gave.push(yieldsIn(text));
     }
+    for (const line of yieldLines(gave)) met.add(line);
     found.boats = [...all];
     const had = new Set(found.logged);
     for (const line of met) if (!had.has(line)) found.logged.push(line);

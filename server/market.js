@@ -32,6 +32,10 @@
 // often a thing sells there is our own readings of that house and nothing else - until there are
 // enough, it is "not known", and the addon does not send anybody there on a guess.
 //
+// And what disenchanting gives, as the players of every copy found it: the Atlas database has it
+// band by band (atlasdb/yields.js), and it goes to the game with the prices, for the addon to
+// lean the original game's tables on.
+//
 // What an auction costs - the house's cut, the deposit by length - goes with it (auctions/
 // houses.js: HOUSE_COSTS), so that a figure corrected here is corrected in the game without a
 // new addon.
@@ -53,6 +57,7 @@ import { auctionSettings } from '../auctions/settings.js';
 import { parseHouse, neutralOf, costsOf, SIDES, RULESETS } from '../auctions/houses.js';
 import { chances, DURATIONS } from '../auctions/sells.js';
 import { readTsm } from '../auctions/tsm.js';
+import { readYields } from '../atlasdb/yields.js';
 import { addonsDir } from './addon.js';
 
 const NAME = 'AzerothAtlas', MARKET = 'AzerothAtlas_Market';
@@ -72,6 +77,8 @@ export function soundRate(rate, perDay) {
 }
 const middle = (list) => [...list].sort((a, b) => a - b)[Math.floor(list.length / 2)];
 
+const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
+const yieldsFile = (cfg) => path.join(cfg.dataDir, 'atlasdb', 'truth-yield.json');
 const stampOf = (file) => { try { const st = fs.statSync(file); return `${st.size}:${Math.round(st.mtimeMs)}`; } catch { return ''; } };
 const copper = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 && v < COPPER_MOST ? Math.round(v) : 0);
 /** A text as Lua writes one: between double quotes, with nothing in it that would end it early. */
@@ -90,7 +97,7 @@ export function marketKey(cfg) {
   const houses = housesOf(cfg);
   if (!houses.length) return null;
   const store = new AuctionStore(cfg.dataDir), region = parseHouse(houses[0]).region;
-  const files = [...houses.flatMap((h) => [store.file(h, 'now.json'), store.file(h, 'sell.json')]), store.file(`all-${region}`, 'sell.json'), store.file('tsm', `${region}-region.json`)];
+  const files = [...houses.flatMap((h) => [store.file(h, 'now.json'), store.file(h, 'sell.json')]), store.file(`all-${region}`, 'sell.json'), store.file('tsm', `${region}-region.json`), yieldsFile(cfg)];
   // (the day counts too: a price of a day gone by is a day older tomorrow)
   return `${FORMAT}|${houses.join(',')}|${files.map(stampOf).join('|')}|${store.days(houses[0]).at(-1) ?? ''}|${Math.floor(Date.now() / 86400000)}`;
 }
@@ -99,7 +106,8 @@ export function marketKey(cfg) {
  * The figures as they stand: { houses: [{ key, side, name, t, cut, deposit, items: Map<item,
  * { price, low, age, chance: { 2, 8, 24 } (0..1 or null), from (1 our readings of the house, 2 of
  * the region, 3 a figure from elsewhere, 0 not known) }> }], credit (true: TradeSkillMaster's
- * figure is among what is handed on) } - or null (no house chosen, or nothing fetched yet that
+ * figure is among what is handed on), yields: Map<band, { n, got: [[material, pieces]] }> (what
+ * disenchanting gave, by every copy's count) } - or null (no house chosen, or nothing fetched yet that
  * may still be handed on).
  */
 export function marketFigures(cfg, now = Date.now() / 1000) {
@@ -175,7 +183,7 @@ export function marketFigures(cfg, now = Date.now() / 1000) {
   }
   // (nothing of its own house: nothing to say - the neutral house's prices alone tell nobody what to do)
   if (!houses.length || houses[0].key !== keys[0]) return null;
-  return { houses, credit };
+  return { houses, credit, yields: readYields(readJson(yieldsFile(cfg))) };
 }
 
 const mille = (p) => (p === null || p === undefined ? '-' : String(Math.round(p * 1000)));
@@ -216,7 +224,11 @@ export function marketAddonFiles(figures, interfaceVersion) {
       '--           the times it is put up for that many hours, in thousandths ("-": not known); from: 1',
       '--           our own readings of the house, 2 of the region\'s houses, 3 TradeSkillMaster\'s figure',
       '--           for the region, 0 not known',
-      `AzerothAtlasMarket = { v = ${FORMAT}, items = ${sorted.length}, credit = ${figures.credit ? 'true' : 'false'}, houses = {`,
+      '--   yields  what disenchanting things of a band gave, by every copy\'s count ("weapon 2 or armour',
+      '--           4 : quality : the band\'s first item level"): "times material=pieces in all ..."',
+      `AzerothAtlasMarket = { v = ${FORMAT}, items = ${sorted.length}, credit = ${figures.credit ? 'true' : 'false'}, yields = {`,
+      ...[...(figures.yields ?? new Map())].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([band, y]) => `[${luaText(band)}]="${y.n} ${y.got.map(([item, pieces]) => `${item}=${pieces}`).join(' ')}",`),
+      '}, houses = {',
       ...figures.houses.map((h) => `{ key = ${luaText(h.key)}, side = ${luaText(h.side)}, name = ${luaText(h.name)}, realm = ${luaText(h.realm)}, t = ${h.t}, cut = ${h.cut}, deposit = { [2] = ${h.deposit[2]}, [8] = ${h.deposit[8]}, [24] = ${h.deposit[24]} } },`),
       '}, of = {',
       ...sorted.map((id) => `[${id}]="${lineOf(figures, id)}",`),

@@ -5,8 +5,9 @@
 //   /meta                      what is published: its number (rev), when, how many of each kind,
 //                              what it was made from, and a fingerprint of every shard
 //   /truth/<kind>/b<n>/i<id>   the records (records.js): kind is npc, object or quest - or place,
-//                              a dungeon with what the copies learned of its insides (places.js);
-//                              a shard holds the ids n to n+499
+//                              a dungeon with what the copies learned of its insides (places.js) -
+//                              or yield, a band of things that can be disenchanted with what the
+//                              copies' players got of it (yields.js); a shard holds the ids n to n+499
 //   /inbox/<copy>/<key>        what each copy of the map has sent (collect.js): added to, never
 //                              changed. Everything published can be made again from these and
 //                              the sources on the maker's own disk. Where several copies have
@@ -27,8 +28,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { findQuestieDb, readQuestie } from '../extractor/questie.js';
 import { readReference } from '../extractor/reference.js';
-import { KINDS, PLACE, PUBLISHED, SCHEMA, LAYERS, fromQuestie, fromReference, mergeAll, shards, canonical, tidy, cacheSays } from './records.js';
+import { KINDS, PLACE, YIELD, PUBLISHED, SCHEMA, LAYERS, fromQuestie, fromReference, mergeAll, shards, canonical, tidy, cacheSays } from './records.js';
 import { foldPlaces } from './places.js';
+import { readYieldLine, foldYields } from './yields.js';
 import { entries, SERVER_TIME } from './rtdb.js';
 
 const SAME = 30;            // yards: sightings of one NPC this close together are the same spot
@@ -147,10 +149,11 @@ function mostSaid(voices) {
  *                                a player fought it on there (where the map had only guessed)
  *   d,... j,... c,...            of a dungeon: a door, a way its floors do not have, how far off the
  *                                minimap's place is (places.js has the three, and puts them together)
+ *   y,<band>,<times>,<material>,<pieces>,...   what disenchanting things of a band gave, in all (yields.js)
  * A line of any other kind is left out: a later version's, which this one does not know.
  * @param inbox what GET /inbox returned
  * @returns { cache, seen, logged, obs, copies, deliveries, splits: [{ kind, id, field, said }],
- *            places: Map<map, a dungeon's record> }
+ *            places: Map<map, a dungeon's record>, yields: Map<band, what disenchanting it gave> }
  */
 export function fold(inbox) {
   const reports = { npc: new Map(), object: new Map(), quest: new Map() }; // id -> Map<copy, { copy, at, key, build, rec }>
@@ -163,6 +166,7 @@ export function fold(inbox) {
   const pins = new Map();   // "quest:s|o|e:the game's map" -> [{ x, y, by: Map<copy, [x, y]> }]
   const fought = new Map(); // "123:m0" -> [{ x, y, by: Map<copy, z> }]: the level a creature was fought on at a spot
   const ofPlaces = new Map(); // copy -> [its lines of the dungeons, in the order sent]
+  const ofYields = new Map(); // copy -> Map<band, its count of what disenchanting gave: the one with the most disenchantings>
   const whole = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
   let deliveries = 0;
   const copies = entries(inbox);
@@ -195,6 +199,16 @@ export function fold(inbox) {
           let mine = ofPlaces.get(copy);
           if (!mine) ofPlaces.set(copy, (mine = []));
           mine.push(String(line));
+          continue;
+        }
+        if (k === 'y') {
+          // what disenchanting gave: a line is all a copy has counted of a band so far, so its fullest line stands for the others
+          const said = readYieldLine(p);
+          if (!said) continue;
+          let mine = ofYields.get(copy);
+          if (!mine) ofYields.set(copy, (mine = new Map()));
+          const had = mine.get(said.band);
+          if (!had || said.n >= had.n) mine.set(said.band, said);
           continue;
         }
         if (k === 'h') {
@@ -371,7 +385,7 @@ export function fold(inbox) {
     o.l = [names.size];
     obs.npc.set(id, o);
   }
-  return { cache, seen, logged, obs, copies: copies.length, deliveries, splits, places: foldPlaces(ofPlaces) };
+  return { cache, seen, logged, obs, copies: copies.length, deliveries, splits, places: foldPlaces(ofPlaces), yields: foldYields(ofYields) };
 }
 
 /**
@@ -432,6 +446,9 @@ export async function buildTruth(cfg, dataDir, inbox, log = () => {}) {
   // the dungeons: what the copies learned of their insides, as it was folded (no other source says anything of that)
   records[PLACE] = got.places;
   if (got.places.size) { from.places = got.places.size; log(`the dungeons, as the copies went through them: ${got.places.size} with a door, a way or checks of the minimap's place`); }
+  // what disenchanting gives: the copies' own counts, band by band (no other source says anything of that for this game)
+  records[YIELD] = got.yields;
+  if (got.yields.size) { from.yields = [...got.yields.values()].reduce((n, y) => n + y.n, 0); log(`what disenchanting gives, as the copies' players found it: ${from.yields.toLocaleString()} disenchantings of ${got.yields.size} kinds of thing`); }
   return { records, from, splits: got.splits };
 }
 

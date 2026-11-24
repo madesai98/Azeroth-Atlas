@@ -90,8 +90,10 @@ export const SCHEMA = 1;
 export const KINDS = ['npc', 'object', 'quest'];
 /** ...and the kind that is no thing but a place: a dungeon, with what the copies learned of its insides (places.js). */
 export const PLACE = 'place';
+/** ...and the kind that is a band of things that can be disenchanted, with what the copies' players got of it (yields.js). */
+export const YIELD = 'yield';
 /** Every kind there is a shard of. */
-export const PUBLISHED = [...KINDS, PLACE];
+export const PUBLISHED = [...KINDS, PLACE, YIELD];
 export const BUCKET = 500; // ids to a shard: a copy fetches only the shards that have changed
 
 /** Believed first to last. */

@@ -36,7 +36,8 @@
 --     auction there is listed with its price and "not known", and is never the advice;
 --   - what disenchanting gives is the original game's tables, as published - nobody has checked
 --     them for this game. What your own disenchanting gave is noted (in this addon's saved
---     settings) and leaned on more and more as it mounts up;
+--     settings), goes to the Atlas database with what the 3D map sends, and comes back put
+--     together with everybody's: the tables are leaned on that more and more as it mounts up;
 --   - a thing bound to you cannot be auctioned: said so, and left out;
 --   - prices are for one piece, of a list read up to an hour before the game was last started.
 --     What is asked is not what a thing sells for: the 3D map reckons a price at no more than
@@ -239,8 +240,29 @@ local function Band(facts)
   return nil
 end
 
+-- What has been counted of a band: { n (times disenchanted), got = { [material] = pieces in all } }
+-- - everybody's count as the 3D map wrote it from the Atlas database, or your own where that is
+-- the larger (everybody's has yours in it once it has been sent and put together; until then
+-- yours may be ahead). Nothing where neither has any.
+local function Counted(key)
+  local own = type(DB().yields) == "table" and DB().yields[key] or nil
+  if not (type(own) == "table" and type(own.n) == "number" and own.n > 0 and type(own.got) == "table") then own = nil end
+  local m = rawget(_G, "AzerothAtlasMarket")
+  local text = type(m) == "table" and type(m.yields) == "table" and m.yields[key] or nil
+  local all = nil
+  if type(text) == "string" then
+    local n = tonumber(match(text, "^(%d+)"))
+    if n and n > 0 then
+      all = { n = n, got = {} }
+      for item, pieces in gmatch(text, "(%d+)=(%d+)") do all.got[tonumber(item)] = tonumber(pieces) end
+    end
+  end
+  if all and (not own or all.n >= own.n) then return all end
+  return own
+end
+
 -- What a band gives on average, a material each: { item, pieces for one disenchanting } - the
--- table's word, leaned on what your own disenchanting of that band gave (see Disenchanted).
+-- table's word, leaned on what has been counted of that band (Counted; see Disenchanted).
 local function Yields(row, key)
   local each, order = {}, {}
   for i = 3, #row do
@@ -248,8 +270,8 @@ local function Yields(row, key)
     each[g[1]] = (each[g[1]] or 0) + g[2] / 100 * (g[3] + g[4]) / 2
     order[#order + 1] = g[1]
   end
-  local seen = type(DB().yields) == "table" and DB().yields[key] or nil
-  if type(seen) == "table" and type(seen.n) == "number" and seen.n > 0 and type(seen.got) == "table" then
+  local seen = Counted(key)
+  if seen then
     for item in pairs(seen.got) do if each[item] == nil and type(item) == "number" then each[item] = 0 ; order[#order + 1] = item end end
     for i = 1, #order do
       local item = order[i]
@@ -258,7 +280,7 @@ local function Yields(row, key)
   end
   local out = {}
   for i = 1, #order do if each[order[i]] > 0 then out[#out + 1] = { item = order[i], each = each[order[i]] } end end
-  return out, (type(seen) == "table" and tonumber(seen.n)) or 0
+  return out, (seen and tonumber(seen.n)) or 0
 end
 
 -- ---- what an auction brings --------------------------------------------------------------------------
@@ -635,12 +657,14 @@ function shared.AdviceSay(words)
     return
   end
   local age = type(time) == "function" and type(m.houses[1].t) == "number" and (time() - m.houses[1].t) or nil
-  local read = 0
+  local read, everybody = 0, 0
+  if type(m.yields) == "table" then for _, text in pairs(m.yields) do everybody = everybody + (type(text) == "string" and tonumber(match(text, "^(%d+)")) or 0) end end
   if type(DB().yields) == "table" then for _, rec in pairs(DB().yields) do if type(rec) == "table" then read = read + (tonumber(rec.n) or 0) end end end
   say("an item's tooltip says what to do with a thing you are getting rid of: vendor, auction or disenchant, whichever brings most of the ways that are safe enough. Hold Shift for every way. Prices for " .. tostring(m.items) .. " items at the " .. HouseName(m, 1) .. " auction house"
     .. (m.houses[2] and " and the neutral one" or "") .. (age and (", " .. Ago(age) .. " old") or "") .. ". "
     .. format("Weights: %s points for every per cent an auction pays over the vendor, %s off for every per cent of the times it does not sell; and it has to bring %s per cent more than the vendor on average (/atlas advice gain %d, /atlas advice risk %d, /atlas advice least %d; reset puts those back). ", tostring(gain), tostring(risk), tostring(shared.AdviceLeast()), GAIN, RISK, LEAST)
     .. (read > 0 and (format("%d", read) .. " of your own disenchantings are counted in what disenchanting gives. ") or "")
+    .. (everybody > 0 and (format("%d", everybody) .. " disenchantings counted by everybody's copies came with the prices. ") or "")
     .. "/atlas advice off turns it off.")
 end
 
