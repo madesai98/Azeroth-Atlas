@@ -14,6 +14,42 @@ import { unpack } from './pack.js';
 
 export { pack, unpack } from './pack.js';
 
+const SELLS_EVERY = 6 * 3600; // seconds: what sells changes slowly - a copy asks for it no more often than this
+
+/**
+ * Only what a house holds now, and nothing of its days: for the neutral house that goes with
+ * this copy's own, whose prices are wanted and whose history is not.
+ * @returns { house, t, fetched } or null when the house is not published
+ */
+export async function pullNow(db, store, house) {
+  const idx = await db.get(`market/index/${house}`);
+  if (!idx?.t || idx.t < Date.now() / 1000 - KEEP_DAYS * 86400) return null;
+  const have = store.now(house);
+  if (have && have.t >= idx.t) return { house, t: have.t, fetched: 0 };
+  const items = {};
+  for (const [id, r] of Object.entries(unpack(await db.get(`market/now/${house}`)))) items[id] = [r[0], r[1], r[2], r[3]];
+  store.write(`${house}/now.json`, { t: idx.t, items });
+  return { house, t: idx.t, fetched: 1 };
+}
+
+/**
+ * What sells (sells.js: how often, how soon, how many), as the function in the cloud has
+ * measured it over the last 30 days, fetched where the database has something newer than this
+ * computer - and asked for no more often than every six hours.
+ * @param key  a house ('us-110'), or every house of a region together ('all-us')
+ * @returns { key, t, fetched } or null when there are no figures yet
+ */
+export async function pullSells(db, store, key, now = Date.now() / 1000) {
+  const have = store.sells(key);
+  if (have && now - (have.at ?? 0) < SELLS_EVERY) return { key, t: have.t, fetched: 0 };
+  const idx = await db.get(`market/sellindex/${key}`);
+  if (!idx?.t || idx.t < now - KEEP_DAYS * 86400) return null;
+  if (have && have.t >= idx.t) { store.write(`${key}/sell.json`, { ...have, at: Math.floor(now) }); return { key, t: have.t, fetched: 0 }; }
+  const items = unpack(await db.get(`market/sell/${key}`));
+  store.write(`${key}/sell.json`, { t: idx.t, at: Math.floor(now), items });
+  return { key, t: idx.t, fetched: 1 };
+}
+
 /**
  * Fetch one house from the database into this computer's store: "now" when it is newer than what
  * is here, the days this copy has not got whole, and the single looks it has not seen.

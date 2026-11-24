@@ -20,7 +20,7 @@ const to = path.join(here, 'shared');
 // cloud. The check below sees to it. `as`: what another of these files is called here, where
 // the original names it by its place in the map.)
 const FILES = [
-  { from: 'auctions/houses.js' }, { from: 'auctions/days.js' }, { from: 'auctions/pack.js' },
+  { from: 'auctions/houses.js' }, { from: 'auctions/days.js' }, { from: 'auctions/pack.js' }, { from: 'auctions/sells.js' },
   { from: 'viewer/js/clock.js' }, { from: 'atlasdb/boats.js', as: { '../viewer/js/clock.js': './clock.js' } },
 ];
 const names = FILES.map((f) => path.basename(f.from));

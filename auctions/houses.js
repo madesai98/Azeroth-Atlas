@@ -47,6 +47,32 @@ export function parseHouse(key) {
   return { key: `${m[1]}-${m[2]}`, region: m[1], id: Number(m[2]), ...h };
 }
 
+/** The neutral house that goes with a house: the same region and ruleset ('us-110' → 'us-116'); a neutral house's is itself. Null: no such house. */
+export function neutralOf(key) {
+  const h = parseHouse(key);
+  if (!h) return null;
+  const id = Object.keys(HOUSES).find((n) => HOUSES[n].ruleset === h.ruleset && HOUSES[n].side === 'neutral');
+  return id ? `${h.region}-${id}` : null;
+}
+
+/**
+ * What an auction costs its seller, by the kind of house.
+ *   cut      per cent of the price the house keeps when the auction sells
+ *   deposit  per cent of what a vendor pays for the thing, paid when it is put up for 2, 8 or 24
+ *            hours - never less than one copper. Handed back when it sells; kept by the house
+ *            when it does not (its time runs out, or it is taken down).
+ * The faction houses' are as published for this game (Wowhead, November 2026: 5%, 20%, 60%)
+ * and as the game's own table of auction houses has them (AuctionHouse: a deposit rate of 5 for
+ * two hours, a cut of 5). The neutral houses' are that table's alone - a deposit rate of 25, a
+ * cut of 15 - reckoned the same way: nobody of ours has put a thing up there and looked.
+ */
+export const HOUSE_COSTS = {
+  faction: { cut: 5, deposit: { 2: 5, 8: 20, 24: 60 } },
+  neutral: { cut: 15, deposit: { 2: 25, 8: 100, 24: 300 } },
+};
+/** What an auction costs at this house: { cut, deposit: { 2, 8, 24 } } - or null: no such house. */
+export const costsOf = (key) => { const h = parseHouse(key); return h ? HOUSE_COSTS[h.side === 'neutral' ? 'neutral' : 'faction'] : null; };
+
 /** Every house of a region, as keys ('us-110', …). */
 export function housesOf(region) {
   return Object.entries(HOUSES).filter(([, h]) => (REGION_RULESETS[region] ?? []).includes(h.ruleset)).map(([id]) => `${region}-${id}`);

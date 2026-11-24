@@ -1823,6 +1823,12 @@ SlashCmdList["AZEROTHATLAS"] = function(msg)
     if shared.DropsSay then shared.DropsSay(rest) else say("this copy of the addon does not show drop rates: update it from the 3D map, and start the game again.") end
     return
   end
+  if word == "advice" or word == "sell" then
+    -- /atlas advice, /atlas advice off, /atlas advice gain 10, /atlas advice risk 20: what to do with a thing you are getting rid of, in its tooltip (Advice.lua)
+    -- (everything after the word: "gain 10" is two)
+    if shared.AdviceSay then shared.AdviceSay(string.match(string.lower(msg), "^%s*%S+%s*(.-)%s*$") or "") else say("this copy of the addon does not say what to do with an item: update it from the 3D map, and start the game again.") end
+    return
+  end
   if word == "track" or word == "untrack" then
     -- /atlas track: the quests you track become those ready to hand in; /atlas track here: those with something to do
     -- where you are; /atlas track dungeon [its name]: those of a dungeon and leading up to it; /atlas untrack: every

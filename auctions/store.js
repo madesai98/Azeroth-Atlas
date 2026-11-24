@@ -63,6 +63,8 @@ export class AuctionStore {
   }
 
   now(house) { return this.read(`${house}/now.json`); }
+  /** What sells there (sells.js), as last fetched: { t, at, items } - `key` a house, or 'all-us' for every house of a region together. */
+  sells(key) { return this.read(`${key}/sell.json`); }
   day(house, day) { return this.read(`${house}/days/${day}.json`); }
   hours(house, day) { return this.read(`${house}/hours/${day}.json.gz`); }
 
@@ -136,6 +138,13 @@ export class AuctionStore {
       // a house not looked at for 30 days: what is "now" there is that old too
       const cur = this.now(house);
       if (cur && cur.t < now - KEEP_DAYS * 86400) { try { fs.rmSync(this.file(house, 'now.json')); gone++; } catch { /* gone */ } }
+    }
+    // what sells: figures made from Blizzard's lists too, and no older than those may be
+    let folders = [];
+    try { folders = fs.readdirSync(this.dir).filter((f) => /^([a-z]{2}-\d+|all-[a-z]{2})$/.test(f)); } catch { /* nothing kept */ }
+    for (const key of folders) {
+      const s = this.sells(key);
+      if (s && !(s.t >= now - KEEP_DAYS * 86400)) { try { fs.rmSync(this.file(key, 'sell.json')); gone++; } catch { /* gone */ } }
     }
     return gone;
   }

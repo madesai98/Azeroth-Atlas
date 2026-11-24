@@ -31,8 +31,8 @@ import { databaseSettings } from '../atlasdb/settings.js';
 import { signIn } from '../atlasdb/signin.js';
 import { AuctionStore, KEEP_DAYS } from './store.js';
 import { auctionSettings, setHouse } from './settings.js';
-import { HOUSES, housesOf, houseName, parseHouse, tsmSlug } from './houses.js';
-import { pullMarket } from './share.js';
+import { HOUSES, housesOf, houseName, neutralOf, parseHouse, tsmSlug } from './houses.js';
+import { pullMarket, pullNow, pullSells } from './share.js';
 import { unpack } from './pack.js';
 import { refreshTsm, parseFile, HOUSE_FIELDS } from './tsm.js';
 import { listHouse, itemHistory } from './view.js';
@@ -163,7 +163,20 @@ try {
     const out = { errors: [] };
     const step = async (name, fn) => { try { out[name] = await fn(); } catch (err) { out.errors.push(`${name}: ${said(err)}`); } };
     if (house) {
-      await step('pull', async () => { const db = await atlas(); return db ? pullMarket(db, store, house, log) : null; });
+      let asked = null;
+      const db = () => (asked ??= atlas()); // (signed in once for all of it)
+      await step('pull', async () => { const d = await db(); return d ? pullMarket(d, store, house, log) : null; });
+      // the neutral house that goes with this one: what it holds now (its prices, for what an item would fetch there)
+      const neutral = neutralOf(house);
+      if (neutral && neutral !== house) await step('neutral', async () => { const d = await db(); return d ? pullNow(d, store, neutral) : null; });
+      // what sells, as measured in the cloud: here, at the neutral house, and in the region's houses together
+      await step('sells', async () => {
+        const d = await db();
+        if (!d) return null;
+        const got = {};
+        for (const key of new Set([house, neutral, `all-${parseHouse(house).region}`].filter(Boolean))) got[key] = (await pullSells(d, store, key))?.fetched ?? null;
+        return got;
+      });
       await step('tsm', () => refreshTsm(store, house, { log }));
     }
     await step('items', items);

@@ -1796,10 +1796,13 @@ do
       if ok and made then
         category = made
         pcall(game.RegisterAddOnCategory, made)
+        -- (and the page of its own that what to do with an item has, under this one: Advice.lua)
+        if shared.AdviceOptions then pcall(shared.AdviceOptions, made) end
         return
       end
     end
     if InterfaceOptions_AddCategory then pcall(InterfaceOptions_AddCategory, panel) end
+    if shared.AdviceOptions then pcall(shared.AdviceOptions, nil) end
   end
 
   -- Open the game's options at this panel. False where that cannot be done from here.

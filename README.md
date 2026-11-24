@@ -2150,6 +2150,155 @@ Tried against a mocked game that fills its tooltip the way this one does, with t
 the map writes them from the real database; not yet seen in the game itself when this was
 written.
 
+## What to do with a thing you are getting rid of, in its tooltip
+
+With the mouse on an item, the addon adds one line to the game's own tooltip: what to do with
+the thing if you do not want it - sell it to a vendor, put it up at your side's auction house
+or at the neutral one, or disenchant it - and what that brings (asked for on 23 November 2026).
+
+```
+Linen Cloth
+Sell Price: 13c
+Getting rid of it: auction, Alliance house, 24 h          ~ 30c (each)
+```
+
+Hold **Shift** and every way is listed, the advised one marked, the others with what speaks
+against them:
+
+```
+Getting rid of it (each)
+Vendor                                                 13c
+> Alliance auction, 24 h (sells 95%)                 ~ 30c
+Neutral auction (not known how often it sells)         39c if sold
+~ on average: the price less the house's cut, by how often it sells, less the deposit lost
+when it does not. Prices of an hour ago. How often things sell: partly TradeSkillMaster's figures.
+```
+
+And of a thing that can be disenchanted, for someone who is no enchanter (both as the addon
+wrote them from one house's real prices, 23 November 2026):
+
+```
+Getting rid of it
+Vendor                                                                10s 70c
+> Alliance auction, 24 h (sells 47%)                                ~ 27s 35c
+Neutral auction (not known how often it sells, asked 2g, sells for less)   79s 14c if sold
+Disenchant, then vendor (needs an enchanter)                          ~ 1c
+Disenchant, then Alliance auction (sells 61%, needs an enchanter)     ~ 31s 48c
+Disenchant, then Neutral auction (needs an enchanter)                 72s 59c if sold
+```
+
+**What a way brings**, for one piece:
+
+| Way | How it is reckoned |
+| --- | --- |
+| **Vendor** | what the game says a vendor pays |
+| **An auction** | on average: the going price less the house's cut, times how often the thing sells of the times it is put up - and, for the times it does not, what a vendor pays less the deposit, which the house keeps. Reckoned for 2, 8 and 24 hours (the deposit and the chance differ), and the best is taken |
+| **Disenchanting** | what the thing gives on average, by its kind (weapon or armour), its quality and its item level; each material then taken to a vendor, or to either auction house as above |
+
+What an auction costs is in `auctions/houses.js`, and goes to the game with the prices, so a
+figure corrected there is corrected in the game without a new addon:
+
+| | Your side's house | The neutral house |
+| --- | --- | --- |
+| The house's cut of the price, when it sells | 5% | 15% |
+| The deposit for 2 / 8 / 24 hours, in per cent of what a vendor pays (never less than a copper); handed back when it sells, kept when it does not | 5 / 20 / 60% | 25 / 100 / 300% |
+
+The faction houses' figures are as published for this game (Wowhead, November 2026) and as the
+game's own table of auction houses has them. The neutral houses' are that table's alone,
+reckoned the same way: nobody of ours has put a thing up there and looked.
+
+**The best and safest: weights of your own.** An auction is advised only where it is safe
+enough, and that is a matter of points (Esc > Options > AddOns > Azeroth Atlas > **Getting rid
+of things**, or `/atlas advice`):
+
+- **points for every per cent the auction pays over the vendor**, if it sells (10 to start with);
+- **points off for every per cent of the times it does not sell** (20 to start with) - counted
+  by what is at stake, the deposit against that of 24 hours at your own house. So a short
+  auction, or one of a thing a vendor pays little for, is let through sooner; one at the neutral
+  house, whose deposit is five times as high, later;
+- and it has to bring **so many per cent more than the vendor on average** to be worth the
+  walk (10 to start with).
+
+Only how the first two stand to each other counts (10 and 20 is the same as 1 and 2). Of the
+ways nothing speaks against, the one that brings most on average is the advice; the vendor
+where they are level. The starting weights are from a trial on every item of an auction house
+(6,207 with a vendor price and a sale rate, 23 November 2026, TradeSkillMaster's sale rates
+taken at their word): with two points off for one point gained, the rule kept 99% of the
+profit the best possible choice for each item would have made, and auctioned 3,153 items of
+which 202 lose on average - against 2,298 losing ones with no points off at all. No simpler
+rule tried came near ("at least 20% better and sells half the time" kept 23%: the item in the
+middle sells one time in three).
+
+**Where the numbers come from.** The 3D map writes them for the game, as it does the drop
+rates: a small addon of their own beside Azeroth Atlas, `AzerothAtlas_Market`
+(`server/market.js`: a quarter of a megabyte, an item a line), when the map starts and each
+time the prices have been fetched - which, with the addon installed and a house chosen on the
+Prices page, is once an hour while the game runs. The game takes them up when it starts or on
+`/reload`.
+
+- **The price** is the going price at your house (see "Auction prices"), and at the neutral
+  house that goes with it. Not for sale at your house just now: the last going price of the
+  last day it was, and the list says how old that is.
+- **What is asked is not what a thing sells for.** Measured on a house of 6,700 items: one
+  item in four is asked at half as much again as it sells for, and where only one or two
+  auctions are up, one in ten at ten times it. So a price is reckoned at no more than twice
+  what the thing sells for - TradeSkillMaster's average sale price of the region where this
+  copy has it, else the middle of our own days' prices at the house (four days or more) - and
+  the list says where it did: "asked 3g 95s, sells for less".
+- **How often it sells** is made from whatever there is, the nearest counting most
+  (`auctions/sells.js`, `chances`): our own following of every auction of your house (see
+  "What sells, measured by ourselves" under "Auction prices"), leaned on the same for the
+  region's houses together, leaned on TradeSkillMaster's sale rate for the region. A figure
+  from elsewhere counts for as much as eight auctions of our own: a few readings move it a
+  little, many replace it. Our following began on 23 November 2026, so at first nearly every
+  figure is TradeSkillMaster's, and the list's last line says so.
+- **A sale rate from next to no sales says nothing** ("sells every time": it sold once). So
+  TradeSkillMaster's rate counts by how many it has seen sold in a day - at half a one a day
+  for half - with the rest made up of what is usual for things that hardly sell (15%).
+- **By length.** A figure for 24 hours stands for the shorter lengths as if things sold at
+  the same rate all the while: 34% in 24 hours is 13% in 8 and 3% in 2. Things sell quicker
+  when newly put up, so this is low for the short lengths - until our own readings, which are
+  taken by length, say otherwise.
+- **The neutral house.** Nobody publishes how often things sell there. What is known is our
+  own readings of that house and nothing else: until there are enough for an item, its auction
+  there is listed with what it would fetch and "not known how often it sells", and is never
+  the advice.
+
+**Disenchanting.** The game's own table of what can be disenchanted (`ItemDisenchantLoot`) has
+the kinds and the bands of item level, and not what each gives. That is taken from the
+original game's tables as the Warcraft Wiki has them (warcraft.wiki.gg/wiki/Disenchanting_tables,
+read 23 November 2026; the bands are the same as this game's) - NOT checked for this game.
+What your own disenchanting gives is noted (the spell you cast, the thing it was cast at, and
+what came of it as loot), kept in the addon's saved settings by band, and leaned on more and
+more as it mounts up: the table counts for as much as twenty disenchantings of your own. Where
+you are no enchanter, the lines are listed as needing one, and are never the advice.
+
+**What it does not do.**
+
+- A thing bound to you (the game's own "Soulbound", or one that binds when picked up) cannot
+  be auctioned: its auction is listed as that, and left out.
+- Nothing where the 3D map has written no prices (no house chosen, or the map never run): the
+  vendor's price is in the game's own tooltip already. `/atlas advice` says what is missing.
+- Prices are for one piece, and as old as the last time the game was started - the list says
+  how old, and a line of its own under the advice once they are more than three days old.
+- Nothing with any value the game hands over as "secret": left alone, not worked around.
+- It does not know what you paid, what the thing is worth to you, or what it is worth as a
+  material for your own professions: it is about getting rid of a thing, as the line says.
+
+`/atlas advice` says whether it is on, the weights and how old the prices are; `/atlas advice
+off` (and `on`), `/atlas advice gain 10`, `/atlas advice risk 20`, `/atlas advice least 10`,
+`/atlas advice reset`. It needs version 41 of the addon (**Check for updates**) and the game
+started again once: the addon has a new file and the prices a new folder, and the game only
+looks for either when it starts.
+
+Tried on this computer's own prices, 23 November 2026, the real addon file over all 7,466
+items of one house: for someone who is no enchanter it advised a vendor for 4,218 and a
+24-hour auction for 3,223, and found nothing to go by for 25 (no vendor buys them, and it is
+not known how often they sell); for an enchanter, disenchanting for 258 of them. And against
+a mocked game with a made-up auction house; not yet seen in the game itself when this was
+written - nor has the noting of your own disenchanting, which goes by what this game says of
+a spell being cast.
+
 ## Tracking all your completed quests at once
 
 The game tracks a quest - its objectives in the list on the right of the screen - when you tick
@@ -3743,11 +3892,47 @@ of the Atlas database's own Firebase project (`functions/`). Once an hour, with 
 computer switched on, it asks Blizzard for every house whose list is newer than the one in the
 database, boils it down (one line per item, not the auctions themselves) and writes it there.
 Every copy of the map reads the prices from the database: nobody else needs a client or an
-account. A copy fetches only the one house it is set to, and only while somebody is looking at
-prices - or while the game runs with the box **Auctionator** ticked, where other addons are
-answered with these prices.
+account. A copy fetches only the one house it is set to (and what the neutral house that goes with it
+holds now), and only while somebody is looking at prices - or while the game runs with Azeroth
+Atlas in it, whose tooltips go by these prices (see "What to do with a thing you are getting
+rid of"), or with the box **Auctionator** ticked, where other addons are answered with them.
 TradeSkillMaster's files are different: each copy fetches them for itself, straight from
 TradeSkillMaster, and nothing of them goes into the Atlas database.
+
+**What sells, measured by ourselves.** A list of auctions says what is asked, not what sells.
+But Blizzard gives every auction a number of its own and says roughly how long it has left
+(under half an hour, under two hours, under twelve, more), and the lists are made anew every
+hour. So the function in the cloud follows every auction from one list to the next
+(`functions/track.js`): how long an auction was put up for is told by how long it had left
+when it was first seen (the game has three lengths: 2, 8 and 24 hours), and one that is gone
+from a list made before its time could have run out was bought - or taken down by its seller:
+the lists cannot tell which. Counted per item and per house, the neutral houses too
+(`auctions/sells.js` has what is written down):
+
+| | |
+| --- | --- |
+| **How often it sells** | of the auctions put up for 2, 8 and 24 hours that have ended, how many went before their time - and the same counting only those put up at the lowest price asked at that moment, which is what somebody going by the going price does |
+| **How soon** | how long those were up before they went |
+| **How many** | the pieces that went that way, and the pieces bought out of a listing that is sold by the piece and is still up |
+| **Again** | of the auctions that went early, how many had a like-for-like new one beside them in the very same list: more likely taken down and put up again than sold |
+
+What it cannot see, and so what the figures lean towards: sold and taken down look the same
+(half of the "again" ones are taken to be the second, a guess until there are weeks of
+readings to fit it to); an auction put up and bought within the hour is never seen; and what
+is counted as having run its time may have been bought in its last hour. Nothing is counted
+across a gap of more than five hours between lists. It began on 23 November 2026: figures for
+an item mean something once a few of its auctions have ended, which for most items is a
+matter of days, and for the rare ones of weeks.
+
+In the database: `/market/sells/<house>/d<day>` (what ended that day), `/market/sell/<house>`
+(the last 30 days together: what a copy reads), `/market/sell/all-<region>` (every house of the
+region together, made once a day), and `/track/<house>` (every auction still up, as the next
+run needs it: about five bytes an auction, read by the function alone). A copy fetches the
+figures of its own house, of the neutral house that goes with it, and of the region, no more
+often than every six hours, and with them the neutral house as last listed (its prices, not
+its days); all of it is deleted after 30 days like everything made from Blizzard's lists.
+They are what an item's tooltip in the game goes by (see "What to do with a thing you are
+getting rid of"); the Prices page does not show them yet.
 
 **What an item gives.** This game keeps no stats on an item (the original game did). An item
 only says what share of a budget each of its stats takes, and the budget comes from the item's
@@ -3769,7 +3954,8 @@ taken from QuestieDB: thread, vials, flux and the like). A recipe with a reagent
 price, because none is for sale and no vendor is known to sell it, is shown with the rest costed
 and the gap said, and no difference is worked out. An item's page shows the recipe that makes
 it, reagent by reagent, and the recipes it goes into. What the sums leave out: the auction
-house's cut and deposit (how much this game takes is not in its files), what the recipe itself
+house's cut and deposit (`auctions/houses.js` has what this game takes; these sums do not count
+it yet), what the recipe itself
 costs to learn, and whether the thing sells at all, which is what the Sells column
 (TradeSkillMaster's) is beside it for. A difference is between two prices asked, not a promise.
 The skill at which a recipe turns yellow and grey is in the files; the skill at which a trainer
@@ -3833,13 +4019,14 @@ API client, made for free at https://develop.battle.net:
 | --- | --- |
 | `node tools/cloud.mjs login` | sign in to Firebase, once |
 | `node tools/cloud.mjs key --id-file=<file> --secret-file=<file>` | hand the client to the function: its two values, each from a file holding nothing else, go into the project's Secret Manager. Never into the repository or the database, and nothing of it is kept on the computer |
-| `node tools/cloud.mjs deploy` | put the function in the cloud, and the one that takes in QuestieDB with it (and again whenever anything in `functions/`, or `houses.js`, `days.js` or `pack.js` in `auctions/`, has changed) |
+| `node tools/cloud.mjs deploy` | put the function in the cloud, and the one that takes in QuestieDB with it (and again whenever anything in `functions/`, or `houses.js`, `days.js`, `pack.js` or `sells.js` in `auctions/`, has changed) |
 | `node tools/cloud.mjs logs` | what the last runs said (`--only=auctions`: of this function alone) |
 | `node tools/cloud.mjs rules` | publish `atlasdb/rules.json` as the database's rules (the same as pasting it into the console) |
 
 Which regions it reads is `AUCTION_REGIONS` in `functions/.env` (`us`; `us,eu,kr,tw` for all
-four). For the Americas it reads about 77 MB of lists an hour and writes under 2 MB; a run takes
-about 20 seconds.
+four). For the Americas it reads about 115 MB of lists an hour and writes about 10 MB (3 MB of prices,
+and every auction still up, to be followed: 1,250,000 of them in twelve houses); a run takes
+about 25 seconds.
 
 If the publishing is ever given up, `/market` should be deleted from the database with it:
 nothing else takes away what is there, and it may not be kept past 30 days.
@@ -3860,13 +4047,14 @@ name, and reading prices sends nothing but the request for a house.
 The pieces. In a copy of the map: `auctions/share.js` (fetching a house from the database),
 `store.js` (what a computer keeps), `days.js` (days, and the 30 of them), `pack.js` (how prices
 are written in the database), `houses.js` (which house is which), `tsm.js` (TradeSkillMaster's
-files), `craft.js` (what a recipe costs), `view.js` (the list, an item's history and the recipes
-as the page takes them), `server/auctions.js` (the map fetching by itself),
+files), `sells.js` (what sells: the figures kept, and how often a thing sells made from them),
+`craft.js` (what a recipe costs), `view.js` (the list, an item's history and the recipes
+as the page takes them), `server/auctions.js` (the map fetching by itself), `server/market.js` (prices and what sells, written for the addon),
 `viewer/js/prices.js` (the page), `extractor/jobs/items.js` (every item's name, kind, armor,
 damage and stats), `extractor/jobs/recipes.js` (every recipe) and `extractor/hotfix.js` (what
 the game was sent after its files were made, laid over its tables: four items in ten are known
-to it from there alone). In the cloud: `functions/` (the scheduled function; `prepare.mjs`
-copies in the three files it shares with the map), put there with `tools/cloud.mjs`.
+to it from there alone). In the cloud: `functions/` (the scheduled function, and `track.js`, which follows every
+auction from list to list; `prepare.mjs` copies in the files it shares with the map), put there with `tools/cloud.mjs`.
 
 ## What your other addons ask of QuestieDB, Questie and Auctionator
 
@@ -4041,8 +4229,9 @@ The map is built from your own installed game. What else it draws on, and where 
 | The timetables of boats, zeppelins and the tram (`viewer/transit.json`, `addon/AzerothAtlas/TransitData.lua`) | **DockWatch** by Wyveryx (MIT), recorded in the game; **NauticusClassicResurrected** (MIT) by way of **ForeverTransport** by Stilo | Included |
 | Guides in the game | **Guidelime** and **RestedXP**, whichever you run, with the guides you have for them | Followed as they run in your game. Not included. One line of each is changed in your own copy, unless you switch that off (see "Guides in the game") |
 | How an item's stats, armor and damage are worked out, and where the game keeps its recipes | **forever-ref** by alcaras (github.com/alcaras/forever-ref), which found that this game uses the formulas TrinityCore worked out for the client, and checked its results against Wowhead | The method only. The code is this project's own; its results were held against forever-ref's |
-| Auction prices | **Blizzard Entertainment**'s game data (its API for developers) | Read hourly by a scheduled function of the database's own; in the database for 30 days, not in the download. Handed on to the game where the box Auctionator is ticked |
-| How often and how fast an item sells; a second opinion on its price | **TradeSkillMaster**'s public price files (tradeskillmaster.com) | Fetched by each copy for itself. Not included |
+| Auction prices, and how often things sell as measured by ourselves | **Blizzard Entertainment**'s game data (its API for developers) | Read hourly by a scheduled function of the database's own; in the database for 30 days, not in the download. Handed on to the game for the addon's item tooltips, and where the box Auctionator is ticked |
+| How often and how fast an item sells, until our own readings say; what it sells for; a second opinion on its price | **TradeSkillMaster**'s public price files (tradeskillmaster.com). Pricing data from TradeSkillMaster | Fetched by each copy for itself, and not handed on in bulk. Not included |
+| What disenchanting gives | The original game's tables as the **Warcraft Wiki** has them (warcraft.wiki.gg/wiki/Disenchanting_tables) | Written into the addon. Not checked for this game |
 | Facts in the Atlas database marked `w`: what a creature or quest is, and where QuestieDB is silent | **Wowhead** (wowhead.com/forever) | Read by the database's maintainer; in the database, not in the download |
 
 ## Reporting a problem

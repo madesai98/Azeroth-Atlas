@@ -28,6 +28,7 @@ import { writeDropsAddon } from './drops.js';
 import { writeBookAddon } from './questbook.js';
 import { standinStatus, applyStandins, setWant, switchOn, pricesMode } from './standins.js';
 import { writePricesAddon } from './prices.js';
+import { writeMarketAddon, marketWanted } from './market.js';
 import { writeFactsAddon } from './facts.js';
 import { Auctions } from './auctions.js';
 import { openLogs, logDir, note, noteCrashes } from './log.js';
@@ -117,6 +118,16 @@ const handPrices = () => {
     return r;
   } catch (err) { note('auctions', 'the auction prices could not be written for the game', { error: err.message }); return null; }
 };
+// (and what things fetch at the auction houses and how often they sell, by which the addon says in an item's tooltip
+// what to do with a thing you are getting rid of - market.js. Looked at when the map starts, each time the prices
+// have been fetched, and when the addon is installed.)
+const handMarket = () => {
+  try {
+    const r = writeMarketAddon(cfg);
+    if (r?.written) note('auctions', 'auction prices and how often things sell, written for the addon', { items: r.items, house: r.house, neutral: r.neutral ?? undefined, listed: r.t, fresh: r.fresh || undefined });
+    return r;
+  } catch (err) { note('auctions', 'the auction prices and what sells could not be written for the addon', { error: err.message }); return null; }
+};
 // The database fetched anew: the map's creatures, NPCs and quests are built again with it, by
 // itself. A short job - only the maps the database changed anything on are done again - and
 // the one way what the other copies have learned reaches this one's map without anybody having
@@ -175,14 +186,17 @@ combat?.start();
 // (Where the box "Auctionator" is ticked and the game has one - the map's stand-in, or your own with the map's
 // prices given through it - the addons there are answered with these prices: they are kept fresh while the game
 // runs, looked at once as the map starts, and handed on after every look.)
-const pricesWanted = () => { try { return !!pricesMode(cfg); } catch { return false; } };
+// (And where Azeroth Atlas is in the game and a house is chosen, the addon says what to do with a thing you are
+// getting rid of, by the same prices and by how often things sell: kept fresh and handed on likewise - market.js.)
+const pricesWanted = () => { try { return !!pricesMode(cfg) || marketWanted(cfg); } catch { return false; } };
 const auctions = new Auctions(cfg, configFile, {
   hold: () => job.running,
   wanted: () => ['live', 'minimized', 'nosignal'].includes(tracker.state?.status) && pricesWanted(),
-  after: () => handPrices(),
+  after: () => { handPrices(); handMarket(); },
 });
 auctions.start();
 handPrices();
+handMarket();
 if (pricesWanted()) auctions.touch();
 const VIEWER_DIR = path.join(PROJECT_ROOT, 'viewer');
 // The page's own files, watched: a page that is open loads itself again when they change (changes.js).
@@ -447,6 +461,8 @@ const server = http.createServer((req, res) => {
       if (install && handDrops()?.fresh) st.restart = true;
       // (and what quests give, likewise)
       if (install && handBook()?.fresh) st.restart = true;
+      // (and what things fetch at auction, likewise)
+      if (install && handMarket()?.fresh) st.restart = true;
       if (install) note('addon', `the addon was installed in the game's folder: version ${st.installedVersion ?? '?'}`, { restartNeeded: st.restart, carriedOver: st.carried ?? undefined, current: st.current, mailboxes: st.mail });
       else if (guides) note('addon', st.taught ? 'guide addons taught about floors' : 'guide addons put back as their makers wrote them', { changed: st.done, asTheyAre: st.guides?.addons });
       else if (changedAddon(st)) note('addon', 'the addon in the game\'s folder', { installed: st.installed, version: st.installedVersion, brought: st.version, current: st.current, mailboxes: st.mail, oldCopy: st.legacy || undefined, guides: st.guides, why: st.reason });
