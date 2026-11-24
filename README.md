@@ -3937,14 +3937,30 @@ What it cannot see, and so what the figures lean towards: sold and taken down lo
 (half of the "again" ones are taken to be the second, a guess until there are weeks of
 readings to fit it to); an auction put up and bought within the hour is never seen; and what
 is counted as having run its time may have been bought in its last hour. Nothing is counted
-across a gap of more than five hours between lists. It began on 23 November 2026: figures for
-an item mean something once a few of its auctions have ended, which for most items is a
-matter of days, and for the rare ones of weeks.
+across a gap of more than five hours between lists.
+
+**From when an auction is counted.** An auction that goes early is known the hour it goes; one
+that runs its time, only when that is up. So for as long as an auction lasts after the
+following begins, the only ones that have ended are those that went early - and counted, they
+say everything sells: an hour and a half after it began on 23 November 2026, every 8-hour and
+24-hour auction that had ended (11,000 at one house) had "gone before its time". So nothing of
+a length is counted until the following has gone on, without a long gap, for as long as such
+an auction lasts and one list more: the 2-hour figures begin three hours on, the 8-hour ones
+nine, the 24-hour ones a day and an hour - and then figures for an item mean something once a
+few of its auctions have ended, which for most items is a matter of days, and for the rare
+ones of weeks. The lists are an hour apart to within seconds, and a list up to five minutes
+late is allowed for; without that, whether a 2-hour auction gone at the very next list had
+"gone before its time" hung on those seconds (none had at one house, all at another). The
+figures made before this was put right (24 November) are not added to: the function began
+them anew, each making of the figures has a number (`auctions/sells.js`: `FIGURES`), and a
+copy does not go by figures of another.
 
 In the database: `/market/sells/<house>/d<day>` (what ended that day), `/market/sell/<house>`
 (the last 30 days together: what a copy reads), `/market/sell/all-<region>` (every house of the
 region together, made once a day), and `/track/<house>` (every auction still up, as the next
-run needs it: about five bytes an auction, read by the function alone). A copy fetches the
+run needs it: about five bytes an auction, read by the function alone), and
+`/market/sellindex/<house>` (when it was last added to, which making of the figures it is, and
+since when the following has gone on). A copy fetches the
 figures of its own house, of the neutral house that goes with it, and of the region, no more
 often than every six hours, and with them the neutral house as last listed (its prices, not
 its days); all of it is deleted after 30 days like everything made from Blizzard's lists.

@@ -24,7 +24,10 @@
 //   /market/sell/<house>                  the same for the last 30 days together: what a copy reads
 //   /market/sell/all-<region>             ...and for every house of the region together: what a copy
 //                                         goes by for an item its own house has no readings of
-//   /market/sellindex/<house>             { t, ended, went, items }: when that was last added to
+//   /market/sellindex/<house>             { t, v, since, ended, went, young, items }: when that was last
+//                                         added to, which making of the figures it is (sells.js:
+//                                         FIGURES - figures of another making are not added to:
+//                                         they begin anew), since when the following has gone on
 //   /track/<house>                        every auction still up, as the next run needs it (only
 //                                         this function reads it: it is no part of /market)
 //
@@ -35,7 +38,7 @@ import { summarise } from './summary.js';
 import { RULESETS, housesOf, parseHouse } from './shared/houses.js';
 import { pack, unpack } from './shared/pack.js';
 import { KEEP_DAYS, KEEP_LOOKS, dayOf, dayStart, daysBefore, mergeDay, oldestKept } from './shared/days.js';
-import { addRows } from './shared/sells.js';
+import { addRows, FIGURES } from './shared/sells.js';
 import { follow, packState, unpackState } from './track.js';
 
 const SWEEP = 90; // how many days back the deleting reaches on each run (nothing older can be there: see below)
@@ -47,7 +50,7 @@ const SWEEP = 90; // how many days back the deleting reaches on each run (nothin
  *          listed: when the newest list among these houses was made (seconds; 0: none is known)
  */
 export async function lookAndPublish(api, db, regions, { log = () => {}, now = () => Date.now() / 1000, reader = null } = {}) {
-  const out = { sent: [], same: [], failed: [], written: 0, listed: 0, followed: { up: 0, fresh: 0, ended: 0, went: 0 } };
+  const out = { sent: [], same: [], failed: [], written: 0, listed: 0, followed: { up: 0, fresh: 0, ended: 0, went: 0, young: 0 } };
   const index = (await db.get('market/index')) ?? {};
   for (const region of regions) {
     for (const house of housesOf(region)) {
@@ -85,14 +88,17 @@ export async function lookAndPublish(api, db, regions, { log = () => {}, now = (
         if (f) {
           // what ended since the list before: into its day, and into the 30 days together -
           // which first lose every day that has fallen out of them since this house was last listed
-          const sold = addRows(unpack(await db.get(`market/sells/${house}/d${day}`)), f.rows);
-          let total = stale ? {} : unpack(await db.get(`market/sell/${house}`));
+          // (figures of another making - sells.js: FIGURES - are not added to: they begin anew, their days with them)
+          const anew = !stale && ((await db.get(`market/sellindex/${house}`))?.v ?? 1) !== FIGURES;
+          if (anew) await db.patch('market', { [`sells/${house}`]: null, [`sell/${house}`]: null });
+          const sold = addRows(anew ? {} : unpack(await db.get(`market/sells/${house}/d${day}`)), f.rows);
+          let total = stale || anew ? {} : unpack(await db.get(`market/sell/${house}`));
           const oldest = oldestKept(now());
-          for (let d = oldestKept(had || now()); d < oldest; d = dayOf(dayStart(d) + 86400 + 43200)) total = addRows(total, unpack(await db.get(`market/sells/${house}/d${d}`)), -1);
+          for (let d = oldestKept(had || now()); !anew && d < oldest; d = dayOf(dayStart(d) + 86400 + 43200)) total = addRows(total, unpack(await db.get(`market/sells/${house}/d${d}`)), -1);
           total = addRows(total, f.rows);
           request[`sells/${house}/d${day}`] = pack(sold);
           request[`sell/${house}`] = pack(total);
-          request[`sellindex/${house}`] = { t, up: f.seen.up, ended: f.seen.ended, went: f.seen.went, items: Object.keys(total).length };
+          request[`sellindex/${house}`] = { t, v: FIGURES, since: Math.round(f.state.since), up: f.seen.up, ended: f.seen.ended, went: f.seen.went, young: f.seen.young, items: Object.keys(total).length };
           for (const k of Object.keys(out.followed)) out.followed[k] += f.seen[k];
           out.written += request[`sells/${house}/d${day}`].length + request[`sell/${house}`].length;
         }
@@ -120,15 +126,19 @@ export async function lookAndPublish(api, db, regions, { log = () => {}, now = (
   for (const region of regions) {
     try {
       const day = dayOf(now());
-      if (!out.sent.some((house) => house.startsWith(`${region}-`)) || (await db.get(`market/sellindex/all-${region}`))?.day === day) continue;
+      const made = await db.get(`market/sellindex/all-${region}`);
+      if (!out.sent.some((house) => house.startsWith(`${region}-`)) || (made?.day === day && made.v === FIGURES)) continue;
       let total = {}, houses = 0;
       for (const house of housesOf(region)) {
+        // (only figures of this making: a house whose figures have not begun anew yet is left out)
+        if (((await db.get(`market/sellindex/${house}`))?.v ?? 1) !== FIGURES) continue;
         const rows = unpack(await db.get(`market/sell/${house}`));
         if (Object.keys(rows).length) { total = addRows(total, rows); houses++; }
       }
-      if (!houses) continue;
+      // (none yet, where there were figures of another making: those are taken away)
+      if (!houses) { if (made && made.v !== FIGURES) await db.patch('market', { [`sell/all-${region}`]: null, [`sellindex/all-${region}`]: null }); continue; }
       const text = pack(total);
-      await db.patch('market', { [`sell/all-${region}`]: text, [`sellindex/all-${region}`]: { t: Math.floor(now()), day, houses, items: Object.keys(total).length } });
+      await db.patch('market', { [`sell/all-${region}`]: text, [`sellindex/all-${region}`]: { t: Math.floor(now()), v: FIGURES, day, houses, items: Object.keys(total).length } });
       out.written += text.length;
       log(`${region}: what sells in its ${houses} houses together, ${Object.keys(total).length.toLocaleString()} items, published`);
     } catch (err) { log(`${region}: its houses together could not be written (${err.message})`); }

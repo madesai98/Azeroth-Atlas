@@ -55,7 +55,7 @@ import { writeFileAtomic } from '../extractor/container.js';
 import { AuctionStore, KEEP_DAYS, dayOf, dayStart } from '../auctions/store.js';
 import { auctionSettings } from '../auctions/settings.js';
 import { parseHouse, neutralOf, costsOf, SIDES, RULESETS } from '../auctions/houses.js';
-import { chances, DURATIONS } from '../auctions/sells.js';
+import { chances, DURATIONS, FIGURES } from '../auctions/sells.js';
 import { readTsm } from '../auctions/tsm.js';
 import { readYields } from '../atlasdb/yields.js';
 import { addonsDir } from './addon.js';
@@ -131,8 +131,9 @@ export function marketFigures(cfg, now = Date.now() / 1000) {
     const own = days.get(item);
     return own && own.length >= OWN_DAYS ? ASK_MOST * middle(own) : 0;
   };
-  const regional = store.sells(`all-${region}`);
-  const all = young(regional) ? regional.items : {};
+  // (our own readings: only of this making of the figures - sells.js: FIGURES)
+  const ours = (x) => (young(x) && x.v === FIGURES ? x.items : {});
+  const all = ours(store.sells(`all-${region}`));
   let credit = false;
   const houses = [];
   for (const key of keys) {
@@ -165,8 +166,7 @@ export function marketFigures(cfg, now = Date.now() / 1000) {
       }
     }
     if (!items.size) continue;
-    const own = store.sells(key);
-    const mine = young(own) ? own.items : {};
+    const mine = ours(store.sells(key));
     for (const [item, row] of items) {
       // (the neutral houses: our own readings of that house and nothing else - see the top of this file)
       const prior = !neutral && rate >= 0 ? soundRate(tsm.items?.[item]?.[rate], perDay >= 0 ? tsm.items?.[item]?.[perDay] : 0) : null;

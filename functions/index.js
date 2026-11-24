@@ -64,7 +64,7 @@ export const auctions = onSchedule({
   const regions = AUCTION_REGIONS.value().split(',').map((r) => r.trim().toLowerCase()).filter((r) => REGIONS.includes(r));
   const api = new Blizzard({ id: CLIENT_ID.value().trim(), secret: CLIENT_SECRET.value().trim() });
   const r = await lookAndPublish(api, db, regions, { log: (line) => console.log(line), reader: 'cloud' });
-  console.log(`auctions: ${r.sent.length} houses published, ${r.same.length} had no newer list, ${r.failed.length} failed; ${r.requests} requests to Blizzard (${(r.bytes / 1e6).toFixed(1)} MB), ${(r.written / 1024).toFixed(0)} KB written; auctions followed: ${r.followed.up} up, ${r.followed.fresh} new, ${r.followed.ended} ended of which ${r.followed.went} before their time`);
+  console.log(`auctions: ${r.sent.length} houses published, ${r.same.length} had no newer list, ${r.failed.length} failed; ${r.requests} requests to Blizzard (${(r.bytes / 1e6).toFixed(1)} MB), ${(r.written / 1024).toFixed(0)} KB written; auctions followed: ${r.followed.up} up, ${r.followed.fresh} new, ${r.followed.ended} ended of which ${r.followed.went} before their time (${r.followed.young} more ended and not counted yet: followed for less long than they last)`);
   // (a run in which nothing at all could be read is a failed run: it shows as one in the logs)
   if (r.failed.length && !r.sent.length && !r.same.length) throw new Error(`no house could be read: ${r.failed.slice(0, 3).map((f) => f.join(' ')).join('; ')}`);
   for (const [house, why] of r.failed) console.warn(`auctions: ${house} failed: ${why}`);

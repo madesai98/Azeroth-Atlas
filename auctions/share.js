@@ -13,6 +13,7 @@ import { KEEP_DAYS, KEEP_HOURS, dayOf, dayStart, oldestKept } from './days.js';
 import { unpack } from './pack.js';
 
 export { pack, unpack } from './pack.js';
+import { FIGURES } from './sells.js';
 
 const SELLS_EVERY = 6 * 3600; // seconds: what sells changes slowly - a copy asks for it no more often than this
 
@@ -37,16 +38,19 @@ export async function pullNow(db, store, house) {
  * measured it over the last 30 days, fetched where the database has something newer than this
  * computer - and asked for no more often than every six hours.
  * @param key  a house ('us-110'), or every house of a region together ('all-us')
+ * Kept with which making of the figures it is (sells.js: FIGURES): what this computer has of
+ * another making is asked after at once, whenever it was last asked - and nobody goes by it.
  * @returns { key, t, fetched } or null when there are no figures yet
  */
 export async function pullSells(db, store, key, now = Date.now() / 1000) {
   const have = store.sells(key);
-  if (have && now - (have.at ?? 0) < SELLS_EVERY) return { key, t: have.t, fetched: 0 };
+  if (have && have.v === FIGURES && now - (have.at ?? 0) < SELLS_EVERY) return { key, t: have.t, fetched: 0 };
   const idx = await db.get(`market/sellindex/${key}`);
   if (!idx?.t || idx.t < now - KEEP_DAYS * 86400) return null;
-  if (have && have.t >= idx.t) { store.write(`${key}/sell.json`, { ...have, at: Math.floor(now) }); return { key, t: have.t, fetched: 0 }; }
+  const v = idx.v ?? 1;
+  if (have && have.t >= idx.t && have.v === v) { store.write(`${key}/sell.json`, { ...have, at: Math.floor(now) }); return { key, t: have.t, fetched: 0 }; }
   const items = unpack(await db.get(`market/sell/${key}`));
-  store.write(`${key}/sell.json`, { t: idx.t, at: Math.floor(now), items });
+  store.write(`${key}/sell.json`, { t: idx.t, v, at: Math.floor(now), items });
   return { key, t: idx.t, fetched: 1 };
 }
 

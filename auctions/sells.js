@@ -24,6 +24,11 @@
 //                             auction of the same item appear in the very same list (the same
 //                             number of pieces): more likely taken down and put up again than sold
 //
+// From when: nothing of a length is counted until the following has gone on for as long as such
+// an auction lasts (track.js says why: until then only the ones that went early can have ended).
+// So after the following begins - or begins again after a long gap - the 2-hour figures start
+// three hours on, the 8-hour ones nine, the 24-hour ones a day and an hour.
+//
 // What it cannot see, and so what the figures lean towards:
 //   - sold and taken down look the same (`again` is a hint of how much of it is the second);
 //   - the lists are an hour apart: an auction put up and bought within the hour is never seen
@@ -33,6 +38,13 @@
 // Kept thirty days and no longer, like everything made from Blizzard's lists (days.js).
 
 export const DURATIONS = [2, 8, 24];   // hours an auction can be put up for in this game
+/**
+ * Which making of the figures this is. The function writes it beside them, begins them anew
+ * where what is there is of another, and a copy does not go by figures of another. (1: counted
+ * from the first hour, which leaned high for as long as an auction lasts. 2: from when what
+ * runs its time can have ended too.)
+ */
+export const FIGURES = 2;
 export const FIELDS = ['r2', 's2', 'r8', 's8', 'r24', 's24', 'lr2', 'ls2', 'lr8', 'ls8', 'lr24', 'ls24', 'lh', 'sold', 'again'];
 export const F = Object.fromEntries(FIELDS.map((f, i) => [f, i]));
 export const WIDTH = FIELDS.length;
