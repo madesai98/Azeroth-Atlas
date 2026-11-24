@@ -50,7 +50,8 @@ export async function pullSells(db, store, key, now = Date.now() / 1000) {
   const v = idx.v ?? 1;
   if (have && have.t >= idx.t && have.v === v) { store.write(`${key}/sell.json`, { ...have, at: Math.floor(now) }); return { key, t: have.t, fetched: 0 }; }
   const items = unpack(await db.get(`market/sell/${key}`));
-  store.write(`${key}/sell.json`, { t: idx.t, v, at: Math.floor(now), items });
+  // (with since when sales have been counted, for "so many a day", and the hours of the day: sells.js)
+  store.write(`${key}/sell.json`, { t: idx.t, v, at: Math.floor(now), from: idx.pfrom > 0 ? idx.pfrom : null, hours: typeof idx.hours === 'string' ? idx.hours : null, items });
   return { key, t: idx.t, fetched: 1 };
 }
 

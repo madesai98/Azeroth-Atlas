@@ -63,7 +63,7 @@ export class AuctionStore {
   }
 
   now(house) { return this.read(`${house}/now.json`); }
-  /** What sells there (sells.js), as last fetched: { t, v (which making of the figures: sells.js, FIGURES), at, items } - `key` a house, or 'all-us' for every house of a region together. */
+  /** What sells there (sells.js), as last fetched: { t, v (which making of the figures: sells.js, FIGURES), at, from (since when sales have been counted), hours (the hours of the day: sells.js, unpackHours), items } - `key` a house, or 'all-us' for every house of a region together. */
   sells(key) { return this.read(`${key}/sell.json`); }
   day(house, day) { return this.read(`${house}/days/${day}.json`); }
   hours(house, day) { return this.read(`${house}/hours/${day}.json.gz`); }

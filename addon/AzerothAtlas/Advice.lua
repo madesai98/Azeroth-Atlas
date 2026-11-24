@@ -1,9 +1,14 @@
 -- Azeroth Atlas: what to do with a thing you are getting rid of.
 --
 -- With the mouse on an item, one line is added to the game's own tooltip that says what to do
--- with it if you do not want it: sell it to a vendor, put it up at your side's auction house or
--- at the neutral one, or disenchant it - whichever brings the most, of the ways that are safe
--- enough by your own weights (below). With Shift held, every way is listed with what it brings.
+-- with it if you do not want it, in one of six words, each in a colour of its own: VENDOR,
+-- AUCTION (your side's house, and for how many hours), NEUTRAL AUCTION, DISENCHANT VENDOR,
+-- DISENCHANT AUCTION, DISENCHANT NEUTRAL AUCTION (disenchant it, and take what it gives there) -
+-- whichever brings the most, of the ways that are safe enough by your own weights (below).
+-- With Shift held, every way is listed with all that is known of it: for an auction the lowest
+-- buyout and what lands with you if it sells (the price less the house's cut), then for 2, 8
+-- and 24 hours how often it sells if you put it up now, the deposit at stake and what one
+-- piece brings on average; how many sell in a day; what the chance rests on.
 --
 -- What a way brings, for one piece:
 --
@@ -12,6 +17,11 @@
 --                        thing sells of the times it is put up - and for the times it does not,
 --                        what a vendor pays less the deposit, which the house keeps. Reckoned for
 --                        2, 8 and 24 hours (the deposit and the chance differ), the best is taken.
+--                        The price is the lowest anybody asks: what you have to match. Things do
+--                        not sell at the same pace all day, so the chance of a 2-hour and an
+--                        8-hour auction is that of one put up NOW: by the hour of the world's
+--                        clock, as the 3D map measured the hours of the day at the house (and
+--                        for an item that sells at hours of its own, its own).
 --   Disenchanting        what it gives on average, by the kind of thing it is (the tables below),
 --                        each material taken to a vendor, or to either auction house as above.
 --
@@ -42,6 +52,8 @@
 --   - prices are for one piece, of a list read up to an hour before the game was last started.
 --     What is asked is not what a thing sells for: the 3D map reckons a price at no more than
 --     twice what the thing sells for, where that is known, and the list says where it did;
+--   - what became of your own auctions - put up, sold, run out, taken down, and what the house
+--     asked and kept - is noted by Sales.lua, shown with the item, and goes to the Atlas database;
 --   - nothing with any value the game hands over as "secret": left alone, not worked around.
 --
 -- /atlas advice              whether it is on, the weights, and how old the prices are
@@ -53,7 +65,7 @@
 local shared = AzerothAtlas
 if type(shared) ~= "table" then return end
 
-local match, gmatch, format, floor = string.match, string.gmatch, string.format, math.floor
+local match, gmatch, gsub, format, floor, sub = string.match, string.gmatch, string.gsub, string.format, math.floor, string.sub
 
 local HEAD = "|cff7fd4ff"   -- (the addon's blue)
 local GOOD = "|cff40e040"
@@ -80,6 +92,8 @@ local function say(text) print("|cff7fd4ffAzeroth Atlas|r: " .. text) end
 -- ---- the switches ---------------------------------------------------------------------------------
 local stamp = 0 -- (raised with every change of a setting: what was worked out before is worked out again)
 function shared.AdviceOn() return DB().advice ~= false end
+-- (something the advice shows has changed - your own auctions, say: worked out again the next time it is asked for)
+function shared.AdviceStamp() stamp = stamp + 1 end
 function shared.SetAdvice(on)
   if on then DB().advice = nil else DB().advice = false end
   stamp = stamp + 1
@@ -117,28 +131,61 @@ end
 -- As the 3D map wrote them - or nothing (none written yet, or written for another version of this).
 local function Market()
   local m = rawget(_G, "AzerothAtlasMarket")
-  if type(m) ~= "table" or m.v ~= 1 or type(m.of) ~= "table" or type(m.houses) ~= "table" then return nil end
+  if type(m) ~= "table" or m.v ~= 2 or type(m.of) ~= "table" or type(m.houses) ~= "table" then return nil end
   local own = m.houses[1]
   if type(own) ~= "table" or type(own.deposit) ~= "table" or type(own.cut) ~= "number" then return nil end
   return m
 end
 
--- An item's line, a house each: { price, low, age, chance = { [2], [8], [24] }, from } - or nothing for a house that has nothing of it.
+-- An item's line, a house each: { price (the lowest asked, as it is reckoned with), low (as it is
+-- asked; 0: not for sale now), age, chance = { [2], [8], [24] }, from, n (auctions of the house
+-- behind it), day (pieces sold a day; nothing: not known), dayFrom, sale (what it sells for; 0:
+-- not known) } - or nothing for a house that has nothing of it.
 local function RowsOf(m, item)
   local text = m.of[item]
   if type(text) ~= "string" then return nil end
   local out, k = {}, 0
   for part in gmatch(text .. "|", "(.-)|") do
     k = k + 1
-    local price, low, age, c2, c8, c24, from = match(part, "^(%d+) (%d+) (%d+) (%S+) (%S+) (%S+) (%d)$")
+    local price, low, age, c2, c8, c24, from, n, day, dayFrom, sale = match(part, "^(%d+) (%d+) (%d+) (%S+) (%S+) (%S+) (%d) (%d+) (%S+) (%d) (%d+)$")
     price = tonumber(price)
     if price and price > 0 then
-      c2, c8, c24 = tonumber(c2), tonumber(c8), tonumber(c24)
-      out[k] = { price = price, low = tonumber(low) or 0, age = tonumber(age) or 0, from = tonumber(from) or 0,
+      c2, c8, c24, day = tonumber(c2), tonumber(c8), tonumber(c24), tonumber(day)
+      out[k] = { price = price, low = tonumber(low) or 0, age = tonumber(age) or 0, from = tonumber(from) or 0, n = tonumber(n) or 0,
+        day = day and day / 10 or nil, dayFrom = tonumber(dayFrom) or 0, sale = tonumber(sale) or 0,
         chance = { [2] = c2 and c2 / 1000 or nil, [8] = c8 and c8 / 1000 or nil, [24] = c24 and c24 / 1000 or nil } }
     end
   end
   return out
+end
+
+-- How the hours ahead stand to the usual, for an auction of an item put up NOW at a house: 1 as
+-- usual, 2 twice as fast. Things do not sell at the same pace all day: the 3D map writes, for
+-- every hour of the world's clock, how the next 2 and the next 8 hours stand to the hours
+-- auctions are usually up in - for the house, and for an item that sells at hours of its own.
+-- (For 24 hours the hour makes no difference: every hour of the day is in them.)
+local PACE_LEAST = 0.05
+local function Pace(m, k, item, hours)
+  if hours >= 24 then return 1 end
+  local h = m.houses[k]
+  if type(h) ~= "table" or type(time) ~= "function" then return 1 end
+  local text = nil
+  local own = type(m.hours) == "table" and m.hours[item] or nil
+  if type(own) == "string" then
+    local i = 0
+    for part in gmatch(own .. "|", "(.-)|") do
+      i = i + 1
+      if i == k and #part == 48 then text = hours == 2 and sub(part, 1, 24) or sub(part, 25, 48) end
+    end
+  end
+  if not text and type(h.pace) == "table" then text = h.pace[hours] end
+  if type(text) ~= "string" or #text ~= 24 then return 1 end
+  local hour = floor((time() - (tonumber(h.at) or 0)) / 3600) % 24
+  local v = tonumber(sub(text, hour + 1, hour + 1), 36)
+  if not v then return 1 end
+  v = v / 10
+  if v < PACE_LEAST then v = PACE_LEAST end
+  return v
 end
 
 -- ---- what the game says of an item ------------------------------------------------------------------
@@ -302,49 +349,68 @@ local function Safe(net, vendor, chance, deposit, own24, gain, risk)
   return gain * over - risk * (1 - chance) * 100 * stake > 0
 end
 
--- An auction of one piece at a house: { price, net (after the cut), age, from, hours, chance,
--- deposit, worth (on average), safe } - hours and the rest of the best length there is a chance
--- for (of the safe ones, where any is). Nothing where the house has no price for it; worth is
--- nothing where it is not known how often it sells.
-local function Auction(m, k, row, vendor, gain, risk)
+-- Does a way bring enough more than the vendor, on average, to be advised over it? (So many per cent more, and a copper at the least.)
+local function Better(worth, vendor) return worth >= vendor * (1 + shared.AdviceLeast() / 100) and worth >= vendor + 1 end
+
+-- An auction of one piece at a house: { price, low, net (what lands with you if it sells: the
+-- price less the house's cut), cut, age, from, n, day, dayFrom, sale, house, lengths = { one for
+-- 2, 8 and 24 hours: { hours, deposit, usual (how often it sells, whenever it is put up), pace
+-- (how the hours ahead stand to the usual), chance (put up now), worth (on average), safe, good
+-- (safe, and enough better than the vendor) } }, best (the length to put it up for: a good one
+-- before a safe one before the rest, of two alike the one that brings more) and that length's
+-- hours, chance, deposit, worth, safe, good }. Nothing where the house has no price for it; no
+-- best and no worth where it is not known how often it sells.
+local function Auction(m, k, item, row, vendor, gain, risk)
   local h = m.houses[k]
-  if not row or type(h) ~= "table" then return nil end
-  local net = row.price * (1 - (tonumber(h.cut) or 0) / 100)
-  local out = { price = row.price, low = row.low, net = net, age = row.age, from = row.from, house = k }
+  if not row or type(h) ~= "table" or type(h.deposit) ~= "table" then return nil end
+  local cut = tonumber(h.cut) or 0
+  local net = row.price * (1 - cut / 100)
+  local out = { price = row.price, low = row.low, net = net, cut = cut, age = row.age, from = row.from, n = row.n, day = row.day, dayFrom = row.dayFrom, sale = row.sale, house = k, lengths = {} }
   local own24 = tonumber(m.houses[1].deposit[24]) or 60
+  local best = nil
   for i = 1, #DURATIONS do
     local hours = DURATIONS[i]
-    local chance, percent = row.chance[hours], tonumber(h.deposit[hours])
-    if chance and percent then
-      local deposit = Deposit(vendor, percent)
-      local worth = chance * net + (1 - chance) * (vendor - deposit)
-      local safe = Safe(net, vendor, chance, deposit, own24, gain, risk)
-      -- (a safe length before one that is not; of two alike, the one that brings more)
-      if out.worth == nil or (safe and not out.safe) or (safe == out.safe and worth > out.worth) then
-        out.hours, out.chance, out.deposit, out.worth, out.safe = hours, chance, deposit, worth, safe
+    local percent = tonumber(h.deposit[hours])
+    if percent then
+      local l = { hours = hours, deposit = Deposit(vendor, percent) }
+      local usual = row.chance[hours]
+      if usual then
+        l.usual = usual
+        l.pace = Pace(m, k, item, hours)
+        l.chance = 1 - (1 - usual) ^ l.pace
+        l.worth = l.chance * net + (1 - l.chance) * (vendor - l.deposit)
+        l.safe = Safe(net, vendor, l.chance, l.deposit, own24, gain, risk)
+        l.good = l.safe and Better(l.worth, vendor)
+        if best == nil or (l.good and not best.good) or (l.good == best.good and ((l.safe and not best.safe) or (l.safe == best.safe and l.worth > best.worth))) then best = l end
       end
+      out.lengths[#out.lengths + 1] = l
     end
   end
+  if best then out.best, out.hours, out.chance, out.deposit, out.worth, out.safe, out.good = best, best.hours, best.chance, best.deposit, best.worth, best.safe, best.good end
   return out
 end
 
 -- ---- every way, and the best ---------------------------------------------------------------------------
--- Does a way bring enough more than the vendor, on average, to be advised over it? (So many per cent more, and a copper at the least.)
-local function Better(worth, vendor) return worth >= vendor * (1 + shared.AdviceLeast() / 100) and worth >= vendor + 1 end
-
-local function HouseName(m, k)
-  local h = m.houses[k]
-  local name = type(h) == "table" and type(h.name) == "string" and h.name or (k == 1 and "Your" or "Neutral")
-  return name
-end
+-- The six ways, as the advice names them, each in a colour of its own.
+local WAYS = {
+  vendor = { "VENDOR", "|cffffd100" },
+  auction = { "AUCTION", "|cff40e040" },
+  neutral = { "NEUTRAL AUCTION", "|cffff9d3c" },
+  dvendor = { "DISENCHANT VENDOR", "|cffc79cff" },
+  dauction = { "DISENCHANT AUCTION", "|cffff6ec7" },
+  dneutral = { "DISENCHANT NEUTRAL AUCTION", "|cff4fd8e8" },
+}
+local function Neutral(m, k) return type(m.houses[k]) == "table" and m.houses[k].side == "neutral" end
 
 -- What to do with one piece of an item: { item, name, stack, ways = { ... }, best (one of the
--- ways, or nothing: there is nothing to go by), bound, old (seconds the prices are old, where
--- that is old: worked out when it is said), credit } - or nothing where nothing is to be said (the game has not heard of
--- the item, or there are no prices and no vendor takes it).
--- A way: { kind ("vendor", "auction", "disenchant"), house (1 your own, 2 the neutral; nothing:
--- the vendor), worth (what it brings on average; nothing: not known), sold (what it brings if
--- everything sells), hours, chance, safe, why (what keeps it from being the advice), gives }.
+-- ways, or nothing: there is nothing to go by), bound, credit, market, listed } - or nothing
+-- where nothing is to be said (the game has not heard of the item, or there are no prices and no
+-- vendor takes it).
+-- A way: { kind ("vendor", "auction", "disenchant"), key (which of the six: WAYS), house (1 your
+-- own, 2 the neutral; nothing: the vendor), worth (what it brings on average; nothing: not
+-- known), sold (what it brings if everything sells), a (the auction: Auction), hours, chance,
+-- safe, why (what keeps it from being the advice), gives (what disenchanting gives), parts (what
+-- the game says of each material), mats (each material's auction) }.
 local function Work(item, bound)
   local facts = Facts(item)
   if not facts then return nil end
@@ -355,18 +421,18 @@ local function Work(item, bound)
   local ways = {}
   local whole = true -- (false: something was not known yet that the game will know in a moment - not kept)
 
-  if vendor > 0 then ways[#ways + 1] = { kind = "vendor", worth = vendor, sold = vendor, safe = true } end
+  if vendor > 0 then ways[#ways + 1] = { kind = "vendor", key = "vendor", worth = vendor, sold = vendor, safe = true } end
 
   local rows = m and RowsOf(m, item) or nil
   if m then
     for k = 1, #m.houses do
-      local a = rows and Auction(m, k, rows[k], vendor, gain, risk) or nil
+      local a = rows and Auction(m, k, item, rows[k], vendor, gain, risk) or nil
       if a then
-        local way = { kind = "auction", house = k, worth = a.worth, sold = a.net, hours = a.hours, chance = a.chance, safe = a.safe == true, price = a.price, low = a.low, age = a.age, from = a.from, deposit = a.deposit }
+        local way = { kind = "auction", key = Neutral(m, k) and "neutral" or "auction", house = k, a = a, worth = a.worth, sold = a.net, hours = a.hours, chance = a.chance, safe = a.safe == true }
         if cannot then way.why = "bound to you"
         elseif a.worth == nil then way.why = "not known how often it sells"
         elseif not a.safe then way.why = "too risky by your weights"
-        elseif not Better(a.worth, vendor) then way.why = "no better than the vendor" end
+        elseif not a.good then way.why = "no better than the vendor" end
         ways[#ways + 1] = way
       end
     end
@@ -384,15 +450,17 @@ local function Work(item, bound)
       local f = Facts(gives[i].item)
       if not f then known = false ; whole = false else sum = sum + gives[i].each * f.sell ; parts[i] = f end
     end
-    if known then ways[#ways + 1] = { kind = "disenchant", worth = sum, sold = sum, safe = true, why = why or (not Better(sum, vendor) and "no better than the vendor" or nil), gives = gives, read = read } end
+    if known then ways[#ways + 1] = { kind = "disenchant", key = "dvendor", worth = sum, sold = sum, safe = true, why = why or (not Better(sum, vendor) and "no better than the vendor" or nil), gives = gives, parts = parts, read = read } end
     -- to each auction house
     if m and known then
       local own24 = tonumber(m.houses[1].deposit[24]) or 60
       for k = 1, #m.houses do
         local worth, sold, deposits, sure, priced, any = 0, 0, 0, 0, true, false
+        local mats = {}
         for i = 1, #gives do
           local r = RowsOf(m, gives[i].item)
-          local a = Auction(m, k, r and r[k] or nil, parts[i].sell, gain, risk)
+          local a = Auction(m, k, gives[i].item, r and r[k] or nil, parts[i].sell, gain, risk)
+          mats[i] = a
           if not a then priced = false
           else
             any = true
@@ -406,7 +474,7 @@ local function Work(item, bound)
           end
         end
         if any and priced then
-          local way = { kind = "disenchant", house = k, worth = worth, sold = sold, gives = gives, read = read }
+          local way = { kind = "disenchant", key = Neutral(m, k) and "dneutral" or "dauction", house = k, worth = worth, sold = sold, gives = gives, parts = parts, mats = mats, read = read }
           if worth ~= nil then
             way.chance = sold > 0 and sure / sold or 0
             way.safe = Safe(sold, vendor, way.chance, deposits, own24, gain, risk)
@@ -447,21 +515,19 @@ local function Ago(seconds)
   if seconds < 2 * 86400 then return format("%d hours", floor(seconds / 3600 + 0.5)) end
   return format("%d days", floor(seconds / 86400 + 0.5))
 end
-
--- What a way is called in the list, and what the advice says of it.
-local function Called(a, w)
-  local m = a.market
-  if w.kind == "vendor" then return "Vendor", "sell to a vendor" end
-  local house = w.house and HouseName(m, w.house) or nil
-  -- ("Alliance house", "neutral house": the neutral one is no side's, and written small)
-  local where = house and ((w.house == 1 and m.houses[1].side ~= "neutral") and (house .. " house") or "neutral house") or nil
-  if w.kind == "auction" then
-    local hours = w.hours and format(", %d h", w.hours) or ""
-    return house .. " auction" .. hours, "auction, " .. where .. hours
-  end
-  if not house then return "Disenchant, then vendor", "disenchant, vendor the materials" end
-  return "Disenchant, then " .. house .. " auction", "disenchant, auction the materials (" .. where .. ")"
+-- How many: to a tenth under ten, whole above, with commas from a thousand.
+local function Count(v)
+  if v < 9.95 then local text = format("%.1f", v) ; return (gsub(text, "%.0$", "")) end
+  local text = format("%d", floor(v + 0.5))
+  local out = ""
+  while #text > 3 do out = "," .. sub(text, -3) .. out ; text = sub(text, 1, -4) end
+  return text .. out
 end
+-- So many pieces of a material: "1.5", "0.05".
+local function Pieces(v) return v >= 0.095 and format("%.1f", v) or format("%.2f", v) end
+
+-- The advice in its colour: "AUCTION".
+local function Verdict(w) local t = WAYS[w.key] or WAYS.vendor ; return t[2] .. t[1] .. "|r" end
 
 -- What a way brings, as it is written at the right: "~ 1g 20s" on average, or "1g 60s if sold" where the chance is not known.
 local function Brings(w)
@@ -470,56 +536,148 @@ local function Brings(w)
   return "~ " .. Money(w.worth)
 end
 
--- The lines for a tooltip: { { left, right, r, g, b } ... } (right nothing: one text across).
--- `more`: every way; else the one line of advice.
+local FROM = {
+  [2] = "How often: auctions followed at the region's houses",
+  [3] = "How often: TradeSkillMaster's figure for the region",
+  [4] = "How often: what became of players' own auctions",
+}
+
+-- The lines for a tooltip: { { left, right, r, g, b, wrap } ... } (right nothing: one text across).
+-- `more`: every way, with all that is known of it; else the one line of advice.
 local function Lines(a, more)
   local out = {}
-  local each = a.stack > 1 and " (each)" or ""
+  -- (a text across, with nothing at the right, is broken into lines where it is too long for the tooltip)
+  local function add(left, right, shade, wrap)
+    if wrap == nil then wrap = right == nil end
+    out[#out + 1] = { left, right, shade or 1, shade or 1, shade or 1, wrap }
+  end
+  local m = a.market
   local best = a.best
   -- (how old the prices are: by the clock now, not when this was worked out)
   local age = a.listed and type(time) == "function" and (time() - a.listed) or nil
-  local old = age and age > OLD and { "These prices are " .. Ago(age) .. " old: run Azeroth Atlas for new ones.", nil, 0.6, 0.6, 0.6, true } or nil
+  local old = age and age > OLD and ("These prices are " .. Ago(age) .. " old: run Azeroth Atlas for new ones.") or nil
   if not more then
     if best then
-      local _, advice = Called(a, best)
-      out[1] = { HEAD .. "Getting rid of it:|r " .. advice, Brings(best) .. each, 1, 1, 1 }
+      local hours = (best.kind == "auction" and best.hours) and format(" %d h", best.hours) or ""
+      add(HEAD .. "Getting rid of it:|r " .. Verdict(best) .. hours, Brings(best) .. (a.stack > 1 and " each" or ""))
     else
-      out[1] = { HEAD .. "Getting rid of it:|r " .. DIM .. "no vendor buys it, and no auction is safe to advise|r", nil, 1, 1, 1, true }
+      add(HEAD .. "Getting rid of it:|r " .. DIM .. "no vendor buys it, and no auction is safe to advise|r", nil, 1, true)
     end
-    out[#out + 1] = old
+    if old then add(old, nil, 0.6, true) end
     return out
   end
-  out[1] = { HEAD .. "Getting rid of it|r" .. each, nil, 1, 1, 1 }
+
+  add(HEAD .. "Getting rid of it|r" .. (a.stack > 1 and (" " .. DIM .. "(one piece)|r") or ""), nil, 1, false)
+  local unchecked = false
   for i = 1, #a.ways do
     local w = a.ways[i]
-    local name = Called(a, w)
-    local note = nil
-    if w.kind ~= "vendor" and w.chance and w.worth ~= nil then note = "sells " .. Percent(w.chance) end
-    if w.why then note = (note and (note .. ", ") or "") .. w.why end
-    -- (the lowest asked is well above what the price was reckoned at: nobody sells it for what is asked)
-    if w.kind == "auction" and w.low and w.low > w.price * 1.25 then note = (note and (note .. ", ") or "") .. "asked " .. Money(w.low) .. ", sells for less" end
-    if w.kind == "auction" and w.age and w.age > 0 then note = (note and (note .. ", ") or "") .. format("price of %d day%s ago", w.age, w.age == 1 and "" or "s") end
-    local left = (w == best and (GOOD .. "> " .. name .. "|r") or name) .. (note and (" " .. DIM .. "(" .. note .. ")|r") or "")
-    if w == best then out[#out + 1] = { left, GOOD .. Brings(w) .. "|r", 1, 1, 1 }
-    elseif w.why then out[#out + 1] = { left, Brings(w), 0.6, 0.6, 0.6 }
-    else out[#out + 1] = { left, Brings(w), 1, 1, 1 } end
+    local mine = w == best
+    local shade = (w.why and 0.6) or 1
+    -- the way, and what it brings
+    local head = (mine and (GOOD .. "> |r") or "") .. Verdict(w)
+    if w.kind == "auction" and w.hours and not w.why then head = head .. format(" %d h", w.hours) end
+    if w.why then head = head .. " " .. DIM .. "(" .. w.why .. ")|r" end
+    add(head, mine and (GOOD .. Brings(w) .. "|r") or Brings(w), shade)
+
+    if w.kind == "auction" then
+      local x = w.a
+      local h = m.houses[w.house]
+      if type(h) == "table" and (tonumber(h.seen) or 0) == 0 then unchecked = true end
+      local cut = format("%s%% cut", tostring(x.cut))
+      -- the price, and what lands with you if it sells
+      if x.low > 0 and x.low > x.price * 1.01 then
+        add("   Lowest buyout " .. Money(x.low) .. (x.sale > 0 and (", but it sells for about " .. Money(x.sale)) or ", more than it sells for"), nil, 0.75)
+        add("   Reckoned at " .. Money(x.price) .. ", less the " .. cut, Money(x.net), 0.9)
+      elseif x.low > 0 then
+        add("   Lowest buyout " .. Money(x.price) .. ", less the " .. cut, Money(x.net), 0.9)
+      else
+        add("   Last price " .. Money(x.price) .. format(" (%d day%s ago), less the ", x.age, x.age == 1 and "" or "s") .. cut, Money(x.net), 0.9)
+      end
+      -- each length: how often it sells put up now, the deposit at stake, what it brings on average
+      local known = false
+      for j = 1, #x.lengths do
+        local l = x.lengths[j]
+        if l.chance then
+          known = true
+          local chosen = l == x.best
+          local left = format("   %s%d h: sells %s, deposit %s", chosen and "> " or "", l.hours, Percent(l.chance), Money(l.deposit))
+          if not l.safe then left = left .. " " .. DIM .. "(too risky)|r" end
+          if chosen and mine then add(GOOD .. left .. "|r", GOOD .. "~ " .. Money(l.worth) .. "|r", 1)
+          else add(left, "~ " .. Money(l.worth), (l.safe and not w.why) and 0.9 or 0.6) end
+        end
+      end
+      if not known then
+        local d = {}
+        for j = 1, #x.lengths do d[#d + 1] = Money(x.lengths[j].deposit) end
+        add("   How often it sells here is not known yet. Deposit for 2, 8, 24 h: " .. table.concat(d, ", "), nil, 0.6, true)
+      end
+      -- how many a day, and for how much
+      if x.day then
+        add("   Sells about " .. Count(x.day) .. " a day" .. (x.dayFrom == 1 and " here" or " in the region (TradeSkillMaster)")
+          .. ((x.sale > 0 and not (x.low > x.price * 1.01)) and (", for about " .. Money(x.sale)) or ""), nil, 0.75)
+      elseif x.sale > 0 and not (x.low > x.price * 1.01) then
+        add("   Sells for about " .. Money(x.sale), nil, 0.75)
+      end
+      -- what the chance rests on
+      if known then
+        if x.from == 1 then add(x.n > 0 and format("   How often: %d auctions followed at this house", x.n) or "   How often: auctions followed at this house", nil, 0.6)
+        elseif FROM[x.from] then add("   " .. FROM[x.from], nil, 0.6) end
+      end
+      -- the hour of the day
+      local fast = {}
+      for j = 1, #x.lengths do
+        local l = x.lengths[j]
+        if l.pace and (l.pace >= 1.1 or l.pace <= 0.9) then fast[#fast + 1] = format("the next %d h at %.1f times the usual pace", l.hours, l.pace) end
+      end
+      if #fast > 0 then add("   Put up now: " .. table.concat(fast, ", "), nil, 0.75, true) end
+      -- your own auctions of it
+      local own = type(shared.SalesOf) == "function" and type(h) == "table" and shared.SalesOf(a.item, h.key) or nil
+      if own and own.p > 0 then
+        local done = own.s + own.x
+        add(format("   Yours: %d put up", own.p) .. (done > 0 and format(", %d of %d sold", own.s, done) or "") .. (own.c > 0 and format(", %d taken down", own.c) or ""), nil, 0.75)
+      end
+    elseif w.kind == "disenchant" then
+      for j = 1, #w.gives do
+        local g, f = w.gives[j], w.parts and w.parts[j]
+        local name = f and f.name or ("item " .. tostring(g.item))
+        local x = w.mats and w.mats[j] or nil
+        if not w.house then
+          add("   " .. Pieces(g.each) .. " " .. name .. " at " .. Money(f and f.sell or 0), Money(g.each * (f and f.sell or 0)), shade < 1 and 0.6 or 0.9)
+        elseif x and x.worth ~= nil then
+          add("   " .. Pieces(g.each) .. " " .. name .. format(": %d h, sells %s, ", x.hours, Percent(x.chance)) .. Money(x.net) .. " after the cut", "~ " .. Money(g.each * x.worth), shade < 1 and 0.6 or 0.9)
+        elseif x then
+          add("   " .. Pieces(g.each) .. " " .. name .. ": " .. Money(x.net) .. " after the cut, not known how often", Money(g.each * x.net), 0.6)
+        end
+      end
+      if not w.house then
+        add((w.read or 0) > 0 and format("   What it gives: the original game's tables, leaned on %d disenchantings counted", w.read) or "   What it gives: the original game's tables, not checked for this game", nil, 0.6, true)
+      end
+    end
   end
-  local foot = "~ on average: the price less the house's cut, by how often it sells, less the deposit lost when it does not."
+  local foot = "~ is what one piece brings on average, put up many times: the price less the cut for the times it sells, what a vendor pays less the lost deposit for the times it does not."
   if age and age <= OLD then foot = foot .. " Prices of " .. Ago(age) .. " ago." end
   if a.credit then foot = foot .. " How often things sell: partly TradeSkillMaster's figures." end
-  out[#out + 1] = { foot, nil, 0.6, 0.6, 0.6, true }
-  out[#out + 1] = old
+  if unchecked then foot = foot .. " The houses' cut and deposits are the game files' figures: no auction of ours has checked them yet." end
+  add(foot, nil, 0.6, true)
+  if old then add(old, nil, 0.6, true) end
   return out
+end
+
+local function HouseName(m, k)
+  local h = m.houses[k]
+  return type(h) == "table" and type(h.name) == "string" and h.name or (k == 1 and "Your" or "Neutral")
 end
 
 -- ---- into the tooltip -------------------------------------------------------------------------------------
 -- (what was last worked out: a tooltip is written anew several times a second)
-local kept = { item = nil, bound = nil, stamp = nil, market = nil, advice = nil }
+local kept = { item = nil, bound = nil, stamp = nil, market = nil, advice = nil, tick = nil }
 local function AdviceFor(item, bound)
   local m = rawget(_G, "AzerothAtlasMarket")
-  if kept.item == item and kept.bound == bound and kept.stamp == stamp and rawequal(kept.market, m) then return kept.advice end
+  -- (and by the clock, in steps of ten minutes: the chance of a short auction is that of one put up now)
+  local tick = type(time) == "function" and floor(time() / 600) or 0
+  if kept.item == item and kept.bound == bound and kept.stamp == stamp and kept.tick == tick and rawequal(kept.market, m) then return kept.advice end
   local advice, whole = Work(item, bound)
-  if whole then kept.item, kept.bound, kept.stamp, kept.market, kept.advice = item, bound, stamp, m, advice else kept.item = nil end
+  if whole then kept.item, kept.bound, kept.stamp, kept.market, kept.advice, kept.tick = item, bound, stamp, m, advice, tick else kept.item = nil end
   return advice
 end
 
@@ -660,11 +818,13 @@ function shared.AdviceSay(words)
   local read, everybody = 0, 0
   if type(m.yields) == "table" then for _, text in pairs(m.yields) do everybody = everybody + (type(text) == "string" and tonumber(match(text, "^(%d+)")) or 0) end end
   if type(DB().yields) == "table" then for _, rec in pairs(DB().yields) do if type(rec) == "table" then read = read + (tonumber(rec.n) or 0) end end end
-  say("an item's tooltip says what to do with a thing you are getting rid of: vendor, auction or disenchant, whichever brings most of the ways that are safe enough. Hold Shift for every way. Prices for " .. tostring(m.items) .. " items at the " .. HouseName(m, 1) .. " auction house"
+  say("an item's tooltip says what to do with a thing you are getting rid of - VENDOR, AUCTION, NEUTRAL AUCTION, or DISENCHANT and one of the three - whichever brings most of the ways that are safe enough. Hold Shift for every way, with the lowest buyout less the cut, how often it sells in 2, 8 and 24 hours put up now, and what it brings on average. Prices for " .. tostring(m.items) .. " items at the " .. HouseName(m, 1) .. " auction house"
     .. (m.houses[2] and " and the neutral one" or "") .. (age and (", " .. Ago(age) .. " old") or "") .. ". "
     .. format("Weights: %s points for every per cent an auction pays over the vendor, %s off for every per cent of the times it does not sell; and it has to bring %s per cent more than the vendor on average (/atlas advice gain %d, /atlas advice risk %d, /atlas advice least %d; reset puts those back). ", tostring(gain), tostring(risk), tostring(shared.AdviceLeast()), GAIN, RISK, LEAST)
     .. (read > 0 and (format("%d", read) .. " of your own disenchantings are counted in what disenchanting gives. ") or "")
     .. (everybody > 0 and (format("%d", everybody) .. " disenchantings counted by everybody's copies came with the prices. ") or "")
+    .. (type(m.houses[1].pace) == "table" and "The hour of the day counts: the map has measured when things sell at your house. " or "The hour of the day does not count yet: the map has not followed the house for long enough to know when things sell. ")
+    .. (type(shared.SalesSay) == "function" and shared.SalesSay() or "")
     .. "/atlas advice off turns it off.")
 end
 
@@ -730,7 +890,7 @@ do
         built = true
         pcall(function()
           Words("Getting rid of things", "GameFontNormalLarge", 16, -16)
-          Words("With the mouse on an item, its tooltip says what to do with it if you do not want it: sell it to a vendor, auction it at your side's house or the neutral one, or disenchant it - whichever brings most, of the ways that are safe enough. Hold Shift to see every way and what it brings.", "GameFontHighlightSmall", 16, -40, 560)
+          Words("With the mouse on an item, its tooltip says what to do with it if you do not want it: VENDOR, AUCTION, NEUTRAL AUCTION, or DISENCHANT and one of those three - whichever brings most, of the ways that are safe enough. Hold Shift to see every way: the lowest buyout less the house's cut, how often it sells in 2, 8 and 24 hours if you put it up now, and what one piece brings on average.", "GameFontHighlightSmall", 16, -40, 560)
           local b = CreateFrame("CheckButton", nil, panel)
           b:SetSize(26, 26)
           b:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -84)

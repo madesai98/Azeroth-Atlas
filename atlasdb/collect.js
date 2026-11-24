@@ -14,6 +14,9 @@
 //     the game's saved settings (addon/AzerothAtlas/Met.lua; the same file as the boats). Read only.
 //   - what your own disenchanting gave, by the kind of thing disenchanted, which the addon counts
 //     in the same file (addon/AzerothAtlas/Advice.lua, read by yields.js). Read only.
+//   - what became of the auctions you put up yourself, counted by item, house and length (so
+//     many put up, sold, run out, taken down; no names, no times), and what the house asked as a
+//     deposit and kept of a sale (addon/AzerothAtlas/Sales.lua, read by sales.js). Read only.
 //   - what the addon noted in windows the game opened for you: what a vendor sells and for how
 //     much, what a trainer teaches and asks, and where the game's own map puts the quests in
 //     your log (addon/AzerothAtlas/Learned.lua, read by learned.js; the same file again). Read only.
@@ -50,6 +53,7 @@ import { SERVER_TIME } from './rtdb.js';
 import { sightingsIn, metIn, pack, unpack } from './boats.js';
 import { learnedIn } from './learned.js';
 import { yieldsIn, yieldLines } from './yields.js';
+import { salesIn, saleLines } from './sales.js';
 import { placeLines } from './places.js';
 
 const BATCH = 400 * 1024; // bytes of facts to one delivery
@@ -151,7 +155,7 @@ export async function gather(cfg, dataDir) {
   // the boats: what the addon has kept for sending, in every account's saved settings
   try {
     const accounts = path.join(cfg.installRoot, folder, 'WTF', 'Account');
-    const all = new Set(), met = new Set(), gave = [];
+    const all = new Set(), met = new Set(), gave = [], sold = [];
     for (const account of fs.readdirSync(accounts)) {
       let text;
       try { text = fs.readFileSync(path.join(accounts, account, 'SavedVariables', 'AzerothAtlas.lua'), 'utf8'); } catch { continue; }
@@ -162,8 +166,11 @@ export async function gather(cfg, dataDir) {
       for (const line of learnedIn(text)) met.add(line);
       // (and what disenchanting gave: counted per account, sent as one count for this computer - yields.js)
       gave.push(yieldsIn(text));
+      // (and what became of your own auctions, and what the houses took: likewise one count for this computer - sales.js)
+      sold.push(salesIn(text));
     }
     for (const line of yieldLines(gave)) met.add(line);
+    for (const line of saleLines(sold)) met.add(line);
     found.boats = [...all];
     const had = new Set(found.logged);
     for (const line of met) if (!had.has(line)) found.logged.push(line);

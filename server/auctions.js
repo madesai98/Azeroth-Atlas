@@ -20,6 +20,7 @@ import { AuctionStore } from '../auctions/store.js';
 import { auctionSettings, setHouse } from '../auctions/settings.js';
 import { HOUSES, REGION_NAMES, REGION_RULESETS, RULESETS, SIDES, housesOf, houseName } from '../auctions/houses.js';
 import { listHouse, listRecipes, itemHistory } from '../auctions/view.js';
+import { marketFigures, marketKey, sellingOf } from './market.js';
 import { note } from './log.js';
 
 const TICK = 5 * 60 * 1000;        // how often it is asked whether a fetch is due, while prices are being looked at
@@ -132,15 +133,45 @@ export class Auctions {
     try { const st = fs.statSync(this.store.file(rel)); return st.isDirectory() ? fs.readdirSync(this.store.file(rel)).map((f) => fs.statSync(this.store.file(rel, f)).mtimeMs).join(',') : String(st.mtimeMs); } catch { return ''; }
   }
 
+  /** What the game's tooltip goes by (market.js), for this copy's own house - made anew when the prices or the figures change. */
+  #figures() {
+    try {
+      const key = marketKey(this.cfg);
+      if (!key) return null;
+      if (this.figures?.key !== key) this.figures = { key, value: marketFigures(this.cfg) };
+      return this.figures.value;
+    } catch { return null; }
+  }
+
+  /**
+   * How often a thing sells and how many a day, as the tooltip goes by them, put in the place of
+   * TradeSkillMaster's figures in a list's rows (`rate`, `perDay`: the columns given) - for this
+   * copy's own house; another house's list keeps TradeSkillMaster's. → true where they were put in
+   */
+  #ours(house, rows, item, rate, perDay) {
+    if (house !== this.settings.house) return false;
+    const own = this.#figures()?.houses[0];
+    if (!own || own.key !== house) return false;
+    for (const r of rows) {
+      const f = own.items.get(r[item]);
+      if (!f) continue;
+      if (f.chance[24] !== null && f.chance[24] !== undefined) r[rate] = Math.round(f.chance[24] * 1000) / 1000;
+      if (f.day !== null && f.day !== undefined) r[perDay] = Math.round(f.day * 10) / 10;
+    }
+    return true;
+  }
+
   /** The house's list as the page takes it (JSON text), or null when nothing is kept of it yet. */
   list(house = this.settings.house) {
     if (!house) return null;
     let stamp;
-    try { stamp = `${fs.statSync(this.store.file(house, 'now.json')).mtimeMs}:${this.#stampOf('tsm')}:${this.#stampOf('../items.json')}`; } catch { return null; }
+    try { stamp = `${fs.statSync(this.store.file(house, 'now.json')).mtimeMs}:${this.#stampOf('tsm')}:${this.#stampOf('../items.json')}:${marketKey(this.cfg) ?? ''}`; } catch { return null; }
     const had = this.cache.get(house);
     if (had?.key === stamp) return had.text;
     const list = listHouse(this.store, this.cfg.dataDir, house);
     if (!list) return null;
+    // (how often things sell: as the game's tooltip goes by it, where this is the copy's own house)
+    list.ours = this.#ours(house, list.rows, 0, 12, 13);
     const text = JSON.stringify(list);
     this.cache.clear(); // (one house at a time is looked at: no use keeping the others)
     this.cache.set(house, { key: stamp, text });
@@ -151,11 +182,12 @@ export class Auctions {
   recipes(house = this.settings.house) {
     if (!house) return null;
     let stamp;
-    try { stamp = `${fs.statSync(this.store.file(house, 'now.json')).mtimeMs}:${this.#stampOf('tsm')}:${this.#stampOf('../items.json')}:${this.#stampOf('../recipes.json')}`; } catch { return null; }
+    try { stamp = `${fs.statSync(this.store.file(house, 'now.json')).mtimeMs}:${this.#stampOf('tsm')}:${this.#stampOf('../items.json')}:${this.#stampOf('../recipes.json')}:${marketKey(this.cfg) ?? ''}`; } catch { return null; }
     const had = this.crafts.get(house);
     if (had?.key === stamp) return had.text;
     const list = listRecipes(this.store, this.cfg.dataDir, house);
     if (!list) return null;
+    list.ours = this.#ours(house, list.rows, 6, 13, 14);
     const text = JSON.stringify(list);
     this.crafts.clear();
     this.crafts.set(house, { key: stamp, text });
@@ -164,7 +196,13 @@ export class Auctions {
 
   item(id, house = this.settings.house) {
     if (!house || !Number.isInteger(id) || id <= 0) return null;
-    return itemHistory(this.store, this.cfg.dataDir, house, id);
+    const d = itemHistory(this.store, this.cfg.dataDir, house, id);
+    // (what selling one brings, as the game's tooltip reckons it: for the copy's own house and its neutral one)
+    if (d && house === this.settings.house) {
+      const figures = this.#figures();
+      if (figures) d.selling = { houses: sellingOf(figures, id, d.item?.sell ?? 0), credit: figures.credit };
+    }
+    return d;
   }
 
   stop() {

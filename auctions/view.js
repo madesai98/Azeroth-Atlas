@@ -6,7 +6,7 @@
 import { readItems } from '../extractor/jobs/items.js';
 import { readRecipes } from '../extractor/jobs/recipes.js';
 import { dayOf, dayStart } from './days.js';
-import { houseName, parseHouse } from './houses.js';
+import { houseName, parseHouse, costsOf } from './houses.js';
 import { readTsm } from './tsm.js';
 import { costRecipe } from './craft.js';
 
@@ -85,7 +85,8 @@ export function listRecipes(store, dataDir, house) {
     const t = r[6] ? reg[r[6]] : null;
     rows.push([r[0], r[1], r[2], r[3], r[4], r[5], r[6], made?.[0] ?? (r[6] ? `Item ${r[6]}` : ''), made?.[1] ?? -1, r[7], Math.round(c.cost), c.missing, Math.round(c.value), t?.[3] ?? 0, t?.[4] ?? 0, r[9]]);
   }
-  return { house, name: houseName(house), t: now.t, skills: book.skills, vendors: sold.size, rows };
+  // (cut: the per cent the house keeps of a sale - the page takes it off what the things made go for)
+  return { house, name: houseName(house), t: now.t, skills: book.skills, vendors: sold.size, cut: costsOf(house).cut, rows };
 }
 
 /**
@@ -129,9 +130,9 @@ export function itemHistory(store, dataDir, house, id) {
     const nameOf = (item) => { const x = info(item); return [item, x?.[0] ?? `Item ${item}`, x?.[1] ?? -1]; };
     for (const r of book.recipes) {
       if (r[6] === id) {
-        const c = costRecipe(r, now?.items, list?.more, sold);
+        const c = costRecipe(r, now?.items, list?.more, sold, costsOf(house).cut);
         made.push({ spell: r[0], name: r[1], skill: book.skills[r[2]] ?? '', learnt: r[3], yellow: r[4], grey: r[5], count: r[7], taught: r[9] ? nameOf(r[9]) : null,
-          parts: c.parts.map(([item, n, price, where]) => [...nameOf(item), n, price, where]), cost: Math.round(c.cost), missing: c.missing, value: Math.round(c.value) });
+          parts: c.parts.map(([item, n, price, where]) => [...nameOf(item), n, price, where]), cost: Math.round(c.cost), missing: c.missing, value: Math.round(c.value), net: Math.round(c.net) });
       }
       const use = r[8].find((x) => x[0] === id);
       if (use) uses.push([r[0], r[1], book.skills[r[2]] ?? '', use[1], ...(r[6] ? nameOf(r[6]) : [0, '', -1])]);

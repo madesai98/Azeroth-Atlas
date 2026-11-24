@@ -334,7 +334,7 @@ export function bindPrices() {
     ['day', '1 day', 'right', 'The going price against the last one of the day before'],
     ['week', '7 days', 'right', 'The going price against a week ago (or the oldest day kept, when that is less)'],
     ['pieces', 'For sale', 'right', 'How many pieces are up for sale'],
-    ['rate', 'Sells', 'right', 'TradeSkillMaster, for the whole region: of the times it is put up for sale, how often it sells; and how many sell in a day'],
+    ['rate', 'Sells', 'right', 'Of the times it is put up for 24 hours at the lowest price, how often it sells; and how many sell in a day. At your own house: the map\'s own following of every auction, leaned on TradeSkillMaster\'s figures for the region until there are readings enough - what the game\'s tooltip goes by. At another house: TradeSkillMaster\'s, for the whole region'],
   ];
   const valueOf = { name: (r) => r[C.name].toLowerCase(), min: (r) => r[C.min], mv: (r) => r[C.mv], day: (r) => pct(r[C.mv], r[C.day]) ?? -Infinity, week: (r) => pct(r[C.mv], r[C.week]) ?? -Infinity, pieces: (r) => r[C.pieces], rate: (r) => r[C.perDay] };
 
@@ -421,7 +421,7 @@ export function bindPrices() {
       const one = m.count > 1 ? `the ${m.count} it makes go` : 'it goes';
       const sum = m.missing ? `The reagents that have a price come to ${money(m.cost)}; ${m.missing} ${m.missing === 1 ? 'has' : 'have'} none.`
         : !m.value ? `Costs ${money(m.cost)} to make. None is for sale to hold that against.`
-          : `Costs ${money(m.cost)} to make; ${one} for ${money(m.value)}: ${m.value >= m.cost ? `${money(m.value - m.cost)} more` : `${money(m.cost - m.value)} less`} than the reagents (the auction house's cut not counted).`;
+          : `Costs ${money(m.cost)} to make; ${one} for ${money(m.value)}, ${money(m.net ?? m.value)} after the auction house's cut: ${(m.net ?? m.value) >= m.cost ? `${money((m.net ?? m.value) - m.cost)} more` : `${money(m.cost - (m.net ?? m.value))} less`} than the reagents.`;
       return el('div', { class: 'pmade' },
         el('div', {}, el('b', { text: `${m.skill}: ${m.name}` }), el('span', { class: 'dim', text: `  yellow at ${m.yellow}, grey at ${m.grey}${m.count > 1 ? ` · makes ${m.count}` : ''}` })),
         el('table', { class: 'ptable plain' }, el('tbody', {}, ...lines)),
@@ -439,7 +439,9 @@ export function bindPrices() {
       tile('For sale', `${now[3].toLocaleString()}`, `in ${now[2].toLocaleString()} ${now[2] === 1 ? 'auction' : 'auctions'}`);
     } else tile('Now', 'None for sale', d.t ? `as listed ${ago(d.t)}` : null);
     const reg = d.tsm?.region, hs = d.tsm?.house;
-    if (reg?.soldPerDay) tile('Sells', `${Math.round(reg.saleRate * 100)}% of the time`, `${reg.soldPerDay >= 10 ? Math.round(reg.soldPerDay).toLocaleString() : reg.soldPerDay.toFixed(1)} a day in the region, for ${money(reg.avgSalePrice)} on average`);
+    if (reg?.soldPerDay) tile('Sells', `${Math.round(reg.saleRate * 100)}% of the time`, `${reg.soldPerDay >= 10 ? Math.round(reg.soldPerDay).toLocaleString() : reg.soldPerDay.toFixed(1)} a day in the region, for ${money(reg.avgSalePrice)} on average (TradeSkillMaster)`);
+    // what selling one brings, house by house, as the game's tooltip reckons it
+    const sellBox = sellingBox(d.selling, it?.sell ?? 0);
 
     // which looks: every one of the last days, or one line a day
     const hours = d.hours ?? [], days = d.days ?? [];
@@ -475,7 +477,7 @@ export function bindPrices() {
     notes.push(days.length < 2 ? 'The charts grow as the house is looked at: a look an hour, a line a day.' : `Auction lists may be kept 30 days (Blizzard's terms for its data): the charts go back no further. ${days.length} ${days.length === 1 ? 'day is' : 'days are'} kept now.`);
 
     // (what an item has not got - no stats, no recipe - is left out)
-    body.append(...[back, name, el('div', { class: 'dim small', text: about }), givesBox, tiles, ...madeBox, usesBox, pick,
+    body.append(...[back, name, el('div', { class: 'dim small', text: about }), givesBox, tiles, sellBox, ...madeBox, usesBox, pick,
       el('div', { class: 'pchead' }, el('span', { class: 'title', text: 'Price of one piece' }), legend(['going', 'lowest'], names)), priceBox,
       el('div', { class: 'pchead' }, el('span', { class: 'title', text: 'Pieces for sale' })), pieceBox,
       numbers, ...notes.map((t) => el('div', { class: 'dim small', text: t }))].filter(Boolean));
@@ -490,11 +492,51 @@ export function bindPrices() {
     ['skill', 'Skill', 'right', 'The skill at which the recipe turns yellow (fewer skill points) and grey (none)'],
     ['cost', 'Costs', 'right', 'What the reagents cost: the going price at the auction house, or a vendor\'s where one sells the reagent for no more'],
     ['value', 'Sells for', 'right', 'What the things made go for at the auction house (all of them, where the recipe makes several)'],
-    ['diff', 'Difference', 'right', 'Sells for, less costs. The auction house\'s cut is not taken off, and a price asked is not a sale: see Sells'],
-    ['rate', 'Sells', 'right', 'TradeSkillMaster, for the whole region: how often the thing made sells of the times it is put up, and how many sell in a day'],
+    ['diff', 'Difference', 'right', 'Sells for, less what the auction house keeps of a sale, less costs. A price asked is not a sale: see Sells'],
+    ['rate', 'Sells', 'right', 'How often the thing made sells of the times it is put up for 24 hours, and how many sell in a day: at your own house the map\'s own figures (what the game\'s tooltip goes by), at another TradeSkillMaster\'s for the whole region'],
   ];
+  /**
+   * "Selling one": for this copy's house and its neutral one, what lands with you if a piece
+   * sells (the lowest buyout less the house's cut), and for 2, 8 and 24 hours how often it sells
+   * put up now, the deposit at stake and what one piece brings on average - the figures the
+   * game's tooltip shows with Shift held. Nothing where there are none.
+   */
+  function sellingBox(selling, vendor) {
+    const houses = selling?.houses ?? [];
+    if (!houses.length) return null;
+    const count = (v) => (v >= 10 ? Math.round(v).toLocaleString() : v.toFixed(1));
+    const from = { 1: (h) => (h.n > 0 ? `${h.n.toLocaleString()} auctions followed at this house` : 'auctions followed at this house'), 2: () => 'auctions followed at the region\'s houses', 3: () => 'TradeSkillMaster\'s figure for the region', 4: () => 'what became of players\' own auctions' };
+    const rows = [];
+    if (vendor > 0) rows.push(el('tr', {}, el('td', { class: 'left', text: 'Vendor' }), el('td', { class: 'right', text: money(vendor) }), el('td', { class: 'right dim', text: '–' }), el('td', { class: 'right dim', text: '–' }), el('td', { class: 'right dim', text: '–' })));
+    const notes = [];
+    for (const h of houses) {
+      const best = h.lengths.filter((l) => l.worth !== null).sort((a, b) => b.worth - a.worth)[0];
+      const cell = (l) => el('td', { class: 'right' + (l === best ? '' : ' dim'), title: l.chance === null ? `Deposit ${money(l.deposit)}; how often it sells is not known yet` : `Sells ${Math.round(l.chance * 100)}% of the time put up now${Math.abs(l.pace - 1) >= 0.1 ? ` (the hours ahead run at ${l.pace.toFixed(1)} times the usual pace)` : ''}; the deposit, lost when it does not: ${money(l.deposit)}`,
+        text: l.chance === null ? `? · deposit ${money(l.deposit)}` : `${Math.round(l.chance * 100)}% · ~ ${money(Math.round(l.worth))}` });
+      const capped = h.low > h.price * 1.01;
+      rows.push(el('tr', {},
+        el('td', { class: 'left', text: `${h.neutral ? 'Neutral' : h.name} auction house`, title: `The house keeps ${h.cut}% of a sale${h.seen ? '' : ' (the game files\' figure: no auction of ours has checked it yet)'}` }),
+        el('td', { class: 'right', title: capped ? `The lowest asked is ${money(h.low)}, far above what it sells for: reckoned at ${money(h.price)}` : h.low ? `Lowest buyout ${money(h.low)}, less the house's ${h.cut}%` : `Not for sale now: its price of ${h.age} ${h.age === 1 ? 'day' : 'days'} ago, less the house's ${h.cut}%`, text: money(Math.round(h.net)) }),
+        ...h.lengths.map(cell)));
+      const said = [];
+      if (h.day !== null && h.day !== undefined) said.push(`sells about ${count(h.day)} a day${h.dayFrom === 1 ? ' here' : ' in the region (TradeSkillMaster)'}`);
+      if (h.sale > 0) said.push(`for about ${money(h.sale)}`);
+      if (from[h.from] && h.lengths.some((l) => l.chance !== null)) said.push(`how often: ${from[h.from](h)}`);
+      else if (!h.lengths.some((l) => l.chance !== null)) said.push('how often it sells there is not known yet');
+      if (said.length) notes.push(`${h.neutral ? 'Neutral house' : `${h.name} house`}: ${said.join('; ')}.`);
+    }
+    return el('div', { class: 'pmade' },
+      el('div', {}, el('b', { text: 'Selling one' }), el('span', { class: 'dim', text: '  what the game\'s tooltip goes by (hold Shift on an item there)' })),
+      el('table', { class: 'ptable plain' },
+        el('thead', {}, el('tr', {}, el('th', { class: 'left', text: '' }), el('th', { class: 'right', text: 'Lands with you if sold', title: 'The lowest buyout, less what the house keeps of a sale' }),
+          ...[2, 8, 24].map((d) => el('th', { class: 'right', text: `${d} h`, title: `Put up for ${d} hours now: how often it sells, and what one piece brings on average - the price less the cut for the times it sells, what a vendor pays less the lost deposit for the times it does not` })))),
+        el('tbody', {}, ...rows)),
+      el('div', { class: 'small dim', text: notes.join(' ') }));
+  }
+
   const R = { spell: 0, name: 1, skill: 2, learnt: 3, yellow: 4, grey: 5, item: 6, itemName: 7, quality: 8, count: 9, cost: 10, missing: 11, value: 12, rate: 13, perDay: 14, taught: 15 };
-  const diffOf = (r) => (r[R.missing] || !r[R.value] || !r[R.cost] ? null : r[R.value] - r[R.cost]);
+  // (what the things made go for, less the house's cut of a sale, less what the reagents cost)
+  const diffOf = (r) => (r[R.missing] || !r[R.value] || !r[R.cost] ? null : Math.round(r[R.value] * (1 - (crafts?.cut ?? 0) / 100)) - r[R.cost]);
   const cvalue = { name: (r) => (r[R.itemName] || r[R.name]).toLowerCase(), skill: (r) => r[R.yellow], cost: (r) => r[R.cost], value: (r) => r[R.value], diff: (r) => diffOf(r) ?? -Infinity, rate: (r) => r[R.perDay] };
 
   function renderCraft() {
@@ -544,7 +586,7 @@ export function bindPrices() {
     fill();
     body.append(el('div', { class: 'pfilters' }, search, skill, el('label', { class: 'row', title: 'Leave out the recipes whose difference cannot be worked out: a reagent with no price, or nothing of what it makes for sale' }, whole, 'Only what can be costed'), count),
       el('div', { class: 'pscroll' }, table, more),
-      el('div', { class: 'dim small', text: `Costs are today's: each reagent at the auction house's going price, or at a vendor's where one sells it for no more (${crafts.vendors} reagents are known to be sold by vendors). Not counted: the auction house's cut, and the price of learning the recipe. A difference is between two prices asked, not a promise: "Sells" says whether the thing is bought at all.` }));
+      el('div', { class: 'dim small', text: `Costs are today's: each reagent at the auction house's going price, or at a vendor's where one sells it for no more (${crafts.vendors} reagents are known to be sold by vendors). The difference has the auction house's cut of a sale taken off (${crafts.cut ?? 0}%). Not counted: the deposit (it comes back when the thing sells, and is lost when it does not), and the price of learning the recipe. A difference is between two prices asked, not a promise: "Sells" says whether the thing is bought at all.` }));
   }
 
   /** The two lists to choose between. */

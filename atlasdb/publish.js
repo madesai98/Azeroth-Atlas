@@ -28,9 +28,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { findQuestieDb, readQuestie } from '../extractor/questie.js';
 import { readReference } from '../extractor/reference.js';
-import { KINDS, PLACE, YIELD, PUBLISHED, SCHEMA, LAYERS, fromQuestie, fromReference, mergeAll, shards, canonical, tidy, cacheSays } from './records.js';
+import { KINDS, PLACE, YIELD, SALE, COST, PUBLISHED, SCHEMA, LAYERS, fromQuestie, fromReference, mergeAll, shards, canonical, tidy, cacheSays } from './records.js';
 import { foldPlaces } from './places.js';
 import { readYieldLine, foldYields } from './yields.js';
+import { readSaleLine, foldSales } from './sales.js';
 import { entries, SERVER_TIME } from './rtdb.js';
 
 const SAME = 30;            // yards: sightings of one NPC this close together are the same spot
@@ -150,10 +151,12 @@ function mostSaid(voices) {
  *   d,... j,... c,...            of a dungeon: a door, a way its floors do not have, how far off the
  *                                minimap's place is (places.js has the three, and puts them together)
  *   y,<band>,<times>,<material>,<pieces>,...   what disenchanting things of a band gave, in all (yields.js)
+ *   a,<item>,<house>,<hours>,...   what became of a copy's players' own auctions of an item; k,...: what a house took (sales.js)
  * A line of any other kind is left out: a later version's, which this one does not know.
  * @param inbox what GET /inbox returned
  * @returns { cache, seen, logged, obs, copies, deliveries, splits: [{ kind, id, field, said }],
- *            places: Map<map, a dungeon's record>, yields: Map<band, what disenchanting it gave> }
+ *            places: Map<map, a dungeon's record>, yields: Map<band, what disenchanting it gave>,
+ *            sales: Map<item, what became of the auctions of it>, costs: Map<1 | 2, what a house took> }
  */
 export function fold(inbox) {
   const reports = { npc: new Map(), object: new Map(), quest: new Map() }; // id -> Map<copy, { copy, at, key, build, rec }>
@@ -167,6 +170,7 @@ export function fold(inbox) {
   const fought = new Map(); // "123:m0" -> [{ x, y, by: Map<copy, z> }]: the level a creature was fought on at a spot
   const ofPlaces = new Map(); // copy -> [its lines of the dungeons, in the order sent]
   const ofYields = new Map(); // copy -> Map<band, its count of what disenchanting gave: the one with the most disenchantings>
+  const ofSales = new Map();  // copy -> Map<kind and key, its count of its own auctions: the one with the most auctions>
   const whole = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
   let deliveries = 0;
   const copies = entries(inbox);
@@ -209,6 +213,16 @@ export function fold(inbox) {
           if (!mine) ofYields.set(copy, (mine = new Map()));
           const had = mine.get(said.band);
           if (!had || said.n >= had.n) mine.set(said.band, said);
+          continue;
+        }
+        if (k === 'a' || k === 'k') {
+          // a copy's own auctions: a line is all it has counted so far, so its fullest line stands for the others
+          const said = readSaleLine(p);
+          if (!said) continue;
+          let mine = ofSales.get(copy);
+          if (!mine) ofSales.set(copy, (mine = new Map()));
+          const had = mine.get(said.kind + said.key);
+          if (!had || said.v[0] >= had.v[0]) mine.set(said.kind + said.key, said);
           continue;
         }
         if (k === 'h') {
@@ -385,7 +399,7 @@ export function fold(inbox) {
     o.l = [names.size];
     obs.npc.set(id, o);
   }
-  return { cache, seen, logged, obs, copies: copies.length, deliveries, splits, places: foldPlaces(ofPlaces), yields: foldYields(ofYields) };
+  return { cache, seen, logged, obs, copies: copies.length, deliveries, splits, places: foldPlaces(ofPlaces), yields: foldYields(ofYields), ...foldSales(ofSales) };
 }
 
 /**
@@ -449,6 +463,10 @@ export async function buildTruth(cfg, dataDir, inbox, log = () => {}) {
   // what disenchanting gives: the copies' own counts, band by band (no other source says anything of that for this game)
   records[YIELD] = got.yields;
   if (got.yields.size) { from.yields = [...got.yields.values()].reduce((n, y) => n + y.n, 0); log(`what disenchanting gives, as the copies' players found it: ${from.yields.toLocaleString()} disenchantings of ${got.yields.size} kinds of thing`); }
+  // the players' own auctions: what became of them, and what the houses took (nobody else can say either)
+  records[SALE] = got.sales;
+  records[COST] = got.costs;
+  if (got.sales.size) { from.sales = [...got.sales.values()].reduce((n, r) => n + Object.values(r.h).reduce((m, by) => m + Object.values(by).reduce((q, v) => q + v[0], 0), 0), 0); log(`the players' own auctions: ${from.sales.toLocaleString()} put up, of ${got.sales.size.toLocaleString()} items`); }
   return { records, from, splits: got.splits };
 }
 

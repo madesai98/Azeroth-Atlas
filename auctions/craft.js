@@ -7,9 +7,10 @@
 // by a vendor has no price, and the recipe's cost is then only a part of it: it is said how
 // many reagents are missing, and no difference is worked out.
 //
-// What is NOT in these sums: the auction house's cut and deposit (how much this game takes is
-// not in its files), the price of the recipe itself, and whether the thing sells at all, which
-// is what TradeSkillMaster's figures beside it are for.
+// What the house keeps of a sale is taken off what the things made go for (`net`: houses.js,
+// HOUSE_COSTS). What is NOT in these sums: the deposit (it comes back when the thing sells, and
+// is lost when it does not), the price of the recipe itself, and whether the thing sells at
+// all, which is what the figures beside it are for.
 
 /** What one piece of a reagent costs, and where: [price, 'vendor' | 'auction' | null]. */
 export function reagentPrice(id, now, more, sold) {
@@ -27,11 +28,13 @@ export function reagentPrice(id, now, more, sold) {
  * @param now     the house as last listed: { <id>: [min, mv, n, q] }
  * @param more    items.json `more` (a vendor's price is in it)
  * @param sold    Set of the items a vendor sells
- * @returns { parts: [[item, how many, price of one, where], …], cost, missing, value }
+ * @param cut     the per cent the house keeps of a sale (nothing: none taken off)
+ * @returns { parts: [[item, how many, price of one, where], …], cost, missing, value, net }
  *          cost: of the reagents that have a price; missing: how many have none; value: what
- *          the things made go for at the house (0: none is for sale)
+ *          the things made go for at the house (0: none is for sale); net: that less the
+ *          house's cut - what would land with whoever sold them
  */
-export function costRecipe(recipe, now, more, sold) {
+export function costRecipe(recipe, now, more, sold, cut = 0) {
   let cost = 0, missing = 0;
   const parts = [];
   for (const [item, count] of recipe[8]) {
@@ -41,5 +44,5 @@ export function costRecipe(recipe, now, more, sold) {
   }
   const listed = recipe[6] ? now?.[recipe[6]] : null;
   const value = listed ? (listed[1] || listed[0] || 0) * Math.max(1, recipe[7]) : 0;
-  return { parts, cost, missing, value };
+  return { parts, cost, missing, value, net: value * (1 - (cut > 0 ? cut : 0) / 100) };
 }

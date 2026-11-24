@@ -93,7 +93,10 @@ export const PLACE = 'place';
 /** ...and the kind that is a band of things that can be disenchanted, with what the copies' players got of it (yields.js). */
 export const YIELD = 'yield';
 /** Every kind there is a shard of. */
-export const PUBLISHED = [...KINDS, PLACE, YIELD];
+/** ...and the two that are of the players' own auctions: an item with what became of the auctions of it, and what a house took (sales.js). */
+export const SALE = 'sale';
+export const COST = 'cost';
+export const PUBLISHED = [...KINDS, PLACE, YIELD, SALE, COST];
 export const BUCKET = 500; // ids to a shard: a copy fetches only the shards that have changed
 
 /** Believed first to last. */

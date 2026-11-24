@@ -2153,38 +2153,78 @@ written.
 ## What to do with a thing you are getting rid of, in its tooltip
 
 With the mouse on an item, the addon adds one line to the game's own tooltip: what to do with
-the thing if you do not want it - sell it to a vendor, put it up at your side's auction house
-or at the neutral one, or disenchant it - and what that brings (asked for on 23 November 2026).
+the thing if you do not want it, in one of six words, each in a colour of its own, and what
+that brings (asked for on 23 November 2026; the words, the colours and the list below on the
+24th).
+
+| The word | In | What to do |
+| --- | --- | --- |
+| **VENDOR** | gold | sell it to a vendor |
+| **AUCTION** 24 h | green | put it up at your side's auction house, for so many hours |
+| **NEUTRAL AUCTION** 24 h | orange | the same at the neutral house |
+| **DISENCHANT VENDOR** | lilac | disenchant it, and sell what it gives to a vendor |
+| **DISENCHANT AUCTION** | pink | disenchant it, and put what it gives up at your side's house |
+| **DISENCHANT NEUTRAL AUCTION** | cyan | ...at the neutral house |
 
 ```
 Linen Cloth
 Sell Price: 13c
-Getting rid of it: auction, Alliance house, 24 h          ~ 30c (each)
+Getting rid of it: AUCTION 24 h                              ~ 25c each
 ```
 
-Hold **Shift** and every way is listed, the advised one marked, the others with what speaks
-against them:
+Hold **Shift** and every way is listed with all that is known of it, the advised one marked
+(as the addon wrote it from one house's real prices, 24 November 2026):
 
 ```
-Getting rid of it (each)
-Vendor                                                 13c
-> Alliance auction, 24 h (sells 95%)                 ~ 30c
-Neutral auction (not known how often it sells)         39c if sold
-~ on average: the price less the house's cut, by how often it sells, less the deposit lost
-when it does not. Prices of an hour ago. How often things sell: partly TradeSkillMaster's figures.
+Getting rid of it (one piece)
+VENDOR                                                         13c
+> AUCTION 24 h                                               ~ 25c
+   Lowest buyout 27c, less the 5% cut                          26c
+   2 h: sells 22%, deposit 1c                                ~ 15c
+   8 h: sells 63%, deposit 2c                                ~ 20c
+   > 24 h: sells 95%, deposit 7c                             ~ 25c
+   Sells about 12,795 a day in the region (TradeSkillMaster), for about 23c
+   How often: TradeSkillMaster's figure for the region
+NEUTRAL AUCTION (not known how often it sells)                 34c if sold
+   Lowest buyout 40c, less the 15% cut                         34c
+   How often it sells here is not known yet. Deposit for 2, 8, 24 h: 3c, 13c, 39c
+~ is what one piece brings on average, put up many times: the price less the cut for the
+times it sells, what a vendor pays less the lost deposit for the times it does not. ...
 ```
 
-And of a thing that can be disenchanted, for someone who is no enchanter (both as the addon
-wrote them from one house's real prices, 23 November 2026):
+For an auction that is: the **lowest buyout** and what lands with you if it sells (the price
+less the house's cut); then for **2, 8 and 24 hours** how often it sells if you put it up
+*now*, the deposit at stake, and what one piece brings on average over many such auctions (the
+length the word names is marked); **how many sell in a day**, and for how much; what "how
+often" rests on; where the hour of the day makes a difference, the pace of the hours ahead;
+and what became of your own auctions of the thing. And of a thing that can be disenchanted,
+for someone who is no enchanter:
 
 ```
 Getting rid of it
-Vendor                                                                10s 70c
-> Alliance auction, 24 h (sells 47%)                                ~ 27s 35c
-Neutral auction (not known how often it sells, asked 2g, sells for less)   79s 14c if sold
-Disenchant, then vendor (needs an enchanter)                          ~ 1c
-Disenchant, then Alliance auction (sells 61%, needs an enchanter)     ~ 31s 48c
-Disenchant, then Neutral auction (needs an enchanter)                 72s 59c if sold
+> VENDOR                                                       8s 25c
+AUCTION (too risky by your weights)                          ~ 7s 90c
+   Lowest buyout 9s 45c, less the 5% cut                       8s 98c
+   > 2 h: sells 5%, deposit 41c (too risky)                  ~ 7s 90c
+   8 h: sells 19%, deposit 1s 65c (too risky)                ~ 7s 6c
+   24 h: sells 48%, deposit 4s 95c (too risky)               ~ 6s
+   Sells about 18 a day in the region (TradeSkillMaster), for about 8s 16c
+   How often: TradeSkillMaster's figure for the region
+NEUTRAL AUCTION (not known how often it sells)                 13s 87c if sold
+   Lowest buyout 19s, but it sells for about 8s 16c
+   Reckoned at 16s 32c, less the 15% cut                       13s 87c
+   How often it sells here is not known yet. Deposit for 2, 8, 24 h: 2s 6c, 8s 25c, 24s 75c
+DISENCHANT VENDOR (needs an enchanter)                       ~ 2c
+   0.5 Strange Dust at 1c                                      1c
+   1.1 Greater Magic Essence at 1c                             1c
+   0.05 Small Glimmering Shard at 1c                           0c
+   What it gives: the original game's tables, not checked for this game
+DISENCHANT AUCTION (needs an enchanter)                      ~ 4s 78c
+   0.5 Strange Dust: 24 h, sells 87%, 1s 19c after the cut   ~ 52c
+   1.1 Greater Magic Essence: 24 h, sells 79%, 4s 60c after the cut   ~ 4s 9c
+   0.05 Small Glimmering Shard: 24 h, sells 74%, 4s 65c after the cut   ~ 17c
+DISENCHANT NEUTRAL AUCTION (needs an enchanter)                7s 77c if sold
+   ...
 ```
 
 **What a way brings**, for one piece:
@@ -2192,7 +2232,7 @@ Disenchant, then Neutral auction (needs an enchanter)                 72s 59c if
 | Way | How it is reckoned |
 | --- | --- |
 | **Vendor** | what the game says a vendor pays |
-| **An auction** | on average: the going price less the house's cut, times how often the thing sells of the times it is put up - and, for the times it does not, what a vendor pays less the deposit, which the house keeps. Reckoned for 2, 8 and 24 hours (the deposit and the chance differ), and the best is taken |
+| **An auction** | on average: the lowest price anybody asks, less the house's cut, times how often the thing sells of the times it is put up - and, for the times it does not, what a vendor pays less the deposit, which the house keeps. Reckoned for 2, 8 and 24 hours (the deposit and the chance differ), and the best is taken |
 | **Disenchanting** | what the thing gives on average, by its kind (weapon or armour), its quality and its item level; each material then taken to a vendor, or to either auction house as above |
 
 What an auction costs is in `auctions/houses.js`, and goes to the game with the prices, so a
@@ -2205,7 +2245,10 @@ figure corrected there is corrected in the game without a new addon:
 
 The faction houses' figures are as published for this game (Wowhead, November 2026) and as the
 game's own table of auction houses has them. The neutral houses' are that table's alone,
-reckoned the same way: nobody of ours has put a thing up there and looked.
+reckoned the same way. Each is checked against what the houses really asked of the players'
+own auctions and kept of their sales ("Your own auctions", below): a measured figure within a
+twenty-fifth of the table's confirms it, another stands in its place, once five auctions (or
+sales) are behind it. Until a house has been checked that way, the list's last line says so.
 
 **The best and safest: weights of your own.** An auction is advised only where it is safe
 enough, and that is a matter of points (Esc > Options > AddOns > Azeroth Atlas > **Getting rid
@@ -2236,15 +2279,22 @@ time the prices have been fetched - which, with the addon installed and a house 
 Prices page, is once an hour while the game runs. The game takes them up when it starts or on
 `/reload`.
 
-- **The price** is the going price at your house (see "Auction prices"), and at the neutral
-  house that goes with it. Not for sale at your house just now: the last going price of the
-  last day it was, and the list says how old that is.
+- **The price** is the lowest anybody asks at your house (see "Auction prices"), and at the
+  neutral house that goes with it: what you have to match to be bought first, and what "how
+  often it sells" was measured for - auctions put up at the lowest price of the moment. Not
+  for sale at your house just now: the last going price of the last day it was, and the list
+  says how old that is.
 - **What is asked is not what a thing sells for.** Measured on a house of 6,700 items: one
   item in four is asked at half as much again as it sells for, and where only one or two
   auctions are up, one in ten at ten times it. So a price is reckoned at no more than twice
-  what the thing sells for - TradeSkillMaster's average sale price of the region where this
-  copy has it, else the middle of our own days' prices at the house (four days or more) - and
-  the list says where it did: "asked 3g 95s, sells for less".
+  what the thing sells for - the middle of the prices our own following saw paid, at the house
+  or else in the region (four sales or more: "What sells, measured by ourselves"); where we have
+  none, TradeSkillMaster's average sale price of the region; else the middle of our own days'
+  going prices at the house (four days or more) - and the list says where it did: "Lowest
+  buyout 3g 95s, but it sells for about 5s 79c. Reckoned at 11s 58c".
+- **How many sell in a day** is our own count at the house once it has gone on two days
+  (pieces of what looked like sales: a floor, since a thing put up and bought within the hour
+  is never seen); TradeSkillMaster's figure for the region till then, and said to be.
 - **How often it sells** is made from whatever there is, the nearest counting most
   (`auctions/sells.js`, `chances`): our own following of every auction of your house (see
   "What sells, measured by ourselves" under "Auction prices"), leaned on the same for the
@@ -2255,14 +2305,48 @@ Prices page, is once an hour while the game runs. The game takes them up when it
 - **A sale rate from next to no sales says nothing** ("sells every time": it sold once). So
   TradeSkillMaster's rate counts by how many it has seen sold in a day - at half a one a day
   for half - with the rest made up of what is usual for things that hardly sell (15%).
-- **By length.** A figure for 24 hours stands for the shorter lengths as if things sold at
-  the same rate all the while: 34% in 24 hours is 13% in 8 and 3% in 2. Things sell quicker
-  when newly put up, so this is low for the short lengths - until our own readings, which are
-  taken by length, say otherwise.
+- **By length.** How often a 2-hour or an 8-hour auction sells is measured by how soon things
+  went, whatever they were put up for: of the auctions put up at the lowest price, how many
+  were gone within two hours, and within eight (far more auctions than the few put up for so
+  short). Where an item has no such readings, its figure for 24 hours stands for the shorter
+  lengths by how the two stand to each other over every item of the region together, once
+  400 auctions are behind that; and until then as if things sold at the same pace all the
+  while they are up (34% in 24 hours is 13% in 8 and 3% in 2), which is low for the short
+  lengths: things sell quicker newly put up than later.
+- **The hour of the day.** Things do not sell at the same pace all day. For every house the
+  function counts, hour by hour of the world's clock, how many auctions were up and how many
+  sales there were among them; an hour's pace against the day's average is the shape of the
+  day at that house (gone by once every hour has been counted on three days; the region's
+  till then). From it the map writes, for an auction put up in each hour, how the next 2 and
+  the next 8 hours stand to the hours auctions are usually up in - and the game looks at its
+  clock: the chance of a short auction in the list is that of one put up *now*. So the same
+  thing can be AUCTION 2 h in the evening and VENDOR in the small hours. An item with 30
+  sales or more counted by the hour goes by where its own sales fall (in blocks of three
+  hours), leaned on the house's shape. For 24 hours the hour makes no difference: every hour
+  of the day is in them. Nothing of this shows until the following has gone on for days:
+  `/atlas advice` says whether the hour counts yet.
 - **The neutral house.** Nobody publishes how often things sell there. What is known is our
-  own readings of that house and nothing else: until there are enough for an item, its auction
-  there is listed with what it would fetch and "not known how often it sells", and is never
-  the advice.
+  own readings of that house, and what became of the players' own auctions there, and nothing
+  else: until there are enough for an item, its auction there is listed with what it would
+  fetch and "not known how often it sells", and is never the advice.
+
+**Your own auctions.** The lists of auctions cannot tell an auction that was bought from one
+its seller took down; only the seller knows. So the addon notes what becomes of the auctions
+you put up while it is loaded (`addon/AzerothAtlas/Sales.lua`; it only listens - it puts
+nothing up and presses nothing): the item, how many, for how long, the price asked, the
+deposit the game asked for it and what a vendor pays for the thing, and at which house - then
+sold, run out or taken down, as the game says it: in your list of auctions at the house, in a
+notice, or in the invoice that comes by mail, which also says what the house kept. Nothing is
+made of an auction that is simply gone; one nothing is heard of for four days after its time
+ran out is "not known". It is kept in the addon's saved settings as counts by house, item and
+length; the item's list shows your own ("Yours: 3 put up, 2 of 3 sold"), and `/atlas advice`
+says what the houses took of you. The 3D map sends the counts to the Atlas database with the
+rest of what it sends (`atlasdb/sales.js`: "of this item, at this house, so many were put up
+for 24 hours and so many sold" - no names, no times), where every copy's are added up
+(`/truth/sale`, `/truth/cost`), and they come back in the prices: an auction whose owner says
+what became of it counts in "how often it sells" as it stands (one taken down says nothing),
+and the houses' cut and deposits are checked as said above. These are the players' own
+auctions, not Blizzard's lists: the thirty days of those do not bind them.
 
 **Disenchanting.** The game's own table of what can be disenchanted (`ItemDisenchantLoot`) has
 the kinds and the bands of item level, and not what each gives. That is taken from the
@@ -3774,6 +3858,15 @@ that grows, and its fullest count stands for its earlier ones; every copy's is a
 other source says what disenchanting gives in this game. What it is for is under "What to do
 with a thing you are getting rid of, in its tooltip".
 
+**What became of the players' own auctions.** And two kinds of record of the auctions the
+copies' players put up themselves (`atlasdb/sales.js`): per item (`/truth/sale`), house by
+house and length by length, how many were put up, sold, ran out and were taken down, and what
+was asked and got in all; and per kind of house (`/truth/cost`: your side's, the neutral
+one), the deposits asked against what a vendor pays for the things, and the cut kept against
+the prices paid. A copy sends the whole of its count each time that grows, and its fullest
+count stands for its earlier ones; every copy's is added up. What it is for is under "What to
+do with a thing you are getting rid of, in its tooltip".
+
 **What a copy sends.** While the map runs it reads the game's cache, its own sightings, what a
 fight showed and whom the addon met (above: "a creature of this kind was here", "at this level
 it has this much health", "it is hostile to this side"), which level a creature is on where a
@@ -3783,7 +3876,9 @@ skill", "the game's map puts this quest here"), what following you through a dun
 the map of the dungeon ("this door puts you here", "from here one gets to there", "in this
 part of it the minimap's place is this far off": not when you were in it, how the run went, or
 which way you took through it), what your own disenchanting gave ("things of this kind gave
-these materials, so many times": not which things, when, or whose), and what
+these materials, so many times": not which things, when, or whose), what became of your own
+auctions ("of this item, at this house, so many put up for 24 hours, so many sold": not when,
+or whose) and what the house asked and kept of them, and what
 the addon has seen of the boats (see "Boats, zeppelins and the tram, live": a boat sighting
 is a line, a stop and a moment, with no names; of a ride of your own, that does say this copy's
 player was aboard then), and
@@ -3954,6 +4049,9 @@ the lists cannot tell which. Counted per item and per house, the neutral houses 
 | **How soon** | how long those were up before they went |
 | **How many** | the pieces that went that way, and the pieces bought out of a listing that is sold by the piece and is still up |
 | **Again** | of the auctions that went early, how many had a like-for-like new one beside them in the very same list: more likely taken down and put up again than sold |
+| **How soon things go** | whatever they were put up for: of the auctions put up at the lowest price that have ended, how many were gone within two hours, and of those put up for 8 or 24, how many within eight - what says how often a short auction sells |
+| **What looks like a sale** | an auction gone early, with no like-for-like new one beside it, at no more than one and a half times the lowest price then asked (one asking far more was taken down, not bought) - or pieces bought out of a listing still up. How many such, how many pieces, and for how much: an auction's price is remembered with it to a twentieth, and "what it sells for" is the middle of the prices paid (the geometric mean), which one auction taken down at a hundred times the price does not move much |
+| **The hours of the day** | those sales by the hour of the world's clock they fell in - per item in blocks of three hours, and for the house hour by hour with how many auctions were up and how many were put up |
 
 What it cannot see, and so what the figures lean towards: sold and taken down look the same
 (half of the "again" ones are taken to be the second, a guess until there are weeks of
@@ -3981,13 +4079,19 @@ In the database: `/market/sells/<house>/d<day>` (what ended that day), `/market/
 (the last 30 days together: what a copy reads), `/market/sell/all-<region>` (every house of the
 region together, made once a day), and `/track/<house>` (every auction still up, as the next
 run needs it: about five bytes an auction, read by the function alone), and
-`/market/sellindex/<house>` (when it was last added to, which making of the figures it is, and
-since when the following has gone on). A copy fetches the
+`/market/sellindex/<house>` (when it was last added to, which making of the figures it is,
+since when the following has gone on and since when sales have been counted, and the hours of
+the day of the last 30 days together), and `/market/hours/<house>/d<day>` (one day's hours of
+the day). A copy fetches the
 figures of its own house, of the neutral house that goes with it, and of the region, no more
 often than every six hours, and with them the neutral house as last listed (its prices, not
 its days); all of it is deleted after 30 days like everything made from Blizzard's lists.
 They are what an item's tooltip in the game goes by (see "What to do with a thing you are
-getting rid of"); the Prices page does not show them yet.
+getting rid of"), and the Prices page shows the same: at your own house the Sells column is
+the figure the tooltip goes by (how often it sells put up for 24 hours, and how many a day),
+and an item's page has **Selling one** - for your house and the neutral one, what lands with
+you if it sells, and for 2, 8 and 24 hours how often it sells put up now and what one piece
+brings on average.
 
 **What an item gives.** This game keeps no stats on an item (the original game did). An item
 only says what share of a budget each of its stats takes, and the budget comes from the item's
@@ -4008,11 +4112,10 @@ house, or a vendor's price where a vendor sells it for no more (which reagents a
 taken from QuestieDB: thread, vials, flux and the like). A recipe with a reagent that has no
 price, because none is for sale and no vendor is known to sell it, is shown with the rest costed
 and the gap said, and no difference is worked out. An item's page shows the recipe that makes
-it, reagent by reagent, and the recipes it goes into. What the sums leave out: the auction
-house's cut and deposit (`auctions/houses.js` has what this game takes; these sums do not count
-it yet), what the recipe itself
-costs to learn, and whether the thing sells at all, which is what the Sells column
-(TradeSkillMaster's) is beside it for. A difference is between two prices asked, not a promise.
+it, reagent by reagent, and the recipes it goes into. The difference has what the auction house keeps of a sale taken off (`auctions/houses.js`: 5%
+at a side's house, 15% at a neutral one). What the sums leave out: the deposit (it comes back
+when the thing sells, and is lost when it does not), what the recipe itself costs to learn,
+and whether the thing sells at all, which is what the Sells column is beside it for. A difference is between two prices asked, not a promise.
 The skill at which a recipe turns yellow and grey is in the files; the skill at which a trainer
 teaches it is the trainer's to say, and is not.
 
