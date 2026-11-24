@@ -28,9 +28,9 @@ import { writeDropsAddon } from './drops.js';
 import { writeBookAddon } from './questbook.js';
 import { standinStatus, applyStandins, setWant, switchOn, pricesMode } from './standins.js';
 import { writePricesAddon } from './prices.js';
-import { writeMarketAddon, marketWanted } from './market.js';
+import { writeMarketAddon, marketWanted, addonInGame } from './market.js';
 import { writeFactsAddon } from './facts.js';
-import { Auctions } from './auctions.js';
+import { Auctions, guessHouse } from './auctions.js';
 import { openLogs, logDir, note, noteCrashes } from './log.js';
 import { Reports } from './report.js';
 
@@ -197,6 +197,29 @@ const auctions = new Auctions(cfg, configFile, {
 auctions.start();
 handPrices();
 handMarket();
+// No auction house chosen, and the addon in the game - whose item tooltips say nothing without
+// prices, and say nothing of why (reported on 23 November 2026: "The auction parts of the addons
+// arent showing up", on a copy whose Prices page had never been opened). The house is taken from
+// the game where that can be told: its region, the realm played on, the side of the character in
+// the game now (auctions.js: guessHouse). Looked at until there is a house; the Prices page says
+// how it came by it, and any other can be chosen there. Where it cannot be told, the page's
+// check and the addon say that one has to be chosen.
+{
+  const pick = () => {
+    try {
+      if (!auctions.settings.on || auctions.settings.house) return true;
+      if (job.running || !addonInGame(cfg)) return false;
+      const faction = tracker.state?.status === 'live' ? tracker.state.player?.faction : null;
+      const key = guessHouse(cfg, faction);
+      if (!key) return false;
+      auctions.setHouse(key, { auto: true });
+      note('auctions', 'no auction house was chosen: taken from the game (its region, the realm played on, your side)', { house: key, name: auctions.status().name });
+      return true;
+    } catch (err) { note('auctions', 'the auction house could not be taken from the game', { error: err.message }); return true; }
+  };
+  const timer = setInterval(() => { if (pick()) clearInterval(timer); }, 15000);
+  timer.unref?.();
+}
 if (pricesWanted()) auctions.touch();
 const VIEWER_DIR = path.join(PROJECT_ROOT, 'viewer');
 // The page's own files, watched: a page that is open loads itself again when they change (changes.js).

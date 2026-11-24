@@ -789,6 +789,24 @@ do
   for _, event in ipairs({ "UNIT_SPELLCAST_SENT", "LOOT_READY", "LOOT_OPENED", "MODIFIER_STATE_CHANGED" }) do pcall(frame.RegisterEvent, frame, event) end
 end
 
+-- No prices: said in the chat too, once in a few days - a tooltip that says nothing says nothing
+-- of why (reported on 23 November 2026: "The auction parts of the addons arent showing up", on
+-- a copy whose 3D map had no auction house chosen).
+local HINT_EVERY = 3 * 86400
+local function Hint()
+  if not hooked or Market() or not shared.AdviceOn() then return end
+  local now = type(time) == "function" and time() or 0
+  local told = tonumber(DB().adviceToldAt) or 0
+  if now - told < HINT_EVERY and now >= told then return end
+  DB().adviceToldAt = now
+  say("item tooltips can say what to do with a thing you do not want (VENDOR, AUCTION, DISENCHANT), but there are no auction prices to go by yet. Run the 3D map: it takes your auction house from the game, or asks for it under Prices. Then leave the game and start it again. (/atlas advice off: not wanted.)")
+end
+do
+  local frame = CreateFrame("Frame", "AzerothAtlasAdviceHint")
+  frame:SetScript("OnEvent", function() shared.Try("no prices, said", Hint) end)
+  pcall(frame.RegisterEvent, frame, "PLAYER_ENTERING_WORLD")
+end
+
 do
   local m = Market()
   if not hooked then shared.Log("advice: this game has no way for an addon to add to an item's tooltip: nothing is said of what to do with a thing")

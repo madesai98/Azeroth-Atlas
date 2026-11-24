@@ -1297,6 +1297,12 @@ async function checkAll(resume = null) {
         standLines = []; showStandLines(); showStandins(st);
       }
     }
+    // 6. the auction house whose prices the addon's item tooltips go by
+    try {
+      const p = await getJSON('/api/prices');
+      if (p?.on && !p.house) say(8, 'Auction prices: no auction house is chosen. Choose yours under Prices: an item\u2019s tooltip in the game then says what to do with a thing you do not want (then start the game again).', 'warn');
+      else if (p?.auto) say(8, `Auction prices: ${p.name}, taken from the realm and the side you play. Another can be chosen under Prices.`, '');
+    } catch { /* said under Prices */ }
     say(9, `Checked at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`, '');
   } catch (err) {
     say(9, `Stopped: ${err.message}`, 'warn');

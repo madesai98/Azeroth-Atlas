@@ -18,7 +18,8 @@ import { spawn } from 'node:child_process';
 import { PROJECT_ROOT } from '../extractor/config.js';
 import { AuctionStore } from '../auctions/store.js';
 import { auctionSettings, setHouse } from '../auctions/settings.js';
-import { HOUSES, REGION_NAMES, REGION_RULESETS, RULESETS, SIDES, housesOf, houseName } from '../auctions/houses.js';
+import { HOUSES, REGION_NAMES, REGION_RULESETS, RULESETS, SIDES, housesOf, houseName, houseOf } from '../auctions/houses.js';
+import { flavourFolder } from '../extractor/config.js';
 import { listHouse, listRecipes, itemHistory } from '../auctions/view.js';
 import { marketFigures, marketKey, sellingOf } from './market.js';
 import { note } from './log.js';
@@ -28,6 +29,39 @@ const HOUR = 3600;                 // Blizzard's lists: one an hour
 const SLACK = 240;                 // seconds after the hour is up before the Atlas database is asked: the function in the cloud
                                    // runs about two minutes after Blizzard's new list is out, and takes half a minute
 const ASKED_FOR = 20 * 60 * 1000;  // how long after the page last asked this goes on fetching
+
+/**
+ * The auction house of whoever plays here, where the game itself says enough: the region it is
+ * set to (Config.wtf: SET portal "US"), the realm its characters are on (the folders under
+ * WTF/Account/<account>, which are named by the realm's number: houses.js knows which ruleset
+ * some of them are of) and the side of the character in the game now. Null where any of that
+ * is not known, or where characters are kept on realms of more than one ruleset - then it is
+ * for the player to choose, on the Prices page. Read only.
+ * @param faction 'alliance' or 'horde': the side of the character in the game now
+ */
+export function guessHouse(cfg, faction) {
+  try {
+    if (faction !== 'alliance' && faction !== 'horde') return null;
+    const folder = flavourFolder(cfg);
+    if (!folder) return null;
+    const wtf = path.join(cfg.installRoot, folder, 'WTF');
+    const region = /^SET portal "([A-Za-z]{2})"/m.exec(fs.readFileSync(path.join(wtf, 'Config.wtf'), 'utf8'))?.[1].toLowerCase();
+    if (!region || !REGION_RULESETS[region]) return null;
+    const houses = new Set();
+    for (const account of fs.readdirSync(path.join(wtf, 'Account'))) {
+      let realms = [];
+      try { realms = fs.readdirSync(path.join(wtf, 'Account', account)); } catch { continue; }
+      for (const realm of realms) {
+        if (!/^\d+$/.test(realm)) continue;
+        // (a realm somebody plays on: with a character's folder in it)
+        let played = false;
+        try { played = fs.readdirSync(path.join(wtf, 'Account', account, realm), { withFileTypes: true }).some((d) => d.isDirectory()); } catch { /* not that one */ }
+        if (played) houses.add(houseOf(region, realm, faction) ?? '?');
+      }
+    }
+    return houses.size === 1 && !houses.has('?') ? [...houses][0] : null;
+  } catch { return null; }
+}
 
 export class Auctions {
   /**
@@ -53,10 +87,10 @@ export class Auctions {
   }
 
   status() {
-    const { on, house } = this.settings;
+    const { on, house, auto } = this.settings;
     const now = house ? this.store.now(house) : null;
     return {
-      on, house, name: house ? houseName(house) : null,
+      on, house, name: house ? houseName(house) : null, auto,
       t: now?.t ?? null, items: now ? Object.keys(now.items).length : 0,
       ...this.state,
     };
@@ -120,9 +154,9 @@ export class Auctions {
     return true;
   }
 
-  /** Choose this copy's house: written to config.json, and fetched straight away. */
-  setHouse(key) {
-    this.settings = setHouse(this.cfg, this.configFile, key);
+  /** Choose this copy's house: written to config.json, and fetched straight away. (auto: taken from the game - guessHouse - not chosen by anybody.) */
+  setHouse(key, { auto = false } = {}) {
+    this.settings = setHouse(this.cfg, this.configFile, key, { auto });
     this.asked = Date.now();
     this.state.last = null;
     this.run();

@@ -285,7 +285,9 @@ export function bindPrices() {
     house.value = s.house ?? '';
     const sum = $('priceWhen');
     if (!s.on) { note.textContent = 'Auction prices are switched off in config.json.'; if (sum) sum.textContent = ''; return; }
-    if (!s.house) { note.textContent = 'Choose the house of your ruleset and side.'; if (sum) sum.textContent = ''; return; }
+    if (!s.house) { note.textContent = 'Choose the house of your ruleset and side: an item\'s tooltip in the game then says what to do with a thing you do not want.'; if (sum) sum.textContent = ''; return; }
+    // (nobody chose it: the map took it from the game - the region, the realm you play on, your side)
+    house.title = s.auto ? 'Taken from the game: its region, the realm you play on and your character\'s side. Choose another here if it is not yours.' : 'The auction house whose prices are shown: your ruleset and your side';
     if (sum) sum.textContent = s.t ? ago(s.t) : '';
     const bits = [];
     if (s.t) bits.push(`${s.items.toLocaleString()} items, listed at ${clock(s.t)} (${ago(s.t)})`);

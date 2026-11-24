@@ -393,6 +393,11 @@ export function sellingOf(figures, item, vendor = 0, now = Date.now() / 1000) {
   return out;
 }
 
+/** Is Azeroth Atlas in the game? (The item's tooltip there is what the figures are for.) */
+export function addonInGame(cfg) {
+  try { const dir = addonsDir(cfg); return !!dir && fs.existsSync(path.join(dir, NAME, `${NAME}.toc`)); } catch { return false; }
+}
+
 /** Is there anybody to write the figures for: Azeroth Atlas in the game, and a house chosen? */
 export function marketWanted(cfg) {
   try {

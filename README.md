@@ -2296,6 +2296,17 @@ time the prices have been fetched - which, with the addon installed and a house 
 Prices page, is once an hour while the game runs. The game takes them up when it starts or on
 `/reload`.
 
+- **Which auction house** is yours is chosen on the map's Prices page - or taken from the
+  game, where nobody has chosen and the game says enough: the region it is set to, the realm
+  your characters are on (the game keeps their settings under the realm's number, and
+  `auctions/houses.js` knows which ruleset some realms are of: so far the Americas' realm 91,
+  PvP), and the side of the character in the game now. The Prices page says that it was taken
+  so, and any other can be chosen there. Without a house there are no prices and the tooltip
+  says nothing - which looked like the addon not working (reported on 23 November 2026: "The
+  auction parts of the addons arent showing up", on a copy whose Prices page had never been
+  opened). So where the house cannot be told, the page's check says that one has to be chosen,
+  and the addon says in the chat as you come into the world, once in a few days, that there
+  are no prices and what to do about it (addon version 44).
 - **The price** is the lowest anybody asks at your house (see "Auction prices"), and at the
   neutral house that goes with it: what you have to match to be bought first, and what "how
   often it sells" was measured for - auctions put up at the lowest price of the moment. Not
@@ -2384,8 +2395,9 @@ needing one, and are never the advice.
 
 - A thing bound to you (the game's own "Soulbound", or one that binds when picked up) cannot
   be auctioned: its auction is listed as that, and left out.
-- Nothing where the 3D map has written no prices (no house chosen, or the map never run): the
-  vendor's price is in the game's own tooltip already. `/atlas advice` says what is missing.
+- Nothing in the tooltip where the 3D map has written no prices (no house chosen and none to
+  be told from the game, or the map never run): the vendor's price is in the game's own
+  tooltip already. The chat says so now and then, and `/atlas advice` says what is missing.
 - Prices are for one piece, and as old as the last time the game was started - the list says
   how old, and a line of its own under the advice once they are more than three days old.
 - Nothing with any value the game hands over as "secret": left alone, not worked around.

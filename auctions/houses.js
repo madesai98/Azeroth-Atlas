@@ -38,6 +38,23 @@ export const HOUSES = {
 export const REGION_RULESETS = { us: ['pvp', 'normal', 'rp', 'rppvp'], eu: ['pvp', 'normal', 'rp', 'rppvp'], kr: ['pvp', 'normal'], tw: ['pvp', 'normal'] };
 export const REGION_NAMES = { us: 'Americas', eu: 'Europe', kr: 'Korea', tw: 'Taiwan' };
 
+/**
+ * Which ruleset a realm is of, by the game's own number for the realm - the folder its
+ * characters' settings are kept under (WTF/Account/<account>/<realm>). Only the realms this
+ * is known of: the game's files do not say, and Blizzard's lists name no realms. (91, the
+ * Americas: the realm of the copy whose house, 110, was held against TradeSkillMaster's PvP
+ * Alliance file.) A realm not listed here is one the map asks about, on its Prices page.
+ */
+export const REALM_RULESETS = { us: { 91: 'pvp' } };
+
+/** The house of a side on a realm ('us', 91, 'alliance' → 'us-110') - or null where the realm's ruleset is not known, or there is no such side. */
+export function houseOf(region, realm, side) {
+  const ruleset = REALM_RULESETS[region]?.[realm];
+  if (!ruleset || !REGION_RULESETS[region]?.includes(ruleset) || (side !== 'alliance' && side !== 'horde')) return null;
+  const id = Object.keys(HOUSES).find((n) => HOUSES[n].ruleset === ruleset && HOUSES[n].side === side);
+  return id ? `${region}-${id}` : null;
+}
+
 /** 'us-110' → { region, id, ruleset, side } or null when there is no such house. */
 export function parseHouse(key) {
   const m = /^(us|eu|kr|tw)-(\d{1,4})$/.exec(String(key ?? ''));
