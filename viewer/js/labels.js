@@ -138,7 +138,8 @@ export class Labels {
 
     // What the game's minimap shows as dots (server/dots.js), drawn as the game draws them: a disc
     // of its colour in a ring - red hostile, yellow neutral, green friendly, blue your pet; the ring
-    // silver, and gold on your target. Your pet has its name over it.
+    // silver, and gold on your target - and on a thing your tracking finds (a herb, a vein), which
+    // the game draws as a yellow disc in a gold ring. Your pet has its name over it.
     for (const d of live.dots ?? []) {
       const p = toScreen(d.x, d.y, d.z + 1.5);
       if (!p || p[0] < -20 || p[0] > W + 20 || p[1] < -20 || p[1] > H + 20) continue;
@@ -147,7 +148,7 @@ export class Labels {
       const r = (pet ? 4.2 : 3.8) * dpr;
       const disc = (radius, colour) => { ctx.beginPath(); ctx.arc(p[0], p[1], radius, 0, Math.PI * 2); ctx.fillStyle = colour; ctx.fill(); };
       disc(r + 3.4 * dpr, 'rgba(8,10,14,0.9)');
-      disc(r + 2.2 * dpr, d.role === 'target' ? '#ffd24a' : '#d9dbe0');
+      disc(r + 2.2 * dpr, d.role === 'target' || d.ring === 'gold' ? '#ffd24a' : '#d9dbe0');
       disc(r + 0.4 * dpr, 'rgba(8,10,14,0.85)');
       disc(r, fill);
       if (pet) outlined(`${d.name ?? 'Pet'}${d.dead ? ' (dead)' : ''}`, p[0], p[1] - 14 * dpr, '#d9d3ff', 11);

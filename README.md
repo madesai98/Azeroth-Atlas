@@ -3073,7 +3073,7 @@ and your pet. The map shows them where they are. Under **You**:
 
 | Switch | What it shows |
 | --- | --- |
-| **What I track, and my target** | every dot of your tracking: red for what is hostile to you, yellow for neutral, green for friendly - and your target, in a gold ring |
+| **What I track, and my target** | every dot of your tracking: red for what is hostile to you, yellow for neutral, green for friendly - and your target, in a gold ring. A herb, a vein or a chest your tracking finds is a yellow dot in a gold ring, as the game draws it |
 | **My pet** | your pet - a hunter's pet, a warlock's demon - by its name |
 
 Both are on until you turn them off. The line above them says what your tracking is set to and
@@ -3093,6 +3093,23 @@ one thing for as long as it is seen, and one picture's mistake is never shown. I
 where the game hides where you are, your place is the one found on the minimap itself. Only the
 picture of the game's own window is read; nothing is sent into the game, and nothing of the
 picture is kept or leaves this computer.
+
+**A herb, a vein, a chest.** What Find Herbs, Find Minerals and Find Treasure put on the
+minimap is a dot like the others, and the same one as a neutral creature you have targeted: a
+yellow disc in a gold ring (seen in the game on 24 November 2026, with Find Herbs on; the
+game's icon sheet has that dot twice). Disc and ring are of one colour, so it is the one dot
+that cannot be told by "a disc of one colour with a ring of another round it". It is told by
+its own look instead: a round of gold edged in black all round, and inside it the bright
+disc, a darker line, the bright ring - which a coin, a nugget or the yellow diamond the game
+pins for a waypoint do not have. Until then it was looked for only once the size of a dot was
+known, and that was learned from a dot with a silver ring: somebody tracking herbs and
+nothing else never has one on the minimap, and saw none of their herbs on the map (reported
+that day: "i can see yellow markers on the ingame minimap, why arent they showing on my 3d
+map?" - 6,491 pictures of that minimap had been read, and no dot found on any). Which it is,
+a thing you track or your target, the picture does not say: with your tracking set to
+finding things, or several such dots on the minimap (you have one target), they are what you
+track. Drawn very small - under five and a half pixels from its middle to the ring's edge -
+the line inside does not show, and such a dot is found only once another has given the size.
 
 **What a dot is.** The picture says a colour and a ring, and no name. The addon says what else
 can be known (`addon/AzerothAtlas/Yours.lua`, from version 34; `/atlas pet` in the game says
@@ -3126,15 +3143,20 @@ What it cannot do:
 - Tell your pet from a hawk of yours for sure, where the game does not say where the pet is:
   with the pet out of sight (at heel, under your arrow) a hawk's dot is taken for it while the
   hawk lasts.
-- Read anything but the ringed dots. Should the game show a herb or a vein as a little picture
-  of its own, that is not read yet.
+- Tell a herb from a vein or a chest, or any of them from a neutral creature you have
+  targeted, by the dot alone: all are the yellow dot in the gold ring (above).
+- Read anything but the ringed dots: what an addon draws on the minimap in another look is
+  not read.
 
 It was tried against the game itself - a creature coming at its hunter, as the target in its
 gold ring, and the pet running in to it; a pet on the creature it fought; a pet half under its
 owner's arrow - and on some eight hundred made-up pictures: the game's own dots drawn at six
 sizes onto real pictures of the minimap, alone and one over another, and other icons of the
-game's, which are no dots. The addon's half ran in a made-up game. What a tracking spell shows
-was not seen in the game itself.
+game's, which are no dots. The addon's half ran in a made-up game. What Find Herbs shows was
+seen in the game on 24 November 2026, and the game's own pictures of that day are tried with
+the rest: a herb beside the player, found with no other dot to go by; and a minimap with none,
+the waypoint's yellow diamond on it, where nothing is found. What a tracking spell for
+creatures shows was not seen in the game itself.
 
 `"dots": false` in `config.json` switches it off.
 

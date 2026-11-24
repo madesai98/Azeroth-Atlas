@@ -6,7 +6,9 @@
 // screen, the helper that reads the strip has the game's picture (strip-reader.cs), and a dot is
 // a thing with a look of its own: a small disc of one colour (red: hostile to you; yellow:
 // neutral; green: friendly; blue: yours, or of your party), a ring round it (silver; gold on
-// the one you have targeted), and a black edge round that. The game draws every one of them from
+// the one you have targeted), and a black edge round that. A THING your tracking finds - a
+// herb, a vein of ore - is the yellow disc in the gold ring: the same dot as a neutral creature
+// you have targeted (seen in the game on 24 November 2026, with Find Herbs on). The game draws every one of them from
 // one sheet of icons (Interface/Minimap/ObjectIconsAtlas), which is where the measures below
 // are from; how big they come out on the screen goes by the interface's scale, so the size is
 // measured off the dots themselves and nothing is taken for granted about it.
@@ -29,6 +31,7 @@
 const DISC = 4.3 / 7.5, RING_IN = 5 / 7.5, EDGE = 8.7 / 7.5;
 const SMALLEST = 3, LARGEST = 24; // pixels: the ring's outer edge is this far from the middle, at the least and at the most
 const RAYS = 32;
+const ALONE_LEAST = 5.5; // pixels: the least a yellow dot in a gold ring measures for it to be told with no other dot's size to go by
 const WHOLE = 0.9; // the share of the ways out from a dot's middle that find its ring, for the ring to be "all round"
 
 // what a pixel can be
@@ -84,6 +87,8 @@ export function findDots(pic, geo, opts = {}) {
   }
   const at = (x, y) => { const X = Math.round(x) - x0, Y = Math.round(y) - y0; return X < 0 || Y < 0 || X >= W || Y >= H ? OTHER : cls[Y * W + X]; };
   at.lum = (x, y) => { const X = Math.round(x) - x0, Y = Math.round(y) - y0; return X < 0 || Y < 0 || X >= W || Y >= H ? 255 : lum[Y * W + X]; };
+  // (the pure yellow the lit side of a gold ring is on the screen - brighter than on the icon sheet, and past what counts as gold)
+  at.lit = (x, y) => { const X = Math.round(x), Y = Math.round(y); if (X < x0 || Y < y0 || X > x1 || Y > y1) return false; const i = (Y * w + X) * 3; return data[i] >= 200 && data[i + 1] >= 190 && data[i + 2] <= 130 && data[i] - data[i + 2] >= 110; };
   const taken = new Uint8Array(W * H); // (pixels a dot already found accounts for)
   const dots = [];
 
@@ -109,16 +114,34 @@ export function findDots(pic, geo, opts = {}) {
     c.done = true;
     if (inside(c.d) && !twice(c.d)) { take(c.d); sizes.push(c.d.size); }
   }
-  const size = sizes.length ? median(sizes) : null;
-  const S = size ?? ownSize;
+  let size = sizes.length ? median(sizes) : null;
+  let S = size ?? ownSize;
 
+  if (!S) {
+    // ---- 1b. the yellow dot with the gold ring, with no size to go by ----------------------------
+    // Who tracks herbs or ore and nothing else has no other dot on the minimap, ever: this one
+    // has to be told by itself. A round of gold edged in black all round is not enough for that
+    // (other things are); it has the look of a dot inside as well - a disc, a darker line round
+    // it, the ring (goldAlone). What it measures is the size of a dot, for the rest.
+    for (const c of cands) {
+      if (c.done || c.b.kind !== GOLD || claimed(taken, W, c.b) > 0.5) continue;
+      const d = goldAlone(c.b, at, x0, y0);
+      if (!d) continue;
+      c.done = true;
+      if (inside(d) && !twice(d)) { take(d); sizes.push(d.size); }
+    }
+    size = sizes.length ? median(sizes) : null;
+    S = size;
+  }
   if (S) {
     // ---- 2. the yellow dot with the gold ring (your target, neutral to you) ---------------------
     // Disc and ring run into each other: a round of gold of the ring's size, edged in black -
     // which is only believed where the size of a dot is known.
     for (const c of cands) {
       if (c.done || c.b.kind !== GOLD || claimed(taken, W, c.b) > 0.5) continue;
-      const d = goldDot(c.b, at, x0, y0, S);
+      // (...or told by its own look, where it is of about that size: on the screen the lit side of its ring is past gold, and the round of gold comes out small)
+      let d = goldDot(c.b, at, x0, y0, S);
+      if (!d) { d = goldAlone(c.b, at, x0, y0); if (d && Math.abs(d.size - S) > Math.max(1.5, 0.25 * S)) d = null; }
       if (!d) continue;
       c.done = true;
       if (inside(d) && !twice(d)) take(d);
@@ -300,6 +323,66 @@ function goldDot(b, at, x0, y0, S) {
   const far = ends.map((p) => Math.hypot(p[0] - circle.x, p[1] - circle.y));
   if (Math.max(...far) - Math.min(...far) > Math.max(1.6, 0.3 * S)) return no(b, x0, y0, `gold, and not round: its edge is from ${Math.min(...far).toFixed(1)} to ${Math.max(...far).toFixed(1)} out`);
   return { x: circle.x, y: circle.y, kind: 'yellow', ring: 'gold', size: S, fit: ends.length / RAYS };
+}
+
+/**
+ * The yellow dot with the gold ring where the size of a dot is not known: a round of gold edged
+ * in black all round, as goldDot looks for - and, since nothing else vouches for it, with a
+ * dot's own look inside: out from the middle the bright disc, a darker line, the bright ring.
+ * (A coin, a nugget, the glow of a quest's mark are gold and round and have no such line; drawn
+ * very small the line does not show either, and the dot is then found only once another has
+ * given the size.)
+ * @returns { x, y, kind: 'yellow', ring: 'gold', size (as measured: the ring's outer edge), fit } - or null
+ */
+function goldAlone(b, at, x0, y0) {
+  // (how big it is, to begin with: half the box round it - the line between disc and ring is not gold, so its pixels are fewer than a round that size has)
+  let R = Math.max(b.w, b.h) / 2;
+  if (R < SMALLEST || R > LARGEST * 1.1 || Math.abs(b.w - b.h) > Math.max(2, 0.25 * Math.max(b.w, b.h)) || b.n < 0.5 * Math.PI * R * R) return no(b, x0, y0, `no round of gold (${b.w} by ${b.h}, ${b.n} of it)`);
+  let mx = b.x + x0 + (b.w - 1) / 2, my = b.y + y0 + (b.h - 1) / 2, circle = null, count = 0;
+  // (twice: the second time from the middle its edge gave, which is truer than the blob's)
+  for (let pass = 0; pass < 2; pass++) {
+    const ends = [];
+    for (let k = 0; k < RAYS; k++) {
+      const a = (k / RAYS) * 2 * Math.PI, ux = Math.cos(a), uy = Math.sin(a);
+      let r = 0, end = 0, gap = 0, c = OTHER;
+      while (r <= R * 1.5 + 2) {
+        r += 0.5; c = at(mx + ux * r, my + uy * r);
+        if (c === GOLD || at.lit(mx + ux * r, my + uy * r)) { end = r; gap = 0; continue; }
+        if (r < R * 0.8) continue; // (inside, between disc and ring, it is shaded: anything goes)
+        if (c === DARK || c === DIM) { c = DARK; break; }
+        if (++gap > 3) break; // (the ring's own rim, where it is dim: a pixel or two that are neither gold nor black yet)
+      }
+      if (c === DARK && end > R * 0.6) ends.push([mx + ux * (end + 0.25), my + uy * (end + 0.25)]);
+    }
+    if (ends.length < RAYS * 0.9) return no(b, x0, y0, `gold, with black round it on ${ends.length} of ${RAYS} ways out (no size of a dot known)`);
+    circle = fitCircle(ends);
+    if (!circle || circle.r < SMALLEST || circle.r > LARGEST || circle.spread > Math.max(0.5, circle.r * 0.07)) return no(b, x0, y0, circle ? `gold, its edge no circle (radius ${circle.r.toFixed(1)}, off by ${circle.spread.toFixed(2)})` : 'gold, its edge no circle');
+    const far = ends.map((p) => Math.hypot(p[0] - circle.x, p[1] - circle.y));
+    if (Math.max(...far) - Math.min(...far) > Math.max(1.6, 0.3 * circle.r)) return no(b, x0, y0, `gold, and not round: its edge is from ${Math.min(...far).toFixed(1)} to ${Math.max(...far).toFixed(1)} out`);
+    mx = circle.x; my = circle.y; R = circle.r; count = ends.length;
+  }
+  // (drawn smaller than this the line inside does not show, and a diamond or a coin would pass)
+  if (R < ALONE_LEAST) return no(b, x0, y0, `gold, round, edged in black, and too small to be told by itself (${R.toFixed(1)}; no size of a dot known)`);
+  if (at(mx, my) !== GOLD) return no(b, x0, y0, 'gold, round, and its middle is not');
+  // The look inside: bright in the disc, a darker line where disc and ring meet, bright again in
+  // the ring. The line is drawn shaded - dark on the side away from the light, on the other
+  // only a little duller than what it parts: so it has to be there, however faint, on half of
+  // the ways out, and plainly on a quarter.
+  let lined = 0, plain = 0;
+  for (let k = 0; k < RAYS; k++) {
+    const a = (k / RAYS) * 2 * Math.PI, ux = Math.cos(a), uy = Math.sin(a);
+    let disc = 0, line = 255, ring = 0;
+    for (let r = 0.5; r <= R; r += 0.5) {
+      const l = at.lum(mx + ux * r, my + uy * r), f = r / R;
+      if (f <= DISC - 0.1) { if (l > disc) disc = l; }
+      else if (f >= DISC - 0.06 && f <= RING_IN + 0.08) { if (l < line) line = l; }
+      else if (f >= RING_IN + 0.1 && f <= 0.95) { if (l > ring) ring = l; }
+    }
+    if (line <= 0.9 * Math.min(disc, ring)) lined++;
+    if (line <= 0.7 * Math.min(disc, ring)) plain++;
+  }
+  if (lined < RAYS * 0.5 || plain < RAYS * 0.25) return no(b, x0, y0, `gold, round, edged in black - and a line between a disc and a ring on ${lined} of ${RAYS} ways out, plainly on ${plain} (no size of a dot known)`);
+  return { x: mx, y: my, kind: 'yellow', ring: 'gold', size: R, fit: count / RAYS };
 }
 
 /**

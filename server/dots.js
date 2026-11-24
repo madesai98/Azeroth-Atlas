@@ -14,7 +14,10 @@
 //
 // A dot is a colour and a ring, and no name. What can be said of it:
 //   red, yellow, green   hostile, neutral, friendly to you: what your tracking found
-//   a gold ring          the one you have targeted
+//   a gold ring          the one you have targeted - but a YELLOW dot in a gold ring is also
+//                        what the game puts there for a thing your tracking finds (a herb, a
+//                        vein of ore, a chest): where your tracking is set to finding things,
+//                        or there are several such dots, they are what you track
 //   blue                 yours, or one of your party. Your party is shown already (the game
 //                        says where they are), so a blue dot where one of them stands is left
 //                        out. Of the others, one is your pet: the one where the addon says
@@ -39,6 +42,8 @@ const EVERY = 250;       // ms between two pictures of the minimap
 const PARTY_NEAR = 10;   // yards: a blue dot this near a member of your party is that member
 const PET_NEAR = 15;     // ...this near where the game says your pet is, your pet (what the addon says is a second old)
 const SIZES = 15;        // measures of a dot's size kept (the middle one is gone by)
+/** The tracking that finds things, not creatures - Find Herbs, Find Minerals, Find Treasure, Find Fish: what it finds is shown as a yellow dot in a gold ring. */
+const THINGS = new Set([2383, 2580, 2481, 43308]);
 const round = (v) => Math.round(v * 10) / 10;
 
 export class Dots {
@@ -183,9 +188,15 @@ export class Dots {
       const at = dot ?? said;
       if (at) out.push({ id: 'pet', role: 'pet', name: pet.name ?? null, dead: !!pet.dead, x: round(at.x), y: round(at.y), dot: !!dot });
     }
+    // A gold ring is your target's - but the yellow dot in a gold ring is also every thing your
+    // tracking finds. With tracking set to finding things, or several of them there (you have one
+    // target), they are what you track.
+    const golden = shown.filter((t) => t.kind === 'yellow' && t.ring === 'gold').length;
+    const things = golden > 1 || (yours?.tracking ?? []).some((t) => THINGS.has(t.spell));
     for (const t of shown) {
       if (t.kind === 'blue') continue;
-      out.push({ id: `d${t.id}`, role: t.ring === 'gold' ? 'target' : 'tracked', kind: t.kind, ring: t.ring, x: round(t.x), y: round(t.y), dot: true });
+      const thing = t.kind === 'yellow' && t.ring === 'gold' && things;
+      out.push({ id: `d${t.id}`, role: t.ring === 'gold' && !thing ? 'target' : 'tracked', kind: t.kind, ring: t.ring, x: round(t.x), y: round(t.y), dot: true });
     }
     return out;
   }
