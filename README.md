@@ -1447,6 +1447,23 @@ tram, then fly Ironforge to Menethil Harbor, then the boat from Menethil Harbor 
 then 553 yd on foot"). The quickest is drawn (the parts on the map you are looking at), with
 each part spelled out in the Routes section next to what walking the whole way would take.
 
+**A place that is shut in.** By the straight line the Wizard's Sanctum is a few yards from
+half of Stormwind: it lies under it. Its only way out is its portal, so every walk "out of
+it" - to the waypoint, to the inn, to the top of the tower above - looked good by estimate
+and came to nothing when worked out, one or two with each look for the chain. There were
+eight looks. A journey that could go by the Skyborne Portal (from anywhere in the north of
+the Eastern Kingdoms to Stormwind) spent them all on walks through solid rock, nothing else
+had been worked out by then, and the answer was to walk: from the Hinterlands to Stormwind
+23 minutes on foot, with Aerie Peak's flight master beside you (reported on 23 November
+2026: "route ignoring flight paths right next to me"). Now a place a walk cannot even leave
+(the route worker's "no way out of where you are": what can be reached from the spot is a
+small pocket) is taken for what it is - out of it only what is within 150 yards is looked at,
+which is its portal - and there are 24 looks, or twelve seconds. That journey is fly Aerie
+Peak to Southshore, the Skyborne Portal, the portal out of the Sanctum: six minutes. A
+journey that still runs out of looks says so in the page's notes ("journeyCutShort"), and
+one that could not be worked out at all for some fault is noted with the fault: neither was
+in a report before.
+
 **A change has to be worth making.** The first thing a journey takes (a flight, a boat, the
 tram) counts for the time it takes. Each one after it has to save a minute on top, or the
 simpler journey stands: from Stormwind's inn the tram to Ironforge's flight master comes out

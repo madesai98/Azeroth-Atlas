@@ -39,6 +39,9 @@ const FAIL_CELL = 32;       // yards: a long search that found no way is not rep
 const FAIL_FOR = 60000;     // ms: ...for this long
 const FAIL_COST = 200000;   // floors a failed search looked at before it counts as a long one
 const LIFT_SECONDS = 25;    // a lift's wait and ride, where the search that took it did not say
+const ROUNDS = 24;          // times a journey is looked for anew, each with the walks of the last worked out, before the best of what has been worked out stands
+const ROUNDS_FOR = 12000;   // ms: ...and for no longer than this
+const SHUT_REACH = 150;     // yards: out of a place that is shut in (a room whose only way out is a portal), nothing further off than this is walked to
 const SPEED_KEY = 'wfmap.flightSpeed';
 const whole = (v) => (Number.isFinite(v) ? Math.round(v) : null);
 
@@ -112,7 +115,7 @@ export class RoutePlanner {
     // (someone in your party is somewhere new with every look: the way to them is noted when its kind changes)
     const to = a && !/^ally/.test(this.label) ? [a.toMap, whole(a.to[0]), whole(a.to[1]), whole(a.to[2])] : null;
     if (!changed(`way.${this.label}`, { to, way: r ? legs : null, lifts, none: r ? null : this.status || '-', first: !!r?.provisional })) return;
-    const more = { to, from: a ? a.from.map(whole) : null, onMap: a?.map, hearthstoneLeadsNobodyKnowsWhere: this.noBind || undefined };
+    const more = { to, from: a ? a.from.map(whole) : null, onMap: a?.map, hearthstoneLeadsNobodyKnowsWhere: this.noBind || undefined, journeyCutShort: a?.cutShort || undefined };
     if (r) note('route', `${this.label}: ${r.provisional ? 'a first answer, on foot (quicker ways are still looked for)' : legs.length > 1 ? legs.join(', then ') : 'on foot'}`, { ...more, seconds: whole(r.seconds), yards: whole(r.length), lifts, onFootAllTheWay: whole(r.walking) ?? undefined, detached: r.detached || undefined, aLongWalkInPieces: r.far || undefined, tookMs: a ? whole(performance.now() - a.time) : null });
     else note('route', `${this.label}: ${a ? `no way${this.status ? ` (${this.status})` : ''}` : `heading nowhere${this.status ? ` (${this.status})` : ''}`}`, { ...more, inTheLarge: a?.large ?? undefined });
   }
@@ -210,7 +213,7 @@ export class RoutePlanner {
     this.rev++;
     this.onChange();
     this.#said();
-    (this.walkOnly ? Promise.resolve(false) : this.#journey(asked, m)).catch((err) => { console.warn('travel planning failed', err); return false; }).then((adopted) => {
+    (this.walkOnly ? Promise.resolve(false) : this.#journey(asked, m)).catch((err) => { console.warn('travel planning failed', err); note('route', `${this.label}: the journey by other means could not be worked out`, { error: String(err?.stack ?? err?.message ?? err).slice(0, 400) }); return false; }).then((adopted) => {
       asked.settled = true;
       // (looked into now - unless a newer question took over before that was done)
       if (direct && this.asked === asked) direct.provisional = false;
@@ -263,7 +266,7 @@ export class RoutePlanner {
    */
   #aloft(asked) {
     asked.done = true;
-    this.#journey(asked, { ok: false }).catch((err) => { console.warn('travel planning failed', err); return false; }).then((adopted) => {
+    this.#journey(asked, { ok: false }).catch((err) => { console.warn('travel planning failed', err); note('route', `${this.label}: the journey by other means could not be worked out`, { error: String(err?.stack ?? err?.message ?? err).slice(0, 400) }); return false; }).then((adopted) => {
       asked.settled = true;
       if (adopted || this.asked !== asked) return;
       this.route = null;
@@ -538,11 +541,26 @@ export class RoutePlanner {
     if (asked.map === asked.toMap) exact.set(`${S.i}>${G.i}`, direct);
     const feet = nodes.filter((n) => n.kind !== 'air');
     let noHearth = false, strict = false;
+    // Places found to be shut in: a walk from there could not even begin towards where it was
+    // to go (the route worker's "no way out of where you are": the floors that can be reached
+    // from the spot are a small pocket, and the place asked for is not in it). The Wizard's
+    // Sanctum under Stormwind is one - the portal from Dalaran puts you down in it, and its only
+    // way out is its own portal. By the straight line it is a few yards from half of Stormwind,
+    // so every walk "out of it" looked good until it was worked out, one or two a round: the
+    // rounds ran out on walks through solid rock, nothing else had been worked out by then, and
+    // a journey from the Hinterlands to Stormwind came out as all on foot, 23 minutes, with
+    // Aerie Peak's flight master beside you (reported on 23 November 2026). Out of such a place
+    // only what is close by is looked at: the portal that leads out of it.
+    const shut = new Set();
+    // (where you stand may be such a place yourself: the walk straight there has said so)
+    if (!direct.ok && /no way out of where you are/.test(direct.reason ?? '')) shut.add(S.i);
     const walk = (a, b) => {
       const r = exact.get(`${a.i}>${b.i}`);
       if (r) return r.ok ? r.seconds : Infinity;
       if (strict) return Infinity;
-      return (Math.hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1]) * slack) / run;
+      const yards = Math.hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1]);
+      if (shut.has(a.i) && yards > SHUT_REACH) return Infinity;
+      return (yards * slack) / run;
     };
     // Every place counts twice: as reached before anything has carried you, and after. The first
     // thing a journey takes (a flight, a boat, the tram) costs the time it takes; each one after
@@ -622,10 +640,12 @@ export class RoutePlanner {
       // not beat the flight that was worked out for real.
       const far = { seconds: (yards * ROUGH) / run, length: yards * ROUGH, points: null, rough: true };
       exact.set(key, !r.ok && /too far/.test(r.reason ?? '') ? { ok: true, ...far } : r);
+      if (!r.ok && /no way out of where you are/.test(r.reason ?? '')) shut.add(e.from);
     };
     // The quickest chain whose walks have all been worked out.
+    const began = performance.now();
     const settle = async () => {
-      for (let round = 0; round < 8; round++) {
+      for (let round = 0; round < ROUNDS && performance.now() - began < ROUNDS_FOR; round++) {
         const found = solve();
         if (!found) return null;
         const todo = found.chain.filter((e) => e.mode === 'walk' && !exact.has(`${e.from}>${e.to}`));
@@ -634,6 +654,8 @@ export class RoutePlanner {
         if (this.asked !== asked) return null; // overtaken by a newer question
       }
       // still shifting after all that: the best of what has been worked out
+      // (said with the route, for a report: a journey cut short may not be the quickest there is)
+      asked.cutShort = true;
       strict = true;
       const found = solve();
       strict = false;
