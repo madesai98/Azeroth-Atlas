@@ -6,13 +6,16 @@
 // there alone). Used wherever an item is shown (the auction prices, to begin with).
 //
 //   { v, sig, cache, build, count,
-//     items: { <id>: [name, quality, class, subclass, slot, item level, required level, sell price, stack] },
+//     items: { <id>: [name, quality, class, subclass, slot, item level, required level, sell price, stack, how it binds] },
 //     more:  { <id>: { s: [[kind of stat, how much], …], ar: armor, dm: [min, max, delay in ms, damage per second], bp: a vendor's price for one } },
 //     stats: { <kind>: the game's own word for it },  slots: { <slot>: … },  subs: { "<class>:<subclass>": … } }
 //
 // quality: 0 poor, 1 common, 2 uncommon, 3 rare, 4 epic, 5 legendary. class / subclass / slot are
 // the game's own numbers (class 2 weapon, 4 armor, 7 trade goods...). Prices in copper. `more`
-// holds only what an item has.
+// holds only what an item has. How it binds: 0 not at all, 1 when picked up, 2 when equipped,
+// 3 when used, 4 and 5 to a quest - such a thing is in a corpse only while a quest of yours wants
+// it (server/drops.js goes by that; a list made before it was kept has nine figures to an item,
+// and is made again the next time the map looks at the game).
 //
 // STATS, ARMOR AND DAMAGE ARE WORKED OUT, AS THE GAME WORKS THEM OUT. This game does not keep
 // them on the item (the original game did). An item says what share of a budget each of its
@@ -89,7 +92,8 @@ const SLOT_TAG = { 1: 'HEAD', 2: 'NECK', 3: 'SHOULDER', 4: 'BODY', 5: 'CHEST', 6
 
 /** What the list is made from, as one fingerprint: it is made again when any of it changes. */
 export function itemsSig(casc, cfg) {
-  const parts = [ITEMS_VERSION, ...TABLES.map((t) => { try { return casc.contentHash(TABLE_FDID[t]); } catch { return null; } }), cacheStamp(cfg)];
+  // ('binds': the list has how each item binds from here on - made again for that, and good as it is until then)
+  const parts = [ITEMS_VERSION, 'binds', ...TABLES.map((t) => { try { return casc.contentHash(TABLE_FDID[t]); } catch { return null; } }), cacheStamp(cfg)];
   return crypto.createHash('sha1').update(JSON.stringify(parts)).digest('hex').slice(0, 20);
 }
 
@@ -189,7 +193,7 @@ export async function ensureItems(casc, cfg, log = () => {}) {
     const name = String(r.Display_lang ?? '').trim();
     if (!name || !(r.ID > 0)) continue;
     const k = kind.get(r.ID);
-    items[r.ID] = [name, r.OverallQualityID | 0, k ? k.ClassID | 0 : -1, k ? k.SubclassID | 0 : -1, r.InventoryType | 0, r.ItemLevel | 0, Math.max(0, r.RequiredLevel | 0), Math.max(0, Number(r.SellPrice) || 0), Math.max(1, r.Stackable | 0)];
+    items[r.ID] = [name, r.OverallQualityID | 0, k ? k.ClassID | 0 : -1, k ? k.SubclassID | 0 : -1, r.InventoryType | 0, r.ItemLevel | 0, Math.max(0, r.RequiredLevel | 0), Math.max(0, Number(r.SellPrice) || 0), Math.max(1, r.Stackable | 0), Math.max(0, r.Bonding | 0)];
     count++;
     const m = {};
     const s = math.stats(r);

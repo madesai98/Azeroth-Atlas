@@ -12,8 +12,11 @@
 //
 //   what drops for anybody    of a creature: how many corpses were looted (n), and in how many of
 //                             them the thing was (k). Its rate is k of n.
-//   what drops with a quest   a thing of the game's "quest" kind is in a corpse only while a quest
-//                             of yours wants it. So its corpses are counted on their own: those
+//   what drops with a quest   a thing the game binds to a quest is in a corpse only while a quest
+//                             of yours wants it (which things those are, the addon and the map's
+//                             server/drops.js tell by the item, not this: a count may have a thing
+//                             both ways - from an addon before 48, which went by the item's kind,
+//                             and from one since). So its corpses are counted on their own: those
 //                             looted while your quest log asked for the thing (t), and those of
 //                             them it was in (k). Its rate is k of t - not k of every corpse,
 //                             which would say less the longer you fought there without the quest.

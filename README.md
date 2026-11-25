@@ -2109,7 +2109,7 @@ of 101; nine more with coins alone and every rate of the list has come down a li
   corpse opened a second time, with what you left in it, is not another corpse.
 - **A thing that drops for anybody** is counted against all the creature's corpses: silk, in 39
   of 121.
-- **A thing of the game's "quest" kind** is in a corpse only while a quest of yours wants it.
+- **A thing the game binds to a quest** is in a corpse only while a quest of yours wants it.
   Counted against every corpse it would say less the longer you had fought there without the
   quest. (The two published figures for the Bloodscalp Ear may differ for that reason: one in
   five in QuestieDB's table, four in five in the reference database's for someone on the
@@ -2117,6 +2117,31 @@ of 101; nine more with coins alone and every rate of the list has come down a li
   corpses: those looted while your log asked for it. Before it has ever been found on a
   creature those corpses are kept under the thing's name, and made over to it when it first
   turns up: the first key, in the fifth corpse, is one of five and not "one of one".
+- **Which things those are: by how the item binds, not by its kind.** Until version 48 the
+  addon and the map took everything of the game's "quest" kind for a thing that drops only
+  with its quest ("im not seeing the green hills pages that stv enemies drop in their loot
+  tables, why?", asked on 25 November 2026 - that is why). The pages of *The Green Hills of
+  Stranglethorn* are of that kind, and so are the Darkmoon cards, a Pristine Black Diamond,
+  the pages of the Shredder Operating Manual: things that drop for anybody, are sold and sent
+  by mail. So they stood in no list, brought nothing to a kill, and a page found without its
+  quest was not even counted. What tells the two apart is the binding: a Bloodscalp Ear is
+  bound to a quest ("Quest Item" in its tooltip), a page is bound to nothing. Held against the
+  original game's loot tables, which say of every drop whether it wants its quest, with this
+  game's own word on each item:
+
+  | Told by | Right | Wrong |
+  | --- | --- | --- |
+  | the item's kind ("quest" or not), as until 47 | 6,761 of 7,130 things | 326 that drop for anybody taken for a quest's, 43 the other way |
+  | how the item binds (to a quest or not), from 48 | 7,093 of 7,130 | 14 that drop for anybody taken for a quest's, 23 the other way |
+
+  The addon has the binding from the map's file, which has it from the game's own item table
+  (`items.json`: made again with it the next time the map looks at the game); where the file
+  is from before that, the addon asks the game itself and writes the tooltip again when it
+  has answered. What an addon from before 48 counted of a page as a quest's is not lost: what
+  was found of it stands, among all the corpses. The 37 things the binding still tells wrong
+  (a Troll Tribal Necklace is bound to nothing and drops only with its quest; Sacred Frostsaber
+  Meat the other way) stay wrong: the original game's tables could put them right for the
+  original game's creatures, and are not asked yet.
 - `/atlas drops` says how many corpses of how many creatures you have counted, and how many
   were passed over.
 
@@ -2183,8 +2208,10 @@ Black Pearl      0.4%            original, none looted
 - **A thing one of your quests still wants is that quest's**, whatever kind of thing it is:
   silk for a tailor's quest stands under the quest, with its rate, and not in the list. When
   you have all the quest asks for, it is back among the rest.
-- **Nothing of a quest you are not on**: a thing of the quest kind that no quest of yours
-  wants is not shown at all. It would not be in the corpse.
+- **Nothing of a quest you are not on**: a thing that drops only with its quest (one the game
+  binds to a quest) and that no quest of yours wants is not shown at all. It would not be in
+  the corpse. A thing of the "quest" kind that drops for anybody - a page of *The Green Hills
+  of Stranglethorn* - is in the list like any other.
 - `/atlas drops list` leaves the list out, and puts it back; the quests' lines stay.
 
 **What a kill brings.** Above the list, one line: what a kill of the creature brings on
@@ -2204,8 +2231,9 @@ what a kill brings = the coin in a corpse
   average: the price less the house's cut for the times it sells, the vendor less the lost
   deposit for the times it does not. Change a weight and the line changes with it. With no
   auction prices on this computer, what a vendor pays. A thing no vendor buys and no auction
-  is safe for brings nothing; nor does a thing of the quest kind, which is not sold. A regular
-  thing one of your quests wants stands under that quest and counts all the same.
+  is safe for brings nothing; nor does a thing that drops only with its quest, which is not
+  sold. A regular thing one of your quests wants stands under that quest and counts all the
+  same.
 - **Pieces to a find.** With every corpse the addon also counts how many pieces of a thing
   were in it (kept as the pieces beyond the first of each find). A corpse that has silk gives
   one and a half on average; that is leaned on the original game's figure for the thing (the
@@ -2326,17 +2354,22 @@ often** in the addon's options; `/atlas drops list` the list alone, `/atlas drop
 a kill brings. The counting goes on
 either way. The rates after the game's own lines need version 29 of the addon, the added lines
 version 30, the counting and the list version 45, what a kill brings version 46, what each
-figure rests on in words version 47 (**Check for updates**); from 44 on a `/reload` is enough.
+figure rests on in words version 47, the things of the quest kind that drop for anybody
+version 48 (**Check for updates**); from 44 on a `/reload` is enough.
 
 Tried against a mocked game that fills its tooltip and opens its loot the way this one does,
 with the figures as the map writes them (the counting, the list, the reckoning, what a kill
-brings, pieces and coin: 116 checks; what the addon says through the strip read by the map's
-own code), and from the saved settings on against a stand-in database (send, publish, fetch,
-into the game's file: 78 checks). The counting itself has run in the game (version 45, on 24
-November 2026: eight corpses of six creatures, through the strip into the map and on to the
-database). The pieces, the coin and what a kill brings (46) have not been seen there yet - in
-particular whether this game writes the coin in a corpse in the words reckoned with; where it
-does not, `/atlas drops` says so and the coin is left to the original game's figure.
+brings, pieces and coin, which things drop only with their quest: 137 checks; what the addon
+says through the strip read by the map's own code), and from the saved settings on against a
+stand-in database (send, publish, fetch, into the game's file: 78 checks). The counting
+itself has run in the game (version 45, on 24 November 2026: eight corpses of six creatures,
+through the strip into the map and on to the database). The pieces, the coin and what a kill
+brings (46) have not been seen there yet - in particular whether this game writes the coin in
+a corpse in the words reckoned with; where it does not, `/atlas drops` says so and the coin is
+left to the original game's figure. Nor has 48: that the pages are bound to nothing and an ear
+to its quest is read out of this game's own item table (and the map's file for the real
+database then lists the pages under a Bloodscalp Hunter: 178 things are no longer taken for a
+quest's, 47 are now) - that the game answers the addon the same when asked has not been seen.
 
 ## What to do with a thing you are getting rid of, in its tooltip
 

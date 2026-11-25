@@ -50,8 +50,15 @@
 //             gives in the original game (where that is more than one) - and after the corpses
 //             may stand the coin, "c<corpses whose coin was read>/<copper in them>/<the original
 //             game's coin to a corpse>". What is not known is left empty.
-//   kinds     of each thing: its quality (0 poor to 5 legendary), and 10 more where it is of the
-//             game's "quest" kind - which only drops while a quest of yours wants it
+//   kinds     of each thing: its quality (0 poor to 5 legendary), and 10 more where it drops only
+//             while a quest of yours wants it. Which things those are: the ones the game binds to
+//             a quest (items.json: how each item binds) - not the ones of its "quest" kind, of
+//             which 326 drop for anybody (the pages of The Green Hills of Stranglethorn, the
+//             Darkmoon cards...). Held against the original game's loot tables, which say of
+//             every drop whether it wants its quest, the binding tells 7,093 of 7,130 things
+//             right, the kind 6,761. A list of items from before the binding was kept goes by
+//             the kind still; the addon (48 on) asks the game itself, and goes by this only
+//             until the game has answered.
 //   mine      by the number a game's saved settings go by: of each creature the part of `all`
 //             that those settings counted, laid out the same way without the rates
 import fs from 'node:fs';
@@ -66,7 +73,9 @@ const NAME = 'AzerothAtlas', DROPS = 'AzerothAtlas_Drops';
 const FORMAT = 1;      // of what an addon from before 45 reads: raise when it is to read it differently
 const LAYOUT = 2;      // of the rest: raise when the addon is to read `all`, `kinds` or `mine` differently
 const ID_MOST = 16777215;
-const QUEST_CLASS = 12; // the game's kind of item that is of a quest
+const QUEST_CLASS = 12; // the game's kind of item that is of a quest: gone by only where the list of items does not say how an item binds
+const BIND = 9;         // where an item's row in items.json has how it binds...
+const QUEST_BOUND = new Set([4, 5]); // ...and what that is for a thing bound to a quest
 const THINGS_MOST = 120; // things written of one creature (the likeliest)
 
 const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
@@ -118,7 +127,8 @@ export function ownLoot(dataDir, cfg = null) {
  *   all: Map<creature, { n (corpses looted), things: Map<item, { pct (the original game's rate, or null), k, t (null: of the n corpses),
  *     m (pieces beyond the first of each find; 0: none), e (pieces to a find in the original game, where more than one; else null) }>,
  *     coin: [corpses whose coin was read, the copper in them], gold (the original game's coin to a corpse; 0: none) }>,
- *   kinds: Map<item, quality + 10 where it is of the quest kind>, mine: Map<tag, Map<creature, count>>,
+ *   kinds: Map<item, quality + 10 where it drops only with its quest>, byBinding (that is told by how the game binds each item: the
+ *     list of items has it), mine: Map<tag, Map<creature, count>>, asQuest: Map<creature, Set<item taken as dropping only with its quest>>,
  *   things (how many in `all`), looted (corpses in `all`) }
  * - or null where no database has been fetched. A figure that is not above nought, or not a
  * figure, is left out; one above a hundred is a hundred.
@@ -150,7 +160,16 @@ export function dropFigures(dataDir, cfg = null) {
   const items = readJson(path.join(dataDir, 'items.json'))?.items;
   const known = items && typeof items === 'object' ? items : {};
   const hasItems = Object.keys(known).length > 1000; // (the map has been built: its list of the game's items is whole)
-  const questKind = (item) => known[item]?.[2] === QUEST_CLASS;
+  // (whether the list of items says how each binds: one made before that was kept has nine figures to an item)
+  let byBinding = false;
+  for (const id in known) { byBinding = Array.isArray(known[id]) && Number.isInteger(known[id][BIND]); break; }
+  // Whether a thing drops only while a quest wants it: it is bound to a quest (see `kinds`, at the
+  // top) - true, false, or null where the game's files do not have the item.
+  const onlyWithQuest = (item) => {
+    const row = known[item];
+    if (!Array.isArray(row)) return null;
+    return Number.isInteger(row[BIND]) ? QUEST_BOUND.has(row[BIND]) : row[2] === QUEST_CLASS;
+  };
 
   // ---- everything a creature gives: the original game's figures, everybody's counts, this computer's own
   const published = readLoot(readJson(path.join(dataDir, 'atlasdb', 'truth-loot.json')));
@@ -158,6 +177,7 @@ export function dropFigures(dataDir, cfg = null) {
   const mine = ownLoot(dataDir, cfg);
   const own = lootTotals(mine);
   const all = new Map(), kinds = new Map();
+  const asQuest = new Map(); // creature -> the things of it taken as dropping only with their quest (`mine` is laid out by the same)
   let things = 0, looted = 0;
   for (const creature of new Set([...of.keys(), ...published.keys(), ...own.keys()])) {
     const pub = published.get(creature);
@@ -172,10 +192,15 @@ export function dropFigures(dataDir, cfg = null) {
       if (!whole(item)) continue;
       const pct = first.get(item) ?? (ref.has(item) ? Math.round(ref.get(item) * 100) / 100 : null);
       const got = counted.got.get(item), on = counted.on.get(item);
-      // (counted both ways, as two copies may: the way the thing's own kind says)
-      const quest = on && got ? questKind(item) : !!on;
+      // (which way it drops: the item's own word - and of a thing the game's files do not have, the way it was
+      // counted; counted both ways, as two copies may: for anybody. A thing that drops for anybody and was
+      // counted as a quest's - by an addon from before 48, which went by the item's kind - keeps what was found
+      // of it, among all the corpses; one that drops only with its quest and was never counted so has no count.)
+      const only = onlyWithQuest(item);
+      const quest = only ?? !!(on && !got);
+      if (quest) { let set = asQuest.get(creature); if (!set) asQuest.set(creature, (set = new Set())); set.add(item); }
       const thing = { pct: pct > 0 ? pct : null, k: 0, t: null, m: 0, e: null };
-      if (quest) { thing.k = on[0]; thing.t = on[1]; } else if (got) thing.k = Math.min(got, counted.n);
+      if (quest) { if (on) { thing.k = on[0]; thing.t = on[1]; } } else thing.k = Math.min(got ?? on?.[0] ?? 0, counted.n);
       if (!quest && thing.k > 0 && more.get(item) > 0) thing.m = more.get(item);
       if (!quest && each.get(item) > 1) thing.e = Math.round(each.get(item) * 100) / 100;
       if (thing.pct === null && !thing.k && !(thing.t > 0)) continue;
@@ -183,7 +208,7 @@ export function dropFigures(dataDir, cfg = null) {
       if (hasItems && !known[item] && !thing.k && !(thing.t > 0)) continue;
       row.set(item, thing);
       // (its kind: the game's own word on the item - or, of a thing the map's data does not have, how it was counted)
-      kinds.set(item, Math.max(kinds.get(item) ?? 0, (Number.isInteger(known[item]?.[1]) ? Math.max(0, Math.min(9, known[item][1])) : 1) + (questKind(item) || (quest && !known[item]) ? 10 : 0)));
+      kinds.set(item, Math.max(kinds.get(item) ?? 0, (Number.isInteger(known[item]?.[1]) ? Math.max(0, Math.min(9, known[item][1])) : 1) + (quest ? 10 : 0)));
     }
     if (!row.size && !(counted.n > 0) && !(gold > 0)) continue;
     // (no more than a row holds: the likeliest, by what was counted and else by the original game's figure)
@@ -200,7 +225,7 @@ export function dropFigures(dataDir, cfg = null) {
     const name = known[item]?.[0];
     if (typeof name === 'string' && name.trim() && name.length <= 200) names.set(item, name.trim());
   }
-  return { rev: stamp.rev, of, names, rates, all, kinds, mine, things, looted };
+  return { rev: stamp.rev, of, names, rates, all, kinds, byBinding, mine, asQuest, things, looted };
 }
 
 /** A text as Lua writes one: between double quotes, with nothing in it that would end it early. */
@@ -224,13 +249,23 @@ function rowText(n, things, coin = null, gold = 0) {
   for (const [item, x] of things) out.push(`${item}=${figuresText([x.pct, x.t > 0 || x.k > 0 ? x.k : null, x.t > 0 ? x.t : null, x.m > 0 ? x.m : null, x.e > 1 ? x.e : null])}`);
   return out.join(' ');
 }
-/** ...and of `mine`: a count, laid out the same way without the rates. */
-function countText(rec) {
+/**
+ * ...and of `mine`: a count, laid out the same way without the rates. Each thing the way the row
+ * of `all` has it: one that drops only with its quest by its own corpses (and not at all where
+ * this count has none of those), any other by what was found of it.
+ * @param asQuest the things of this creature taken as dropping only with their quest - or null: those counted so
+ */
+function countText(rec, asQuest = null) {
   const out = [String(rec.n) + coinText(rec.coin, 0)];
   const ids = [...new Set([...rec.got.keys(), ...rec.on.keys()])].sort((a, b) => a - b);
   for (const item of ids) {
-    const on = rec.on.get(item), more = on ? 0 : rec.more?.get(item);
-    out.push(`${item}=${figuresText(['', on ? on[0] : rec.got.get(item), on ? on[1] : null, more > 0 ? more : null])}`);
+    const on = rec.on.get(item);
+    if (asQuest ? asQuest.has(item) : !!on) {
+      if (on) out.push(`${item}=${figuresText(['', on[0], on[1]])}`);
+      continue;
+    }
+    const more = rec.more?.get(item);
+    out.push(`${item}=${figuresText(['', rec.got.get(item) ?? on?.[0], null, more > 0 ? more : null])}`);
   }
   return out.join(' ');
 }
@@ -258,17 +293,19 @@ export function dropsAddonFiles(figures, interfaceVersion) {
       '-- with the original game\'s rate in per cent ("item=per cent ..."). names: what each thing is called,',
       '-- as the game\'s own files have it. all: everything a creature gives ("corpses looted',
       '-- item=per cent/found in so many/of so many ..."), kinds: each thing\'s quality, and 10 more where it',
-      '-- is of a quest; mine: the part of `all` that each game\'s saved settings counted themselves.',
+      '-- drops only with its quest (kb = 1: told by how the game binds the item; without it, by the item\'s',
+      '-- kind, which takes some things that drop for anybody for a quest\'s - the addon then asks the game);',
+      '-- mine: the part of `all` that each game\'s saved settings counted themselves.',
       `AzerothAtlasDrops = { v = ${FORMAT}, creatures = ${creatures.length}, rates = ${figures.rates}, of = {`,
       ...creatures.map((id) => `[${id}]="${figures.of.get(id).map(([item, pct]) => `${item}=${pct}`).join(' ')}",`),
       '}, names = {',
       ...named.map((item) => `[${item}]=${luaText(figures.names.get(item))},`),
-      `}, f = ${LAYOUT}, things = ${figures.things ?? 0}, looted = ${figures.looted ?? 0}, all = {`,
+      `}, f = ${LAYOUT},${figures.byBinding ? ' kb = 1,' : ''} things = ${figures.things ?? 0}, looted = ${figures.looted ?? 0}, all = {`,
       ...all.map(([id, row]) => `[${id}]="${rowText(row.n, row.things, row.coin, row.gold)}",`),
       '}, kinds = {',
       ...kinds.map(([item, kind]) => `[${item}]=${kind},`),
       '}, mine = {',
-      ...mine.flatMap(([tag, creatures2]) => [`[${tag}]={`, ...[...creatures2].sort((a, b) => a[0] - b[0]).map(([id, rec]) => `[${id}]="${countText(rec)}",`), '},']),
+      ...mine.flatMap(([tag, creatures2]) => [`[${tag}]={`, ...[...creatures2].sort((a, b) => a[0] - b[0]).map(([id, rec]) => `[${id}]="${countText(rec, figures.asQuest ? figures.asQuest.get(id) ?? new Set() : null)}",`), '},']),
       '} }',
       '',
     ].join('\n'),

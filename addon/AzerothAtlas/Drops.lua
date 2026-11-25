@@ -23,8 +23,9 @@
 --     ...
 --
 -- A thing one of your quests still wants stands under that quest, whatever kind of thing it
--- is, and not in this list. A thing of the game's "quest" kind that no quest of yours wants is
--- not shown at all: it would not be in the corpse. The list is short (LIST_SHORT); with Shift
+-- is, and not in this list. A thing that drops only with its quest (one the game binds to a
+-- quest: see Only, below) and that no quest of yours wants is not shown at all: it would not be
+-- in the corpse. The list is short (LIST_SHORT); with Shift
 -- held down it is all there is, and every figure - in the list, and after a quest's line - has
 -- what it rests on after it:
 --
@@ -45,8 +46,8 @@
 -- the coin in a corpse, and for every thing that drops for anybody: how often it drops, times
 -- how many pieces a corpse that has it gives, times what one piece brings when it is got rid of
 -- the way its own tooltip advises (Advice.lua: the vendor, an auction, disenchanting - whichever
--- brings most of the ways that are safe enough by your weights). A thing of the quest kind
--- brings nothing: it is not sold. With Shift: the coin on a line of its own, and after each
+-- brings most of the ways that are safe enough by your weights). A thing that drops only with
+-- its quest brings nothing: it is not sold. With Shift: the coin on a line of its own, and after each
 -- thing of the list what it adds. Counted with the rest: how many pieces of a thing a corpse
 -- had (kept as the pieces beyond the first of each find), and its coin - read from the words
 -- the game shows it in. Each leans on the original game's figure where there is one, as the
@@ -91,11 +92,13 @@
 --   - not what a spell of yours brought out (skinning, picking a pocket, mining a corpse): that
 --     is another list than the corpse's own;
 --   - a thing that drops for anybody: in how many of the creature's corpses it was;
---   - a thing of the "quest" kind is only in a corpse while a quest of yours wants it. So it is
---     counted on its own: the corpses looted while your log asked for it (by its name), and
+--   - a thing the game binds to a quest is only in a corpse while a quest of yours wants it. So
+--     it is counted on its own: the corpses looted while your log asked for it (by its name), and
 --     those of them it was in. Before it has ever been found on a creature those corpses are
 --     counted under the name alone, and made over to the thing when it first turns up: so the
---     first find is not "one of one".
+--     first find is not "one of one". (Which things those are: by how the item binds, not by
+--     its kind - the pages of The Green Hills of Stranglethorn are of the "quest" kind, and drop
+--     for anybody. See Only, below.)
 --
 -- What is not done:
 --   - nothing is written inside a dungeon or a raid, where the game keeps what is in a tooltip
@@ -118,7 +121,8 @@ local floor, strchar = math.floor, string.char
 -- (the figure's colour: a grey of its own, which also says "this line has its figure already")
 local MARK = "|cff9a9b9c"
 local LIST_SHORT, LIST_LONG = 6, 30   -- things in the list of what else a creature gives: as a rule, and with Shift held down
-local QUEST_CLASS = 12                -- the game's kind of item that is of a quest
+local QUEST_CLASS = 12                -- the game's kind of item that is of a quest: gone by only until the game says how the item binds
+local QUEST_BOUND = { [4] = true, [5] = true } -- how the game binds an item that is a quest's ("Quest Item" in its tooltip)
 -- (how a count is leaned on a first guess: see the top of this file)
 local WEIGHT_LEAST, WEIGHT_MOST, FINDS = 10, 400, 2
 local GUESS, GUESS_QUEST, GUESS_WEIGHT = 0.10, 0.30, 5
@@ -197,10 +201,20 @@ local function GameName(item)
   return name
 end
 
--- Whether the game counts an item among those of a quest (its kind), as far as it says: true,
--- false - or nothing, where it does not say. Kept: an item's kind does not change.
+-- ---- which things drop only with their quest ---------------------------------------------------
+-- By how the game binds the item - not by its kind. Of the "quest" kind are also the pages of
+-- The Green Hills of Stranglethorn, the Darkmoon cards, a Pristine Black Diamond: things that
+-- drop for anybody, and are sold and sent by mail. What they are not is bound to a quest, as a
+-- Bloodscalp Ear is. Held against the original game's loot tables (which say of every drop
+-- whether it wants its quest), with this game's own word on each item: the binding tells 7,093
+-- of 7,130 things right, the kind 6,761. Going by the kind took 326 things that drop for
+-- anybody for a quest's: they stood in no list here, brought nothing to a kill, and were not
+-- counted when found.
+--
+-- Whether the game counts an item among those of a quest (its kind), as far as it says at once:
+-- true, false - or nothing, where it does not say. Kept: an item's kind does not change.
 local gameKinds = {}
-local function GameQuest(item)
+local function GameKind(item)
   local known = gameKinds[item]
   if known ~= nil then return known end
   local instant = (C_Item and C_Item.GetItemInfoInstant) or rawget(_G, "GetItemInfoInstant")
@@ -209,6 +223,55 @@ local function GameQuest(item)
   if not ok or secret(class) or type(class) ~= "number" then return nil end
   gameKinds[item] = class == QUEST_CLASS
   return gameKinds[item]
+end
+-- Whether the game binds an item to a quest: true, false - or nothing, where it has not said
+-- yet what the item is. Asking makes it find out, and it says when it has (GET_ITEM_INFO_RECEIVED:
+-- shared by onlyWaits, so that what is known of a creature is put together again then). An
+-- answer is kept; an item it had none for is asked after again two seconds on (`now`: at once),
+-- and one it says it does not have - or has been asked of ASKS_MOST times for nothing - not
+-- again, until it speaks of that item.
+local ASKS_MOST = 4
+local gameOnly, onlyAsked, onlyAsks, onlyNever, onlyWaits = {}, {}, {}, {}, false
+local function GameOnly(item, now)
+  local known = gameOnly[item]
+  if known ~= nil then return known end
+  if onlyNever[item] and not now then return nil end
+  local get = (C_Item and type(C_Item.GetItemInfo) == "function" and C_Item.GetItemInfo) or (type(GetItemInfo) == "function" and GetItemInfo) or nil
+  if not get then return nil end
+  local at = Now()
+  local asked = onlyAsked[item]
+  if not now and asked and at >= asked and at - asked < 2 then onlyWaits = true ; return nil end
+  local ok, name, _, _, _, _, _, _, _, _, _, _, _, _, bind = pcall(get, item)
+  if not ok or name == nil or secret(name) or secret(bind) or type(bind) ~= "number" then
+    onlyAsked[item] = at
+    onlyAsks[item] = (onlyAsks[item] or 0) + 1
+    if onlyAsks[item] >= ASKS_MOST then onlyNever[item] = true else onlyWaits = true end
+    return nil
+  end
+  gameOnly[item] = QUEST_BOUND[bind] == true
+  return gameOnly[item]
+end
+-- Whether a thing drops only while a quest of yours wants it.
+--   - the 3D map's word, where its file goes by the binding (kb; `kinds`: ten more for such a
+--     thing): it has that from the game's own files, and the game need not be asked;
+--   - else the game's word on how the item binds - asked at once of a thing in a corpse (`now`);
+--   - where it has none yet: the map's word by the item's kind (a map whose list of items is
+--     from before it kept the binding), and with neither, the kind as the game says it at once.
+-- @returns true, false or nothing (nothing says) - and whether that is the last word on it
+-- (false: the game has yet to say how the item binds)
+local function Only(d, item, now)
+  local known = gameOnly[item]
+  if known ~= nil then return known, true end
+  local kinds = d and type(d.kinds) == "table" and d.kinds or nil
+  local kind = kinds and tonumber(kinds[item])
+  if kind and d.kb == 1 and not now then return kind >= 10, true end
+  local game = GameOnly(item, now)
+  if game ~= nil then return game, true end
+  local last = onlyNever[item] == true
+  if kind then return kind >= 10, last or d.kb == 1 end
+  local class = GameKind(item)
+  if class == nil then return nil, last end
+  return class, last
 end
 
 -- ---- your own count -----------------------------------------------------------------------------
@@ -271,14 +334,14 @@ end
 -- many: nothing where it is of the n corpses), quest (it drops only with its quest), m (pieces
 -- beyond the first of each find), e (pieces to a find in the original game, or nothing) }, ... },
 -- cn (corpses whose coin was read), copper (in them), gold (the original game's coin to a corpse,
--- or nothing), mine (how many of the n corpses you looted yourself) } - or nothing. The last creature asked about is kept, until the count or the
--- figures change.
+-- or nothing), mine (how many of the n corpses you looted yourself), waiting (of so many things the
+-- game has yet to say how it binds: see Only) } - or nothing. The last creature asked about is kept, until the count or the
+-- figures change, or the game says what an item is.
 local last = { id = nil, of = nil, stamp = nil, row = nil }
 local function Known(d, id)
   if last.id == id and last.of == d and last.stamp == stamp then return last.row end
   local by, n = {}, 0
   local cn, copper, gold = 0, 0, nil
-  local kinds = d and type(d.kinds) == "table" and d.kinds or nil
   if Counted(d) then
     n, cn, copper, gold = ReadRow(d.all[id], by)
   elseif d then
@@ -291,13 +354,26 @@ local function Known(d, id)
       end
     end
   end
+  local own = Own(id)
+  local tried = own and type(own.tried) == "table" and own.tried or nil
+  -- Which way each thing drops: the item's own word (Only) - and where nothing says, the way it
+  -- was counted. `waiting`: of so many the game has yet to say how it binds.
+  local waiting = 0
+  local function only(item, e)
+    local is, sure = Only(d, item)
+    if not sure then waiting = waiting + 1 end
+    if is == nil then is = (e ~= nil and e.t ~= nil) or (tried ~= nil and tried[item] ~= nil) end
+    return is
+  end
   for item, e in pairs(by) do
     if e.pct and not (e.pct > 0) then e.pct = nil end
-    e.quest = e.t ~= nil or (kinds ~= nil and (tonumber(kinds[item]) or 0) >= 10)
+    e.quest = only(item, e)
+    -- (a thing that drops for anybody, counted as a quest's - by an addon from before 48, which went by
+    -- the item's kind: what was found of it stands, among all the corpses)
+    if not e.quest then e.t = nil end
   end
   -- your own count: what of it the 3D map's row has in it already is not counted twice
   local mineN = 0 -- (how many of the corpses are your own)
-  local own = Own(id)
   if own then
     local had, hadN, hadCn, hadCopper = {}, 0, 0, 0
     local l = AzerothAtlasDB.loot
@@ -307,21 +383,22 @@ local function Known(d, id)
     mineN = math.max(own.n, hadN)
     cn = cn + math.max(0, (tonumber(own.cn) or 0) - hadCn)
     copper = copper + math.max(0, (tonumber(own.coin) or 0) - hadCopper)
-    local tried = type(own.tried) == "table" and own.tried or nil
     local more = type(own.more) == "table" and own.more or nil
     local function add(item)
       if type(item) ~= "number" then return end
       local e = by[item]
+      if not e then e = { k = 0 } ; e.quest = only(item, nil) ; by[item] = e end
       local t = tried and tonumber(tried[item]) or nil
-      if not e then e = { k = 0, quest = t ~= nil } ; by[item] = e end
       local was = had[item]
       local k = math.max(0, (tonumber(own.got[item]) or 0) - (was and was.k or 0))
-      if t then
-        -- (counted here as a thing of a quest: by its own corpses, whatever the row said of it)
-        if not e.quest or e.t == nil then e.quest, e.t, e.k = true, 0, 0 end
-        e.t = e.t + math.max(0, t - (was and was.t or 0))
-        e.k = e.k + k
-      elseif not e.quest then
+      if e.quest then
+        -- (a quest's thing: by its own corpses - those you looted while your log asked for it - whatever the row said of it)
+        if t then
+          if e.t == nil then e.t, e.k = 0, 0 end
+          e.t = e.t + math.max(0, t - (was and was.t or 0))
+          e.k = e.k + k
+        end
+      else
         e.k = e.k + k
         e.m = (e.m or 0) + math.max(0, (more and tonumber(more[item]) or 0) - (was and was.m or 0))
       end
@@ -332,8 +409,6 @@ local function Known(d, id)
   local list = {}
   for item, e in pairs(by) do
     e.item = item
-    -- (a thing of a quest by the game's own word, of which the row had only the original game's figure)
-    if not e.quest and e.t == nil and e.k == 0 and GameQuest(item) then e.quest = true end
     if e.quest and e.t == nil then e.t = 0 end
     list[#list + 1] = e
   end
@@ -341,7 +416,7 @@ local function Known(d, id)
   if gold and not (gold > 0) then gold = nil end
   if #list > 0 or n > 0 or gold then
     table.sort(list, function(a, b) return a.item < b.item end)
-    row = { n = n, list = list, cn = cn, copper = copper, gold = gold, mine = math.min(mineN, n) }
+    row = { n = n, list = list, cn = cn, copper = copper, gold = gold, mine = math.min(mineN, n), waiting = waiting }
   end
   last.id, last.of, last.stamp, last.row = id, d, stamp, row
   return row
@@ -717,11 +792,12 @@ local function Unit(tooltip, data, types, unitType)
   -- What a kill brings on average: the coin, and what everything that drops for anybody sells
   -- for (also what stands under a quest of yours above: it has its price all the same).
   local worth, priced = nil, false
-  owed.any = false
+  -- (things of which the game has not said yet how they bind - whether they drop only with their quest: written again when it has)
+  owed.any = (row.waiting or 0) > 0
   if shared.DropsWorthOn() and type(tooltip.AddDoubleLine) == "function" then
     worth = Worth(row)
     -- (things the game has not said the price of yet: written again when it has)
-    owed.any = worth ~= nil and worth.unpriced > 0
+    if worth ~= nil and worth.unpriced > 0 then owed.any = true end
     if worth and worth.sum < 0.5 then worth = nil end
     if worth then
       local left = "A kill brings"
@@ -740,8 +816,8 @@ local function Unit(tooltip, data, types, unitType)
   end
 
   -- Everything else it gives. Not what stands under a quest already (whatever kind of thing it
-  -- is: what a quest of yours wants is that quest's), and nothing of the quest kind that no
-  -- quest of yours wants - it would not be in the corpse.
+  -- is: what a quest of yours wants is that quest's), and nothing that drops only with its quest
+  -- and that no quest of yours wants - it would not be in the corpse.
   if shared.DropsListOn() and type(tooltip.AddDoubleLine) == "function" then
     local rest = {}
     for i = 1, #row.list do
@@ -1076,20 +1152,29 @@ function shared.LootReport()
   return out
 end
 
--- Is this the name of a thing that drops for anybody? (As far as the 3D map's data says: of
--- the things it names, which are of no quest. Read out once for each file the map writes.)
+-- Is this the name of a thing that drops for anybody? (Of the things the 3D map's data names:
+-- one of that name which does not drop only with its quest - Only. The names are read out once
+-- for each file the map writes.)
 local plainNames = { of = nil, by = nil }
 local function Ordinary(d, subject)
-  if not d or type(d.names) ~= "table" or type(d.kinds) ~= "table" then return false end
+  if not d or type(d.names) ~= "table" then return false end
   if plainNames.of ~= d then
     local by = {}
     for item, name in pairs(d.names) do
-      local kind = tonumber(d.kinds[item])
-      if type(name) == "string" and kind and kind < 10 then by[lower(name)] = true end
+      if type(name) == "string" then
+        local plain = lower(name)
+        local had = by[plain]
+        -- (two items of one name, as a quest of each side may have its own: both)
+        if had == nil then by[plain] = item elseif type(had) == "table" then had[#had + 1] = item else by[plain] = { had, item } end
+      end
     end
     plainNames.of, plainNames.by = d, by
   end
-  return plainNames.by[subject] == true
+  local items = plainNames.by[subject]
+  if items == nil then return false end
+  if type(items) ~= "table" then return Only(d, items) == false end
+  for i = 1, #items do if Only(d, items[i]) == false then return true end end
+  return false
 end
 
 -- (corpses with no coin in them, a creature each, looted before any coin was ever read: they count
@@ -1137,14 +1222,18 @@ local function Count(creature, items, coin)
   for item, info in pairs(items) do
     -- (what the corpse calls a thing is its name from now on: the game may not say it by its number yet)
     if info.name and not gameNames[item] then gameNames[item] = info.name end
-    -- (of a quest: by the game's own word on the item's kind; where it has none, by how it marks the thing in the corpse)
-    local quest = GameQuest(item)
+    -- (only with its quest: by the game's own word on how the item binds - Only; where nothing says, by how it marks the thing in the corpse)
+    local quest = Only(d, item, true)
     if quest == nil then quest = info.quest end
     if quest then
       questThings[item] = info
     else
       rec.got[item] = (tonumber(rec.got[item]) or 0) + 1
       changed[#changed + 1] = item
+      -- (counted as a quest's until now - by an addon from before 48, which went by the item's kind: it is
+      -- none, has no corpses of its own, and waits under no name)
+      if type(rec.tried) == "table" then rec.tried[item] = nil end
+      if type(rec.on) == "table" and info.name then rec.on[lower(info.name)] = nil end
       -- (how many pieces of it: kept as those beyond the first, which is in the find itself)
       local extra = (tonumber(info.many) or 1) - 1
       if extra > 0 then
@@ -1252,14 +1341,21 @@ do
       if ok and shownUnit ~= nil and not secret(shownUnit) then pcall(tip.RefreshData, tip) end
     end
   end
-  frame:SetScript("OnEvent", function(_, event, unit, _, spell)
+  frame:SetScript("OnEvent", function(_, event, unit, second, spell)
     if LOG[event] then wants.dirty = true
     elseif event == "LOOT_READY" or event == "LOOT_OPENED" then shared.Try("what a corpse gave", Looted)
     elseif event == "MODIFIER_STATE_CHANGED" then
       -- (Shift pressed or let go over a creature: the tooltip is written again, with the whole list or the short one)
       Rewrite()
     elseif event == "GET_ITEM_INFO_RECEIVED" then
-      -- (the game has said what an item is: a tooltip that waited for its price is written again - once for all that arrive together)
+      -- (the game has said what an item is - here: the item, and whether it has it at all. One it does not have is not
+      -- asked after again; and where the word on how some thing binds was waited for, what is known of a creature is
+      -- put together again with the next writing of its tooltip)
+      if not secret(unit) and type(unit) == "number" and not secret(second) then
+        if second == false then onlyNever[unit] = true else onlyNever[unit], onlyAsks[unit] = nil, nil end
+      end
+      if onlyWaits then onlyWaits, onlyAsked, stamp = false, {}, stamp + 1 end
+      -- (a tooltip that waited for it - or for a price - is written again: once for all that arrive together)
       if owed.any and not owed.due then
         owed.due = true
         local function again() owed.due = false ; if owed.any then Rewrite() end end
