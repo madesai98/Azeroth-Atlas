@@ -2150,9 +2150,35 @@ game's saved settings go by), so what you have looted since is added to it and n
 yours is counted twice.
 
 **The list.** Under the quests: `Drops`, and what the creature gives for anybody, the
-likeliest first, six at the most; with Shift held down all of it (thirty at the most), each
-with what its figure rests on - `30%  30/100`: found in 30 of 100 corpses; `-`: the original
-game's figure alone.
+likeliest first, six at the most; with Shift held down all of it (thirty at the most).
+
+**With Shift, where every figure comes from** ("the number of datapoints for each droprate or
+details about where the numbers are coming from", asked for on 24 November 2026). Each figure
+of the tooltip - in the list, after a quest's line, the coin - has what it rests on after it:
+
+```
+Bloodscalp Ears
+- 3/15 Bloodscalp Ear (70%: 40/50, original 20%)
+A kill brings                                      ~ 1s 4c
+   Coin                      30c  90 corpses, original 35c
+Drops                        100 corpses looted, 12 by you
+Silk Cloth         30%  30/100, original 29%, x1.5     67c
+Wool Cloth        1.3%     0/100, original 3.6%, x2     1c
+Shadowgem         25%          1/1, no original figure
+Black Pearl      0.4%            original, none looted
+```
+
+- `30/100`: found in 30 of the 100 corpses looted - everybody's and yours together. For a
+  thing that drops only with its quest: of the corpses looted while the quest wanted it.
+- `original 29%`: the original game's rate, which the count leans on until it outweighs it.
+  `no original figure`: a thing the published tables do not have for this creature - the count
+  is leaned on one in ten. `original, none looted`: nobody has looted the creature yet (or
+  not with the quest), and the figure is the original game's as it stands.
+- `x1.5`: how many pieces a corpse that has the thing gives, where that is more than one.
+- Over the list: how many corpses of this creature have been looted, and how many of them by
+  you. After the coin: of how many corpses it was read, and the original game's coin.
+- Last on a line: what the thing adds to what a kill brings.
+- Under it all, a line that says how to read them.
 
 - **A thing one of your quests still wants is that quest's**, whatever kind of thing it is:
   silk for a tailor's quest stands under the quest, with its rate, and not in the list. When
@@ -2198,8 +2224,9 @@ what a kill brings = the coin in a corpse
   once coin has been read at all (those looted before are counted then). `/atlas drops` says
   of how many corpses the coin was read, or that it is not understood. Then the line goes by
   the original game's coin alone.
-- **With Shift**: the coin on a line of its own with the corpses it was read of, and after
-  each thing of the list what it adds - `30%  30/100  67c`.
+- **With Shift**: the coin on a line of its own with the corpses it was read of and the
+  original game's coin, and after each thing of the list what it adds (above: "With Shift,
+  where every figure comes from").
 - A thing the game has not said the price of yet is left out and said to be - "(2 things not
   priced yet)" - and the tooltip is written again when the game has said.
 - Pieces and coin go the way of the rest: said to the map through the strip (a second message
@@ -2298,12 +2325,12 @@ switches the tooltip's lines, as does **In a creature's tooltip, show what it dr
 often** in the addon's options; `/atlas drops list` the list alone, `/atlas drops worth` what
 a kill brings. The counting goes on
 either way. The rates after the game's own lines need version 29 of the addon, the added lines
-version 30, the counting and the list version 45, what a kill brings version 46 (**Check for
-updates**); from 44 on a `/reload` is enough.
+version 30, the counting and the list version 45, what a kill brings version 46, what each
+figure rests on in words version 47 (**Check for updates**); from 44 on a `/reload` is enough.
 
 Tried against a mocked game that fills its tooltip and opens its loot the way this one does,
 with the figures as the map writes them (the counting, the list, the reckoning, what a kill
-brings, pieces and coin: 112 checks; what the addon says through the strip read by the map's
+brings, pieces and coin: 116 checks; what the addon says through the strip read by the map's
 own code), and from the saved settings on against a stand-in database (send, publish, fetch,
 into the game's file: 78 checks). The counting itself has run in the game (version 45, on 24
 November 2026: eight corpses of six creatures, through the strip into the map and on to the

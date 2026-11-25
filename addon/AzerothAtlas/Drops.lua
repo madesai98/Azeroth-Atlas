@@ -25,7 +25,18 @@
 -- A thing one of your quests still wants stands under that quest, whatever kind of thing it
 -- is, and not in this list. A thing of the game's "quest" kind that no quest of yours wants is
 -- not shown at all: it would not be in the corpse. The list is short (LIST_SHORT); with Shift
--- held down it is all there is, each thing with what its figure rests on.
+-- held down it is all there is, and every figure - in the list, and after a quest's line - has
+-- what it rests on after it:
+--
+--     Drops                    100 corpses looted, 12 by you
+--     Silk Cloth        30%  30/100, original 29%, x1.5
+--     - 3/15 Bloodscalp Ear (70%: 40/50, original 20%)
+--
+-- found in 30 of the 100 corpses looted (everybody's and yours; a quest's thing: of those looted
+-- while the quest wanted it), the original game's rate that the count leans on ("no original
+-- figure" where there is none; "original, none looted" where that is all there is), and how
+-- many pieces a corpse that has the thing gives where that is more than one. Under it all, a
+-- line that says how to read them.
 --
 -- And above the list, what a kill of the creature brings on average:
 --
@@ -260,7 +271,7 @@ end
 -- many: nothing where it is of the n corpses), quest (it drops only with its quest), m (pieces
 -- beyond the first of each find), e (pieces to a find in the original game, or nothing) }, ... },
 -- cn (corpses whose coin was read), copper (in them), gold (the original game's coin to a corpse,
--- or nothing) } - or nothing. The last creature asked about is kept, until the count or the
+-- or nothing), mine (how many of the n corpses you looted yourself) } - or nothing. The last creature asked about is kept, until the count or the
 -- figures change.
 local last = { id = nil, of = nil, stamp = nil, row = nil }
 local function Known(d, id)
@@ -285,6 +296,7 @@ local function Known(d, id)
     e.quest = e.t ~= nil or (kinds ~= nil and (tonumber(kinds[item]) or 0) >= 10)
   end
   -- your own count: what of it the 3D map's row has in it already is not counted twice
+  local mineN = 0 -- (how many of the corpses are your own)
   local own = Own(id)
   if own then
     local had, hadN, hadCn, hadCopper = {}, 0, 0, 0
@@ -292,6 +304,7 @@ local function Known(d, id)
     local mine = Counted(d) and type(d.mine) == "table" and d.mine[l.id]
     if type(mine) == "table" then hadN, hadCn, hadCopper = ReadRow(mine[id], had) end
     n = n + math.max(0, own.n - hadN)
+    mineN = math.max(own.n, hadN)
     cn = cn + math.max(0, (tonumber(own.cn) or 0) - hadCn)
     copper = copper + math.max(0, (tonumber(own.coin) or 0) - hadCopper)
     local tried = type(own.tried) == "table" and own.tried or nil
@@ -328,7 +341,7 @@ local function Known(d, id)
   if gold and not (gold > 0) then gold = nil end
   if #list > 0 or n > 0 or gold then
     table.sort(list, function(a, b) return a.item < b.item end)
-    row = { n = n, list = list, cn = cn, copper = copper, gold = gold }
+    row = { n = n, list = list, cn = cn, copper = copper, gold = gold, mine = math.min(mineN, n) }
   end
   last.id, last.of, last.stamp, last.row = id, d, stamp, row
   return row
@@ -443,18 +456,32 @@ end
 
 -- How often this creature drops the thing a line is about - or nothing. (Two items of one name,
 -- as a quest of each side may have its own: the likelier.)
+-- @returns the rate - and what it rests on: found in so many, of so many corpses, and the thing as Known has it
 local function RateFor(d, row, subject)
   local plain = lower(subject)
-  local best = nil
+  local best, found, of, thing = nil, nil, nil, nil
   for i = 1, #row.list do
     local e = row.list[i]
     if Is(d, e.item, subject, plain) then
-      local pct = Rate(e, row.n)
-      if pct and pct > 0 and (not best or pct > best) then best = pct end
+      local pct, k, t = Rate(e, row.n)
+      if pct and pct > 0 and (not best or pct > best) then best, found, of, thing = pct, k, t, e end
     end
   end
-  return best
+  return best, found, of, thing
 end
+
+-- What a figure rests on, in words - shown with Shift held down: "30/100, original 29%, x1.5".
+-- Found in 30 of 100 corpses looted (everybody's and yours; a quest's thing: of those looted
+-- while the quest wanted it); the original game's rate, which the count leans on; and how many
+-- pieces a corpse that has the thing gives, where that is more than one.
+local function Evidence(k, t, orig, each)
+  local text
+  if t and t > 0 then text = (k or 0) .. "/" .. t .. ", " .. (orig and ("original " .. Percent(orig)) or "no original figure")
+  else text = "original, none looted" end
+  if each and each >= 1.05 then text = text .. ", x" .. (gsub(format("%.1f", each), "%.0$", "")) end
+  return text
+end
+local function Shift() return type(IsShiftKeyDown) == "function" and IsShiftKeyDown() and true or false end
 
 -- The creature the game names by this: its number - or nothing (a player, a pet, something the game will not say).
 local function CreatureBy(guid)
@@ -543,12 +570,13 @@ local function Line(tooltip, lineData, unitType)
   if not row then return end
   local subject = Subject(text)
   if not subject or subject == "" then return end
-  local pct = RateFor(d, row, subject)
+  local pct, found, of, thing = RateFor(d, row, subject)
   if not pct then return end
   -- (a line that has its figure already is not given it twice: such a one is not found)
   local line, shown = Written(tooltip, text)
   if not line then return end
-  line:SetText(shown .. " " .. MARK .. "(" .. Percent(pct) .. ")|r")
+  -- (with Shift held down: what the figure rests on, after it)
+  line:SetText(shown .. " " .. MARK .. "(" .. Percent(pct) .. (Shift() and (": " .. Evidence(found, of, thing.pct)) or "") .. ")|r")
   count.shown = count.shown + 1
 end
 
@@ -667,15 +695,18 @@ local function Unit(tooltip, data, types, unitType)
   end
   local dash = words(rawget(_G, "QUEST_DASH")) or "- "
   local added = 0
+  local more = Shift()
+  local evidenced = false -- (a figure of ours stands in the tooltip: with Shift, with what it rests on)
   local function consider(w)
     if listed[w.subject] then return end
-    local pct = RateFor(d, row, w.subject)
+    local pct, found, of, thing = RateFor(d, row, w.subject)
     if not pct then return end
     -- (the quest's name, as the game writes one: in its yellow)
     if w.quest ~= block then tooltip:AddLine(w.title, 1, 0.82, 0); block = w.quest end
-    tooltip:AddLine(dash .. w.text .. " " .. MARK .. "(" .. Percent(pct) .. ")|r", 1, 1, 1, true)
+    tooltip:AddLine(dash .. w.text .. " " .. MARK .. "(" .. Percent(pct) .. (more and (": " .. Evidence(found, of, thing.pct)) or "") .. ")|r", 1, 1, 1, true)
     listed[w.subject] = true
     added = added + 1
+    evidenced = true
   end
   -- (first what belongs under the lines the game ended on, then the rest, quest by quest as your log has them)
   local first = block
@@ -683,10 +714,9 @@ local function Unit(tooltip, data, types, unitType)
   for _, w in ipairs(wanted) do if w.quest ~= first then consider(w) end end
   count.added = count.added + added
 
-  local more = type(IsShiftKeyDown) == "function" and IsShiftKeyDown() and true or false
   -- What a kill brings on average: the coin, and what everything that drops for anybody sells
   -- for (also what stands under a quest of yours above: it has its price all the same).
-  local worth = nil
+  local worth, priced = nil, false
   owed.any = false
   if shared.DropsWorthOn() and type(tooltip.AddDoubleLine) == "function" then
     worth = Worth(row)
@@ -697,9 +727,12 @@ local function Unit(tooltip, data, types, unitType)
       local left = "A kill brings"
       if worth.unpriced > 0 then left = left .. " " .. MARK .. "(" .. worth.unpriced .. (worth.unpriced == 1 and " thing" or " things") .. " not priced yet)|r" end
       tooltip:AddDoubleLine(left, "~ " .. Coins(worth.sum), 0.5, 0.83, 1, 1, 1, 1)
-      -- (with Shift: the coin of it, and what that rests on - so many corpses, or the original game's figure alone)
+      -- (with Shift: the coin of it, and what that rests on - read of so many corpses, and the original game's figure)
       if more and worth.coin then
-        tooltip:AddDoubleLine("   Coin", Coins(worth.coin) .. "  " .. MARK .. (row.cn > 0 and (row.cn .. (row.cn == 1 and " corpse" or " corpses")) or "-") .. "|r", 0.9, 0.9, 0.9, 1, 1, 1)
+        local rests
+        if row.cn > 0 then rests = row.cn .. (row.cn == 1 and " corpse" or " corpses") .. ", " .. (row.gold and ("original " .. Coins(row.gold)) or "no original figure")
+        else rests = "original, none read" end
+        tooltip:AddDoubleLine("   Coin", Coins(worth.coin) .. "  " .. MARK .. rests .. "|r", 0.9, 0.9, 0.9, 1, 1, 1)
       end
       added = added + 1
       count.worth = count.worth + 1
@@ -716,21 +749,26 @@ local function Unit(tooltip, data, types, unitType)
       if not e.quest then
         local name = NameOf(d, e.item)
         local pct, k, t = Rate(e, row.n)
-        if name and pct and pct > 0 and not listed[lower(name)] then rest[#rest + 1] = { name = name, pct = pct, k = k, t = t, item = e.item } end
+        if name and pct and pct > 0 and not listed[lower(name)] then rest[#rest + 1] = { name = name, pct = pct, k = k, t = t, item = e.item, e = e } end
       end
     end
     if #rest > 0 then
       table.sort(rest, function(a, b) if a.pct ~= b.pct then return a.pct > b.pct end return a.name < b.name end)
       local most = more and LIST_LONG or LIST_SHORT
-      tooltip:AddLine("Drops", 0.5, 0.83, 1)
-      local priced = false
+      -- (with Shift: how many corpses the figures rest on, and how many of them are your own)
+      if more then
+        local looted = row.n > 0 and (row.n .. (row.n == 1 and " corpse looted" or " corpses looted") .. (row.mine > 0 and (", " .. row.mine .. " by you") or "")) or "none looted yet"
+        tooltip:AddDoubleLine("Drops", MARK .. looted .. "|r", 0.5, 0.83, 1, 1, 1, 1)
+      else
+        tooltip:AddLine("Drops", 0.5, 0.83, 1)
+      end
       for i = 1, math.min(#rest, most) do
         local r = rest[i]
         local right = Percent(r.pct)
-        -- (with Shift: what the figure rests on - found in so many of so many corpses, or the original game's figure alone -
-        -- and what the thing adds to a kill)
+        -- (with Shift: what the figure rests on - found in so many of so many corpses, the original game's rate, the
+        -- pieces to a find - and what the thing adds to a kill)
         if more then
-          right = right .. "  " .. MARK .. (r.t > 0 and (r.k .. "/" .. r.t) or "-") .. "|r"
+          right = right .. "  " .. MARK .. Evidence(r.k, r.t, r.e.pct, Each(r.e, row.n)) .. "|r"
           local adds = worth and worth.of[r.item]
           if adds then right = right .. "  " .. Coins(adds) ; priced = true end
         end
@@ -738,12 +776,16 @@ local function Unit(tooltip, data, types, unitType)
       end
       if #rest > most then
         tooltip:AddLine(MARK .. "+" .. (#rest - most) .. " rarer" .. (more and "" or " (hold Shift)") .. "|r", 0.6, 0.61, 0.61)
-      elseif more then
-        tooltip:AddLine(MARK .. "found in so many of the corpses looted; -: the original game's figure" .. (priced and "; then what it adds to a kill" or "") .. "|r", 0.6, 0.61, 0.61, true)
       end
       added = added + 1
+      evidenced = true
       count.listed = count.listed + 1
     end
+  end
+  -- With Shift, under whatever was added: how the figures are to be read (where any stands with what it rests on).
+  if more and added > 0 and (evidenced or next(listed) ~= nil) then
+    tooltip:AddLine(MARK .. "30/100: found in 30 of the 100 corpses looted, everybody's and yours (a quest's thing: of those looted while the quest wanted it). original: the original game's rate, which the count leans on until it outweighs it. x2: pieces to a find."
+      .. (priced and " Last: what the thing adds to a kill." or "") .. "|r", 0.6, 0.61, 0.61, true)
   end
   if added > 0 then done.data, done.lines = data, (Lines(tooltip)) end
 end
