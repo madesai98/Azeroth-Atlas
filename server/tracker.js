@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { decodeStrip, NameCache, MAX_BLOCKS, TEXT_KIND } from './strip.js';
+import { decodeStrip, NameCache, MAX_BLOCKS, TEXT_KIND, LOOT_KEY, readLoot } from './strip.js';
 import { note, changed } from './log.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -95,6 +95,8 @@ export class PlayerTracker {
     // What reads the dots off the same square (dots.js; server.js sets it): told and handed what the eyes are.
     this.dots = null;
     this.asked = { place: null, dots: null }; // the square each of the two asks for
+    // What keeps the count of what was in the corpses you loot (loot.js; server.js sets it): told each message of it.
+    this.loot = null;
   }
 
   // ---- subscribers (server-sent events) ---------------------------------------------------
@@ -324,6 +326,14 @@ export class PlayerTracker {
         this.questSig = sig;
         this.quests = { rev: this.quests.rev + 1, log: q.log, done: q.done, me: who ? { class: who.class, race: who.race, skills: who.skills, reps: who.reps, spells: who.spells } : null };
       }
+    }
+    // What was in the corpses of a creature you have just looted (the addon's Drops.lua): a message
+    // that is whole in itself, taken the moment its last piece is in (loot.js keeps the count).
+    if (d.text && d.text.last && d.text.kind === TEXT_KIND.STATS && d.text.key === LOOT_KEY && this.loot) {
+      try {
+        const said = readLoot(this.names.raw.get(`${TEXT_KIND.STATS}:${LOOT_KEY}`));
+        if (said && this.loot.heard(said)) note('game', `what was in the corpses of creature ${said.creature}: ${said.n} looted so far`, { things: said.items.length });
+      } catch (err) { if (changed('loot heard', err.message)) note('game', 'what the strip said of a corpse could not be taken in', { error: err.message }); }
     }
     // Where the game's own interface is on the screen (the addon's Windows.lua): for the map drawn
     // over the game, where it is set to lie behind the interface (viewer/js/overlay.js). Taken

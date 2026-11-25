@@ -14,6 +14,10 @@
 //     the game's saved settings (addon/AzerothAtlas/Met.lua; the same file as the boats). Read only.
 //   - what your own disenchanting gave, by the kind of thing disenchanted, which the addon counts
 //     in the same file (addon/AzerothAtlas/Advice.lua, read by yields.js). Read only.
+//   - what was in the corpses you looted, creature by creature: how many corpses, and in how
+//     many of them each thing was - which the addon counts in the same file and says through the
+//     strip as it happens (addon/AzerothAtlas/Drops.lua, read by loot.js; what the strip said is
+//     kept by the map in <dataDir>/user/loot.json). Read only.
 //   - what became of the auctions you put up yourself, counted by item, house and length (so
 //     many put up, sold, run out, taken down; no names, no times), and what the house asked as a
 //     deposit and kept of a sale (addon/AzerothAtlas/Sales.lua, read by sales.js). Read only.
@@ -39,7 +43,9 @@
 // here", "from here one gets to there", "in this part of it the minimap's place is this far off" -
 // not when you were in it, how often you died there, or which way you went through it. Of
 // disenchanting: "things of this kind and quality, in this band of item level, gave these
-// materials, so many times" - not which things, when, or whose they were. A sighting of a boat
+// materials, so many times" - not which things, when, or whose they were. Of what you looted:
+// "corpses of this creature, so many, had this thing in so many of them" - not when, where, or
+// whose they were, nor which game's settings counted them. A sighting of a boat
 // goes as "a craft of this line left this stop at this moment, by this way" (a ride, or which addon passed it on), with
 // no names, yours or anybody's: the moment is the whole of what it says, so it has to go, and
 // of a ride of your own it does say that this copy's player was aboard then. What is sent is
@@ -54,6 +60,7 @@ import { sightingsIn, metIn, pack, unpack } from './boats.js';
 import { learnedIn } from './learned.js';
 import { yieldsIn, yieldLines } from './yields.js';
 import { salesIn, saleLines } from './sales.js';
+import { lootIn, lootHeard, lootByTag, lootTotals, lootNews, fromTags, toTags } from './loot.js';
 import { placeLines } from './places.js';
 
 const BATCH = 400 * 1024; // bytes of facts to one delivery
@@ -89,10 +96,11 @@ const wordless = (kind, rec) => {
 /**
  * Read everything there is to send.
  * @returns { build, npc: Map<id, fields>, object: Map, quest: Map, seen: [[kind letter, id, map, x, y, z]],
- *   logged: [a line of the combat log's facts as it is sent: see fold() in publish.js], boats: [a sighting as it is sent], notes: string[] }
+ *   logged: [a line of the combat log's facts as it is sent: see fold() in publish.js], boats: [a sighting as it is sent],
+ *   loot: Map<the number a game's saved settings go by, Map<creature, what was in its corpses, counted (loot.js)>>, notes: string[] }
  */
 export async function gather(cfg, dataDir) {
-  const found = { build: 0, npc: new Map(), object: new Map(), quest: new Map(), seen: [], logged: [], boats: [], notes: [] };
+  const found = { build: 0, npc: new Map(), object: new Map(), quest: new Map(), seen: [], logged: [], boats: [], loot: new Map(), notes: [] };
   const folder = flavourFolder(cfg);
   const root = folder ? path.join(cfg.installRoot, folder, 'Cache', 'WDB') : null;
   let languages = [];
@@ -155,7 +163,7 @@ export async function gather(cfg, dataDir) {
   // the boats: what the addon has kept for sending, in every account's saved settings
   try {
     const accounts = path.join(cfg.installRoot, folder, 'WTF', 'Account');
-    const all = new Set(), met = new Set(), gave = [], sold = [];
+    const all = new Set(), met = new Set(), gave = [], sold = [], looted = [];
     for (const account of fs.readdirSync(accounts)) {
       let text;
       try { text = fs.readFileSync(path.join(accounts, account, 'SavedVariables', 'AzerothAtlas.lua'), 'utf8'); } catch { continue; }
@@ -168,13 +176,19 @@ export async function gather(cfg, dataDir) {
       gave.push(yieldsIn(text));
       // (and what became of your own auctions, and what the houses took: likewise one count for this computer - sales.js)
       sold.push(salesIn(text));
+      // (and what was in the corpses you looted: counted per game's settings, sent as one count for this computer - loot.js)
+      looted.push(lootIn(text));
     }
+    // (with what the strip has said of it since the game last wrote its settings)
+    found.loot = lootByTag(looted, lootHeard(dataDir));
     for (const line of yieldLines(gave)) met.add(line);
     for (const line of saleLines(sold)) met.add(line);
     found.boats = [...all];
     const had = new Set(found.logged);
     for (const line of met) if (!had.has(line)) found.logged.push(line);
   } catch { /* no saved settings yet */ }
+  // (no saved settings to be read at all: what the strip said is there all the same)
+  if (!found.loot.size) { try { found.loot = lootByTag([], lootHeard(dataDir)); } catch { /* nothing heard */ } }
   return found;
 }
 
@@ -190,7 +204,7 @@ export async function share(db, store, found, { app = '', dry = false, copy = nu
   const install = copy ?? store.install();
   const sent = store.read('sent.json', {});
   const fresh = { npc: {}, object: {}, quest: {}, seen: [] }, marks = {};
-  const count = { npc: 0, object: 0, quest: 0, seen: 0, logged: 0, boats: 0 };
+  const count = { npc: 0, object: 0, quest: 0, seen: 0, logged: 0, boats: 0, loot: 0 };
   // The boats: each sighting once. They go to a place of their own in the database, where a
   // function takes them in every ten minutes (functions/boats.js).
   const boatsSent = store.read('boats-sent.json', {}), today = Date.now() / 1000;
@@ -226,6 +240,18 @@ export async function share(db, store, found, { app = '', dry = false, copy = nu
     if (sent[key]) continue;
     fresh.seen.push(line); marks[key] = 1; count.logged++;
   }
+  // What was in the corpses looted. A creature's lines are all this copy has counted of it so
+  // far, sent again when that has grown - so what was sent is remembered as the count it was
+  // (loot-sent.json), not line by line: a line is another with every corpse.
+  // The count is kept by the number of the game's settings that made it (loot-own.json), for good:
+  // settings written anew begin another count under another number, which is added to the old one
+  // - it does not start from nothing under it, where the database would not see it grow.
+  const own = lootByTag([], found.loot ?? new Map(), fromTags(store.read('loot-own.json', null)));
+  const ownText = JSON.stringify(toTags(own));
+  const ownChanged = own.size > 0 && ownText !== JSON.stringify(store.read('loot-own.json', null));
+  const loot = lootNews(store.read('loot-sent.json', {}), lootTotals(own));
+  for (const line of loot.lines) fresh.seen.push(line);
+  count.loot = loot.lines.length;
   // deliveries of a modest size each
   const batches = [];
   let cur = null, size = 0;
@@ -241,10 +267,12 @@ export async function share(db, store, found, { app = '', dry = false, copy = nu
   let bytes = 0;
   for (const b of batches) bytes += JSON.stringify(b).length;
   await sendBoats();
+  if (!dry && ownChanged) store.write('loot-own.json', JSON.parse(ownText));
   if (dry || !batches.length) return { sent: count, deliveries: batches.length, bytes, dry, boatsError };
   for (const b of batches) await db.post(`inbox/${install}`, b);
   await db.patch(`installs/${install}`, { last: SERVER_TIME, app, build: found.build });
   store.write('sent.json', { ...sent, ...marks });
+  if (loot.lines.length) store.write('loot-sent.json', loot.now);
   return { sent: count, deliveries: batches.length, bytes, dry: false, boatsError };
 }
 

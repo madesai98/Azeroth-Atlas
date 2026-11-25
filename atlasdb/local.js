@@ -5,6 +5,10 @@
 //                  (signin.js). It says nothing about who you are (no account of yours, no
 //                  character, no computer name), and a new one is made if the file is deleted.
 //   sent.json      a fingerprint of every fact already sent, so nothing is sent twice
+//   loot-own.json  what the games on this computer have counted in the corpses looted, by the
+//                  made-up number each game's saved settings go by (loot.js): kept for good, so
+//                  that settings written anew add to the count and do not begin it again
+//   loot-sent.json that count as it was last sent, creature by creature
 //   truth-*.json   the database as last fetched, one file per kind, and truth-meta.json
 import fs from 'node:fs';
 import path from 'node:path';

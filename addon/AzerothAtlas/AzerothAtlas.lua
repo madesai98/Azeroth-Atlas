@@ -73,7 +73,8 @@ local L_PARTY, L_TEXT, L_TARGET, L_FIX = 1, 2, 4, 8
 -- overlays over the game, which fade and let clicks through while you fight.)
 local L_COMBAT = 16
 -- text kinds: a party member's name; your speeds and hearthstone (and, from key 8 of that kind
--- on, who your character is - class, race, professions, standings: Self.lua); where your hearthstone is set
+-- on, who your character is - class, race, professions, standings: Self.lua; under its key 7,
+-- what was in the corpses of a creature you have just looted: Drops.lua); where your hearthstone is set
 -- (its name, and the spot if this addon saw you bind there); the flight points you know;
 -- the NPC whose window you last opened; and, a little at a time, your quests: the ones in your
 -- log (kind 0; under its keys 4 to 7, how far those of them have got that are part done: see
@@ -1179,6 +1180,14 @@ local function BuildMessages()
   shared.Try("quests", RefreshQuests)
   local handed = HandedBytes()
   if handed then list[#list + 1] = { T_TALK, 10, handed } end
+  -- what was in the corpses of the creatures you have just looted (Drops.lua): a creature's figures
+  -- as they stand, said for a few rounds each - the 3D map sends them on to the Atlas database
+  if shared.LootReport then
+    local ok, reports = shared.Try("loot report", shared.LootReport)
+    if ok and type(reports) == "table" then
+      for _, r in ipairs(reports) do list[#list + 1] = { T_STATS, r[1], r[2] } end
+    end
+  end
   if quests.logFresh then
     -- (the bulk begins with the log's pieces: it carries on after them, with the quests done; and
     -- the round starts again here, at its head, where this list may be made in the middle of one)
@@ -1819,7 +1828,7 @@ SlashCmdList["AZEROTHATLAS"] = function(msg)
     return
   end
   if word == "drops" or word == "droprates" then
-    -- /atlas drops, /atlas drops off, /atlas drops on: how often a creature drops what your quest wants, in its tooltip (Drops.lua)
+    -- /atlas drops, /atlas drops off, /atlas drops on, /atlas drops list: what a creature gives and how often, in its tooltip (Drops.lua)
     if shared.DropsSay then shared.DropsSay(rest) else say("this copy of the addon does not show drop rates: update it from the 3D map, and start the game again.") end
     return
   end

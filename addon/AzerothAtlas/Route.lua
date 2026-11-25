@@ -1298,7 +1298,7 @@ function shared.Command(word, rest)
     say("/atlas boats (when the boats, zeppelins and tram leave, as far as known)   /atlas boats listen (other players' sightings: taken or not)")
     say("/atlas guide (which guide addon the route follows: Guidelime or RestedXP)   /atlas guide auto, /atlas guide guidelime, /atlas guide restedxp (set it)")
     say("Shift-click the world map: a quick waypoint.   Ctrl-click: a pin, and you are asked which level where there are several (/atlas ask: asked, or not; /atlas level asks whenever you like).")
-    say("/atlas drops (how often a creature drops what your quest wants, after that line of its tooltip: /atlas drops off, /atlas drops on)")
+    say("/atlas drops (what a creature gives and how often, in its tooltip - what your quests want of it, and everything else - counted as you loot: /atlas drops off, /atlas drops on; /atlas drops list leaves the list of everything else out)")
     say("/atlas advice (an item's tooltip says what to do with a thing you are getting rid of - vendor, auction or disenchant; Shift lists every way: /atlas advice off, /atlas advice gain 10, /atlas advice risk 20, /atlas advice reset)")
     say("/atlas track (the quests you track become those ready to hand in)   /atlas track here (those with something to do where you are)   /atlas track dungeon, or with a dungeon's name after it (those of a dungeon, and those leading up to them)   /atlas untrack (every quest is untracked)   Whatever is tracked stands with the most rewarding at the top. All four are also in the quest log's menus and in the right-click on a tracked quest.")
   end

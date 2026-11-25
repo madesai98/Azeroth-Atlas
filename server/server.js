@@ -25,6 +25,7 @@ import { Minimap } from './minimap.js';
 import { Dots } from './dots.js';
 import { clockFigures, writeClockAddon } from './boats.js';
 import { writeDropsAddon } from './drops.js';
+import { LootStore } from './loot.js';
 import { writeBookAddon } from './questbook.js';
 import { standinStatus, applyStandins, setWant, switchOn, pricesMode } from './standins.js';
 import { writePricesAddon } from './prices.js';
@@ -85,7 +86,7 @@ const handBoats = () => {
 const handDrops = () => {
   try {
     const r = writeDropsAddon(cfg, cfg.dataDir);
-    if (r?.written) note('database', 'drop rates: how often each creature drops what quests ask for, as the Atlas database has it, written for the addon', { creatures: r.creatures, rates: r.rates, itemsNamed: r.named, fresh: r.fresh || undefined });
+    if (r?.written) note('database', 'what creatures give and how often, as the Atlas database has it and as your own looting counted it, written for the addon', { creatures: r.creatures, rates: r.rates, itemsNamed: r.named, things: r.things, looted: r.looted, fresh: r.fresh || undefined });
     return r;
   } catch (err) { note('database', 'the drop rates could not be written for the addon', { error: err.message }); return null; }
 };
@@ -159,6 +160,11 @@ setTimeout(applyDatabase, 8000).unref?.();
 // you are in a dungeon the map has a plan of. ("minimap": false in config.json switches it off)
 // (what following you through a dungeon teaches of the dungeon itself - a door, a way its floors
 // do not have, how far off the minimap's place is - goes to the Atlas database with the rest)
+// What was in the corpses you loot, as the addon says it through the strip the moment it
+// happens (see loot.js): kept, and sent to the Atlas database with the rest before long - not
+// only when the game next writes its saved settings.
+const loot = new LootStore(cfg.dataDir, { onNew: () => atlas.nudge() });
+tracker.loot = loot;
 const minimap = cfg.minimap === false ? null : new Minimap(cfg, { tracker, onLearned: () => atlas.nudge() });
 if (minimap) { tracker.eyes = minimap; minimap.start(); }
 // What the game's minimap shows as dots - what you track, your target, your pet - as places on
@@ -562,7 +568,7 @@ const server = http.createServer((req, res) => {
 // reads the game window is put away first), and not left behind should the watcher go.
 if (process.send) {
   // (a map build in hand goes with it: nobody would see it finish, and the next one picks up where it stopped)
-  const leave = () => { note('server', 'asked to make way: its code has changed, or the application is closing'); try { tracker.stop(); } catch { /* going anyway */ } try { minimap?.stop(); } catch { /* going anyway */ } try { atlas.stop(); } catch { /* going anyway */ } try { combat?.stop(); } catch { /* going anyway */ } try { auctions.stop(); } catch { /* going anyway */ } try { if (job.running) job.child?.kill(); } catch { /* gone */ } process.exit(0); };
+  const leave = () => { note('server', 'asked to make way: its code has changed, or the application is closing'); try { tracker.stop(); } catch { /* going anyway */ } try { loot.stop(); } catch { /* going anyway */ } try { minimap?.stop(); } catch { /* going anyway */ } try { atlas.stop(); } catch { /* going anyway */ } try { combat?.stop(); } catch { /* going anyway */ } try { auctions.stop(); } catch { /* going anyway */ } try { if (job.running) job.child?.kill(); } catch { /* gone */ } process.exit(0); };
   process.on('message', (m) => { if (m?.stop) leave(); });
   process.on('disconnect', leave);
 }

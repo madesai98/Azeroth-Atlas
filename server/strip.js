@@ -187,6 +187,34 @@ function readAt(digitAt, width, w) {
 
 /** The key of the first piece of who your character is, among the travel facts (the addon's Self.lua). */
 const SELF_KEY = 8;
+/** The key, among the travel facts, that what was in the corpses you looted goes by (the addon's Drops.lua). */
+export const LOOT_KEY = 7;
+/**
+ * What the addon says of a creature's corpses, the moment its count has grown (Drops.lua says how
+ * it is laid out): { tag (a made-up number for the game's saved settings that count), creature,
+ * n (corpses of it looted in all), items: [[item, k, t]] } - a thing that drops for anybody was in
+ * k of the n corpses (t is 0); one that drops only with its quest was in k of the t corpses
+ * looted while a quest wanted it. Null where it is cut short or does not add up (a message put
+ * together from the pieces of two).
+ */
+export function readLoot(b) {
+  if (!b || b.length < 9) return null;
+  let sum = 0;
+  for (let i = 0; i < b.length; i++) if (i !== 8) sum += b[i] * (i % 7 + 1);
+  if (b[8] !== 1 + sum % 250) return null;
+  const u24 = (o) => b[o] * 65536 + b[o + 1] * 256 + b[o + 2];
+  const tag = b[0] * 256 + b[1], creature = u24(2), n = u24(5);
+  if (!tag || !creature) return null;
+  const items = [];
+  for (let o = 9; o + 8 < b.length; o += 9) {
+    const item = u24(o), k = u24(o + 3), t = u24(o + 6);
+    if (!item) continue;
+    // (in no more corpses than there were)
+    if (k > (t > 0 ? t : n)) return null;
+    items.push([item, k, t]);
+  }
+  return { tag, creature, n, items };
+}
 /**
  * Who your character is, read out of the addon's account of it (Self.lua says how it is laid
  * out): { class, race, skills, reps, spells } - or null where it is cut short or laid out in a

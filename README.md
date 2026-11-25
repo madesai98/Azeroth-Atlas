@@ -2070,34 +2070,109 @@ Either can be switched off in its own settings.
 ## Drop rates in a creature's tooltip
 
 With the mouse on a creature, the game's own tooltip lists the quests of yours it has something
-for, and under each what is still wanted of it. Where the Atlas database knows how often that
-creature drops that item, the addon puts the figure after the line:
+for, and under each what is still wanted of it. How often that creature gives that thing is put
+after the line - and under the quests, everything else the creature can give you just now:
 
 ```
 Bloodscalp Hunter
 Level 35
 Humanoid
 Bloodscalp Ears
-  15/15 Bloodscalp Ear (22%)
+- 3/15 Bloodscalp Ear (70%)
 Where's the Key?
 - 0/1 Primitive Key
+Drops
+Silk Cloth                  30%
+Wild Hog Shank             4.9%
+Wool Cloth                 1.3%
+Sweet Nectar               1.1%
+Mageweave Cloth           0.99%
+Greater Healing Potion    0.77%
++2 rarer (hold Shift)
 ```
 
-Where no figure is known the line is left as the game wrote it - as "Primitive Key" above, an
-item new to this game that nobody has a rate for yet. And what a quest of yours still wants of
-the creature that the game does not list at all is added under it (below). No other addon is
-needed for it (asked for on 20 November 2026, by someone about to uninstall Questie).
+(The figures are made up, to show the layout.) Where nothing is known of a thing its line is
+left as the game wrote it - as "Primitive Key" above, an item new to this game, until somebody
+finds one. No other addon is needed for any
+of it (the rates were asked for on 20 November 2026, by someone about to uninstall Questie; the
+list, the counting and what follows on 24 November).
 
-**Where the figures come from.** The Atlas database, as this copy last fetched it: every
-creature's record has `drops`, the items quests ask for that it gives, each with a rate in per
-cent (see "The Atlas database": today they are the rates QuestieDB's tables have for the
-original game, 16,600 of them for 4,299 creatures; a rate the database learns from anywhere
-else will show the same way). The game hands an addon nothing while it runs but what the game
-itself loads, so the map writes them as a small addon of their own beside Azeroth Atlas,
-`AzerothAtlas_Drops` (`server/drops.js`: a quarter of a megabyte, a creature a line), as it does
-the boats' times: when the map starts, each time the database has been fetched, and when the
-addon is installed - and only when the figures have changed. The game takes them up when it
-starts or on `/reload`; a folder it has not seen before, only when it starts.
+**Counted as you loot.** The figures used to be the original game's, written down once. Now
+every corpse you loot is counted - once, with everything that was in it - and the tooltip goes
+by the count from that moment: no reload, no map. Loot a hunter with silk in it and silk is 31
+of 101; nine more with coins alone and every rate of the list has come down a little.
+
+- **Only what you loot alone**: in a group the game shows each player a part of what a corpse
+  has. Not what a spell of yours brought out of a creature (skinning it, picking its pocket):
+  that is another list than the corpse's own. Not what you fish up or take out of a chest. A
+  corpse opened a second time, with what you left in it, is not another corpse.
+- **A thing that drops for anybody** is counted against all the creature's corpses: silk, in 39
+  of 121.
+- **A thing of the game's "quest" kind** is in a corpse only while a quest of yours wants it.
+  Counted against every corpse it would say less the longer you had fought there without the
+  quest. (The two published figures for the Bloodscalp Ear may differ for that reason: one in
+  five in QuestieDB's table, four in five in the reference database's for someone on the
+  quest. Which is right for this game, the count will say.) So it is counted against its own
+  corpses: those looted while your log asked for it. Before it has ever been found on a
+  creature those corpses are kept under the thing's name, and made over to it when it first
+  turns up: the first key, in the fifth corpse, is one of five and not "one of one".
+- `/atlas drops` says how many corpses of how many creatures you have counted, and how many
+  were passed over.
+
+**A count is leaned on a first guess.** A rate out of a handful of corpses is a poor rate: one
+corpse with the thing in it is not "every time". So the count is put together with something
+to start from, which it outweighs as it grows (a Bayesian average):
+
+```
+rate = (found in + weight x first guess) / (corpses + weight)
+```
+
+- With a figure of the original game for the thing, that is the first guess, and it weighs as
+  much as ten corpses - or as many as it takes to find the thing twice at that rate, where
+  that is more, four hundred at the most. One in five and 8 found in 10 is a half; 80 in 100 is
+  75%. A page that drops once in a hundred is not struck off by fifty corpses without one
+  (0.8%), nor made much of by one early find (1.2%).
+- With none: one corpse in ten for a thing that drops for anybody, three in ten for one of a
+  quest, each weighing as much as five corpses. A thing never heard of, found in the first
+  corpse, is 25% and not 100%.
+- With nothing counted, the original game's figure as it is.
+
+**Whose count.** Yours, and everybody's. What you count is said to the map through the strip
+the moment it happens (a creature's figures as they stand, for a few rounds: the game writes
+its saved settings only when you log out or `/reload`, and the count should not wait for
+that), the map sends it to the Atlas database with the next delivery - within five minutes -
+and there every copy's count of a creature is added up (see "The Atlas database", "What
+creatures give"). When the database has been published and fetched again, everybody's count
+comes back to every copy's game with the original game's figures, in the file the map writes
+for the addon. That file says which part of its count is your own (by a made-up number your
+game's saved settings go by), so what you have looted since is added to it and nothing of
+yours is counted twice.
+
+**The list.** Under the quests: `Drops`, and what the creature gives for anybody, the
+likeliest first, six at the most; with Shift held down all of it (thirty at the most), each
+with what its figure rests on - `30%  30/100`: found in 30 of 100 corpses; `-`: the original
+game's figure alone.
+
+- **A thing one of your quests still wants is that quest's**, whatever kind of thing it is:
+  silk for a tailor's quest stands under the quest, with its rate, and not in the list. When
+  you have all the quest asks for, it is back among the rest.
+- **Nothing of a quest you are not on**: a thing of the quest kind that no quest of yours
+  wants is not shown at all. It would not be in the corpse.
+- `/atlas drops list` leaves the list out, and puts it back; the quests' lines stay.
+
+**Where the figures to start from come from.** The Atlas database, as this copy last fetched
+it: every creature's record has `drops`, the items quests ask for that it gives, each with a
+rate in per cent (QuestieDB's tables for the original game: 16,600 of them for 4,299
+creatures), and its record of what it gives has the reference database's loot table for it
+(41,000 things for 4,268 of this game's creatures: what a corpse has half a per cent of the
+time and more) beside everybody's counts. The game hands an addon nothing while it runs but
+what the game itself loads, so the map writes all of it as a small addon of its own beside
+Azeroth Atlas, `AzerothAtlas_Drops` (`server/drops.js`: under a megabyte, a creature a line),
+as it does the boats' times: when the map starts, each time the database has been fetched or
+your own count has been sent, and when the addon is installed - and only when something has
+changed. The game takes it up when it starts or on `/reload`; a folder it has not seen
+before, only when it starts. An addon from before the counting (44 and older) reads the same
+file as it always did.
 
 **How a line is told.** The game's tooltip names the item and gives no number for it. So what
 is left of "0/15 Bloodscalp Ear" without its count has to be, to the letter (large or small),
@@ -2117,19 +2192,23 @@ Bloodscalp Hunter drops the pages of *The Green Hills of Stranglethorn*, about o
 hundred each, and the game says nothing of them under it. So once the tooltip has been
 written, your quest log is gone through, and whatever a quest of yours still wants that this
 creature has a rate for, and that the game did not list, is written under it as the game
-would have: the quest's name, and under it the line as your log has it, with its rate.
+would have: the quest's name, and under it the line as your log has it, with its rate - over
+the list of everything else.
 
 ```
 Bloodscalp Hunter
 Level 35
 Humanoid
 Bloodscalp Ears
-  15/15 Bloodscalp Ear (22%)
+- 3/15 Bloodscalp Ear (70%)
 Where's the Key?
 - 0/1 Primitive Key
 Chapter I
 - 0/1 Green Hills of Stranglethorn - Page 1 (0.92%)
 - 0/1 Green Hills of Stranglethorn - Page 4 (0.93%)
+Drops
+Silk Cloth                  30%
+...
 ```
 
 - **Only what is still wanted.** A thing you have all of is not added (the game shows its own
@@ -2146,26 +2225,34 @@ Chapter I
 
 **What it does not do.**
 
-- Nothing for a creature the database has no rate for, whatever else is known to drop from it,
-  and nothing for a thing with no rate: a line is added because of a rate, not without one.
+- Nothing for a creature of which nothing is known, and nothing for a thing with no rate: a
+  line is added because of a rate, not without one.
 - Nothing inside a dungeon or a raid, where the game keeps what a tooltip holds to itself, and
   nothing with any value the game hands over as "secret": left alone, not worked around. A
   tooltip of which any line is kept secret gets no lines of ours either: what the game has
-  listed there cannot be told.
+  listed there cannot be told. Loot of which the game keeps anything secret, or does not say
+  which corpse a thing came out of, is not counted.
+- A corpse with nothing in it cannot be looted, so it is never counted: a rate is "of the
+  corpses that had anything to take", as the published figures for the original game are.
+- What others count reaches your game only with a `/reload` or a start of the game after the
+  database has been published and fetched again - and the database is published by its
+  maker's copy, when that runs. Your own count needs none of that.
 - A copy that has never fetched the database (or has it switched off from the start) has no
-  figures to write: the tooltip is as the game writes it, and `/atlas drops` says so.
+  figures to start from: the tooltip goes by your own count alone, and `/atlas drops` says so.
 
-`/atlas drops` says whether it is on, how many creatures there are figures for and how many
-lines it has added; `/atlas drops off` (and `on`) switches both, as does **In a creature's
-tooltip, show how often it drops what your quest wants** in the addon's options. The rates
-after the game's own lines need version 29 of the addon, the added lines version 30 (**Check
-for updates**) - and the game started again once since version 29 was put in: the addon had a
-new file then, and the figures a new folder, and the game only looks for either when it
-starts. From 29 to 30 a `/reload` is enough.
+`/atlas drops` says whether it is on, how many creatures there are figures for, how many
+lines it has added and how much you have counted yourself; `/atlas drops off` (and `on`)
+switches the tooltip's lines, as does **In a creature's tooltip, show what it drops and how
+often** in the addon's options; `/atlas drops list` the list alone. The counting goes on
+either way. The rates after the game's own lines need version 29 of the addon, the added lines
+version 30, the counting and the list version 45 (**Check for updates**); from 44 to 45 a
+`/reload` is enough.
 
-Tried against a mocked game that fills its tooltip the way this one does, with the figures as
-the map writes them from the real database; not yet seen in the game itself when this was
-written.
+Tried against a mocked game that fills its tooltip and opens its loot the way this one does,
+with the figures as the map writes them (the counting, the list and the reckoning: 69 checks;
+what the addon says through the strip read by the map's own code), and from the saved settings
+on against a stand-in database (send, publish, fetch, into the game's file: 53 checks). In the
+game itself none of the counting has been seen yet.
 
 ## What to do with a thing you are getting rid of, in its tooltip
 
@@ -3887,6 +3974,25 @@ that grows, and its fullest count stands for its earlier ones; every copy's is a
 other source says what disenchanting gives in this game. What it is for is under "What to do
 with a thing you are getting rid of, in its tooltip".
 
+**What creatures give.** And one record per creature of what it gives (`/truth/loot`, made
+by `atlasdb/loot.js`) - apart from the creature's own record, so that a count that grows by
+the hour does not make every copy build its map again. In it: how many of its corpses the
+copies' players looted (alone, each corpse once) and how many copies looted any; of each thing
+that drops for anybody, in how many of those corpses it was; of each thing that drops only
+with its quest, in how many it was of the corpses looted while a quest wanted it; and, beside
+the counts, what the reference database's loot table for the creature gives (the original
+game: what a corpse has half a per cent of the time and more, forty things at the most). A
+copy sends the whole of what it has counted of a creature each time that grows
+(`p,<creature>,<corpses>,<item>,<found in>,...` and `w,<creature>,<item>,<found in>,<of>,...`,
+in the list it already sends: the database's rules are as they were), and since every figure
+only ever grows, the largest a copy has said of each stands; every copy's is added up. One
+copy's word is enough: nothing waits for a second. What a copy has sent is remembered as the
+count it was (`<dataDir>/atlasdb/loot-sent.json`), not line by line; and what the games on a
+computer have counted is kept by the made-up number each game's saved settings go by
+(`loot-own.json`), so that settings written anew add another count to the old one and do not
+begin it again where the database would not see it grow. Nobody else says what
+this game's creatures give. What it is for is under "Drop rates in a creature's tooltip".
+
 **What became of the players' own auctions.** And two kinds of record of the auctions the
 copies' players put up themselves (`atlasdb/sales.js`): per item (`/truth/sale`), house by
 house and length by length, how many were put up, sold, ran out and were taken down, and what
@@ -3905,7 +4011,10 @@ skill", "the game's map puts this quest here"), what following you through a dun
 the map of the dungeon ("this door puts you here", "from here one gets to there", "in this
 part of it the minimap's place is this far off": not when you were in it, how the run went, or
 which way you took through it), what your own disenchanting gave ("things of this kind gave
-these materials, so many times": not which things, when, or whose), what became of your own
+these materials, so many times": not which things, when, or whose), what was in the corpses
+you looted ("corpses of this creature, so many, had this thing in so many of them": not when,
+where, or whose - counted by the addon and said through the strip as it happens, so that it
+goes with the next delivery and not only when the game has written its settings), what became of your own
 auctions ("of this item, at this house, so many put up for 24 hours, so many sold": not when,
 or whose) and what the house asked and kept of them, and what
 the addon has seen of the boats (see "Boats, zeppelins and the tram, live": a boat sighting
@@ -3913,8 +4022,8 @@ is a line, a stop and a moment, with no names; of a ride of your own, that does 
 player was aboard then), and
 sends what it has not sent before: a little after it starts, whenever the game has written its
 cache or the addon's saved settings again (it does when you log out, leave the game or
-`/reload`), after you have met an NPC or the map has learned something of a dungeon, and every
-six hours besides. **Facts about the game
+`/reload`), within five minutes of your meeting an NPC, looting a corpse or the map learning
+something of a dungeon, and every six hours besides. **Facts about the game
 world and nothing else**: not your account, your characters, your realm or your computer's
 name. Of what you have seen of the world, not where you were or when: a sighting of an NPC goes
 as "this NPC stands here". A boat's moment is the one thing sent that has a time in it. The

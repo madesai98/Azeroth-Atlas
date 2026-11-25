@@ -7,7 +7,9 @@
 //   /truth/<kind>/b<n>/i<id>   the records (records.js): kind is npc, object or quest - or place,
 //                              a dungeon with what the copies learned of its insides (places.js) -
 //                              or yield, a band of things that can be disenchanted with what the
-//                              copies' players got of it (yields.js); a shard holds the ids n to n+499
+//                              copies' players got of it (yields.js) - or loot, a creature with
+//                              what the copies' players found in its corpses (loot.js); a shard
+//                              holds the ids n to n+499
 //   /inbox/<copy>/<key>        what each copy of the map has sent (collect.js): added to, never
 //                              changed. Everything published can be made again from these and
 //                              the sources on the maker's own disk. Where several copies have
@@ -27,11 +29,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { findQuestieDb, readQuestie } from '../extractor/questie.js';
-import { readReference } from '../extractor/reference.js';
-import { KINDS, PLACE, YIELD, SALE, COST, PUBLISHED, SCHEMA, LAYERS, fromQuestie, fromReference, mergeAll, shards, canonical, tidy, cacheSays } from './records.js';
+import { readReference, lootOf } from '../extractor/reference.js';
+import { KINDS, PLACE, YIELD, SALE, COST, LOOT, PUBLISHED, SCHEMA, LAYERS, fromQuestie, fromReference, referenceLoot, mergeAll, shards, canonical, tidy, cacheSays } from './records.js';
 import { foldPlaces } from './places.js';
 import { readYieldLine, foldYields } from './yields.js';
 import { readSaleLine, foldSales } from './sales.js';
+import { readLootLine, takeLootLine, foldLoot } from './loot.js';
 import { entries, SERVER_TIME } from './rtdb.js';
 
 const SAME = 30;            // yards: sightings of one NPC this close together are the same spot
@@ -152,11 +155,13 @@ function mostSaid(voices) {
  *                                minimap's place is (places.js has the three, and puts them together)
  *   y,<band>,<times>,<material>,<pieces>,...   what disenchanting things of a band gave, in all (yields.js)
  *   a,<item>,<house>,<hours>,...   what became of a copy's players' own auctions of an item; k,...: what a house took (sales.js)
+ *   p,<creature>,<corpses>,<item>,<found in>,...   what a copy's players found in a creature's corpses; w,...: of what drops only with its quest (loot.js)
  * A line of any other kind is left out: a later version's, which this one does not know.
  * @param inbox what GET /inbox returned
  * @returns { cache, seen, logged, obs, copies, deliveries, splits: [{ kind, id, field, said }],
  *            places: Map<map, a dungeon's record>, yields: Map<band, what disenchanting it gave>,
- *            sales: Map<item, what became of the auctions of it>, costs: Map<1 | 2, what a house took> }
+ *            sales: Map<item, what became of the auctions of it>, costs: Map<1 | 2, what a house took>,
+ *            loot: Map<copy, Map<creature, what it counted in that creature's corpses>> (put together by foldLoot) }
  */
 export function fold(inbox) {
   const reports = { npc: new Map(), object: new Map(), quest: new Map() }; // id -> Map<copy, { copy, at, key, build, rec }>
@@ -171,6 +176,7 @@ export function fold(inbox) {
   const ofPlaces = new Map(); // copy -> [its lines of the dungeons, in the order sent]
   const ofYields = new Map(); // copy -> Map<band, its count of what disenchanting gave: the one with the most disenchantings>
   const ofSales = new Map();  // copy -> Map<kind and key, its count of its own auctions: the one with the most auctions>
+  const ofLoot = new Map();   // copy -> Map<creature, its count of what was in that creature's corpses: the largest of each figure>
   const whole = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
   let deliveries = 0;
   const copies = entries(inbox);
@@ -223,6 +229,15 @@ export function fold(inbox) {
           if (!mine) ofSales.set(copy, (mine = new Map()));
           const had = mine.get(said.kind + said.key);
           if (!had || said.v[0] >= had.v[0]) mine.set(said.kind + said.key, said);
+          continue;
+        }
+        if (k === 'p' || k === 'w') {
+          // what was in a creature's corpses: a line is all a copy has counted so far, and every figure only grows
+          const said = readLootLine(p);
+          if (!said) continue;
+          let mine = ofLoot.get(copy);
+          if (!mine) ofLoot.set(copy, (mine = new Map()));
+          takeLootLine(mine, said);
           continue;
         }
         if (k === 'h') {
@@ -399,7 +414,7 @@ export function fold(inbox) {
     o.l = [names.size];
     obs.npc.set(id, o);
   }
-  return { cache, seen, logged, obs, copies: copies.length, deliveries, splits, places: foldPlaces(ofPlaces), yields: foldYields(ofYields), ...foldSales(ofSales) };
+  return { cache, seen, logged, obs, copies: copies.length, deliveries, splits, places: foldPlaces(ofPlaces), yields: foldYields(ofYields), ...foldSales(ofSales), loot: ofLoot };
 }
 
 /**
@@ -432,6 +447,7 @@ export async function buildTruth(cfg, dataDir, inbox, log = () => {}) {
     log(`${layer.name} (as of ${layer.made ?? '?'}): ${layer.npc.size.toLocaleString()} creatures, ${layer.object.size.toLocaleString()} objects, ${layer.quest.size.toLocaleString()} quests`);
   }
   // the reference database, as the map update fetched it
+  let refLoot = null;
   try {
     const dir = path.join(dataDir, 'sources', 'classic-db');
     const name = fs.readdirSync(dir).find((f) => /\.sql(\.gz)?$/i.test(f));
@@ -441,6 +457,8 @@ export async function buildTruth(cfg, dataDir, inbox, log = () => {}) {
       const all = { npc: new Set([...known.npc, ...got.cache.npc.keys()]), object: new Set([...known.object, ...got.cache.object.keys()]), quest: new Set([...known.quest, ...got.cache.quest.keys()]) };
       const c = fromReference(ref, all);
       sources.npc.push(['c', c.npc]); sources.object.push(['c', c.object]); sources.quest.push(['c', c.quest]);
+      // (and what its loot tables say each of this game's creatures gives: where nobody has looted one yet, that is all there is)
+      try { refLoot = referenceLoot(ref, lootOf, all.npc); } catch (err) { log(`the reference database's loot tables were not read (${err.message})`); }
       from.reference = name;
       log(`${name}: ${c.npc.size.toLocaleString()} creatures, ${c.object.size.toLocaleString()} objects, ${c.quest.size.toLocaleString()} quests of this game known to it`);
     } else log('no reference database on this disk (Update map fetches it)');
@@ -467,6 +485,14 @@ export async function buildTruth(cfg, dataDir, inbox, log = () => {}) {
   records[SALE] = got.sales;
   records[COST] = got.costs;
   if (got.sales.size) { from.sales = [...got.sales.values()].reduce((n, r) => n + Object.values(r.h).reduce((m, by) => m + Object.values(by).reduce((q, v) => q + v[0], 0), 0), 0); log(`the players' own auctions: ${from.sales.toLocaleString()} put up, of ${got.sales.size.toLocaleString()} items`); }
+  // what creatures give: the copies' own counts of what was in the corpses their players looted, and, beside them,
+  // what the reference database's loot tables give (nobody else says anything of this game's creatures)
+  records[LOOT] = foldLoot(got.loot, refLoot);
+  {
+    const counted = [...records[LOOT].values()].filter((r) => r.n > 0 || r.on);
+    if (counted.length) { from.loot = counted.reduce((n, r) => n + (r.n ?? 0), 0); log(`what creatures give, as the copies' players found it: ${from.loot.toLocaleString()} corpses looted, of ${counted.length.toLocaleString()} creatures`); }
+    if (refLoot?.size) log(`...and the reference database's loot tables for ${refLoot.size.toLocaleString()} of this game's creatures`);
+  }
   return { records, from, splits: got.splits };
 }
 

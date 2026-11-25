@@ -88,7 +88,7 @@ try {
     const ofDungeons = found.logged.filter((l) => /^[djc],/.test(l)).length;
     log(`found: ${found.npc.size} creatures, ${found.object.size} objects and ${found.quest.size} quests in the game's cache (game build ${found.build || '?'}), ${found.seen.length} sightings, ${found.logged.length - ofDungeons} facts of creatures fought or met and of what the game's windows showed, ${ofDungeons} of the insides of dungeons (a door, a way, how far off the minimap's place is), ${found.boats.length} sightings of boats, zeppelins and the tram`);
     const r = await share(db, store, found, { app, dry: flag('dry'), copy });
-    log(`${r.dry ? 'would send' : 'sent'}: ${r.sent.npc} creatures, ${r.sent.object} objects, ${r.sent.quest} quests, ${r.sent.seen} sightings, ${r.sent.logged ?? 0} other facts (creatures fought or met, the game's windows, the insides of dungeons) in ${r.deliveries} ${r.deliveries === 1 ? 'delivery' : 'deliveries'} (${kb(r.bytes)}), ${r.sent.boats} sightings of boats; the rest was sent before`);
+    log(`${r.dry ? 'would send' : 'sent'}: ${r.sent.npc} creatures, ${r.sent.object} objects, ${r.sent.quest} quests, ${r.sent.seen} sightings, ${r.sent.logged ?? 0} other facts (creatures fought or met, the game's windows, the insides of dungeons), ${r.sent.loot ?? 0} lines of what was in the corpses looted in ${r.deliveries} ${r.deliveries === 1 ? 'delivery' : 'deliveries'} (${kb(r.bytes)}), ${r.sent.boats} sightings of boats; the rest was sent before`);
     if (r.boatsError) log(`the boats could not be sent: ${r.boatsError}`);
     if (json) console.log(JSON.stringify({ collect: r }));
   } else if (command === 'publish') {

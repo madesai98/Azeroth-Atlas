@@ -84,6 +84,16 @@
 //           far they differ ..." how far the minimap's place is from the combat log's, by the
 //           32-yard square; a [copies, checks, yards]: the same over the whole dungeon.
 //           (A height or a facing that is not known is left empty.)
+//
+// And one record per creature of what it gives, kind "loot" (loot.js) - apart from the
+// creature's own record, so that a count that grows by the hour does not make every copy build
+// its map again:
+//
+//   loot    n corpses looted (by players alone, each corpse once), c copies that looted any,
+//           got [[item, in how many of those corpses it was]] what drops for anybody,
+//           on [[item, in how many it was, of how many corpses looted while a quest wanted it]]
+//           what drops only with its quest, ref [[item, per cent]] what the reference database's
+//           loot table for the creature gives (the original game; half a per cent and more)
 import crypto from 'node:crypto';
 
 export const SCHEMA = 1;
@@ -96,7 +106,9 @@ export const YIELD = 'yield';
 /** ...and the two that are of the players' own auctions: an item with what became of the auctions of it, and what a house took (sales.js). */
 export const SALE = 'sale';
 export const COST = 'cost';
-export const PUBLISHED = [...KINDS, PLACE, YIELD, SALE, COST];
+/** ...and the kind that is a creature with what it gives: what the copies' players found in its corpses, counted, and the reference database's loot table for it (loot.js). */
+export const LOOT = 'loot';
+export const PUBLISHED = [...KINDS, PLACE, YIELD, SALE, COST, LOOT];
 export const BUCKET = 500; // ids to a shard: a copy fetches only the shards that have changed
 
 /** Believed first to last. */
@@ -269,6 +281,35 @@ export function fromReference(ref, known = null) {
     quest.set(id, tidy({ n: q.title || undefined, type: q.type || undefined, limit: q.limit || undefined, o: tidy(o) }));
   }
   return { npc, object, quest };
+}
+
+const REF_LEAST = 0.005; // a thing the reference database's loot table gives less often than this is left out (the thousands of things any creature of a level may give once in a blue moon)
+const REF_MOST = 40;     // the most things kept of one creature's table: the likeliest
+
+/**
+ * What the reference database's loot tables give, creature by creature: Map<creature, [[item,
+ * per cent], ...]> by item, the likeliest REF_MOST of those given REF_LEAST of the time and more.
+ * What drops for anybody and what drops only with its quest alike: which of the two a thing is,
+ * the game's own word on the item says (its kind), not this.
+ * @param ref    readReference()
+ * @param lootOf extractor/reference.js's, handed in (this file reads nothing from the disk)
+ * @param known  Set of the creatures this game has, or null for all
+ */
+export function referenceLoot(ref, lootOf, known = null) {
+  const out = new Map();
+  const tables = { main: ref.loot.creature, reference: ref.loot.reference };
+  const made = new Map(); // loot id -> its list (many creatures share a table)
+  for (const [id, t] of ref.templates) {
+    if (!(t.loot > 0) || (known && !known.has(id))) continue;
+    let list = made.get(t.loot);
+    if (!list) {
+      list = [...lootOf(tables, t.loot)].filter(([, [p]]) => p >= REF_LEAST).sort((a, b) => b[1][0] - a[1][0] || a[0] - b[0]).slice(0, REF_MOST)
+        .map(([item, [p]]) => [item, Math.min(100, Math.round(p * 10000) / 100)]).sort((a, b) => a[0] - b[0]);
+      made.set(t.loot, list);
+    }
+    if (list.length) out.set(id, list);
+  }
+  return out;
 }
 
 /** One record of the game's cache (from readWdb()) as the fields a record keeps. */

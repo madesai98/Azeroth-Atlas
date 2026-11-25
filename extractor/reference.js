@@ -199,6 +199,43 @@ function readFacts(sql) {
 }
 
 /**
+ * Everything a loot table gives, each thing with the chance that one corpse (or chest) has it:
+ * Map<item, [chance (0..1), true if only while you are on the quest that wants it]>.
+ * A loot table lists items on their own (each with its own chance), items in groups (one of the
+ * group at most: those with no chance of their own share what is left), and references to
+ * shared tables, rolled a number of times.
+ * @param tables { main: Map<loot id, rows>, reference: Map<loot id, rows> } (readReference().loot: creature or object, and reference)
+ */
+export function lootOf(tables, id, shared = false, depth = 0) {
+  const rows = (shared ? tables.reference : tables.main).get(id);
+  const out = new Map();
+  if (!rows || depth > 3) return out;
+  // (what each group's members with no chance of their own get)
+  const left = new Map();
+  for (const [, chance, group, ref] of rows) {
+    if (!group || ref < 0) continue;
+    const g = left.get(group) ?? { given: 0, free: 0 };
+    if (chance === 0) g.free++; else g.given += Math.abs(chance);
+    left.set(group, g);
+  }
+  const miss = new Map(), quest = new Set();
+  const add = (item, p, only) => { miss.set(item, (miss.get(item) ?? 1) * (1 - Math.min(1, Math.max(0, p)))); if (only) quest.add(item); };
+  for (const [item, chance, group, minOrRef, max] of rows) {
+    if (minOrRef < 0) {
+      // a shared table, rolled `max` times, each time with this chance
+      const roll = (Math.abs(chance) || 100) / 100;
+      for (const [inner, [p, only]] of lootOf(tables, -minOrRef, true, depth + 1)) add(inner, 1 - (1 - Math.min(1, roll * p)) ** Math.max(1, max), only || chance < 0);
+    } else {
+      const g = group ? left.get(group) : null;
+      const pct = chance !== 0 ? Math.abs(chance) : g && g.free ? Math.max(0, 100 - g.given) / g.free : 100;
+      add(item, pct / 100, chance < 0);
+    }
+  }
+  for (const [item, m] of miss) if (item > 0 && m < 1) out.set(item, [1 - m, quest.has(item)]);
+  return out;
+}
+
+/**
  * Read the spawn tables out of the database dump, and what else it knows (see readFacts).
  * @returns {{ hash, creatures: Map<id, number[]>, objects: Map<id, number[]>, ...facts }}  each list is map, x, y, z per spawn
  */
