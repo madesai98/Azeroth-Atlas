@@ -2081,6 +2081,7 @@ Bloodscalp Ears
 - 3/15 Bloodscalp Ear (70%)
 Where's the Key?
 - 0/1 Primitive Key
+A kill brings           ~ 1s 4c
 Drops
 Silk Cloth                  30%
 Wild Hog Shank             4.9%
@@ -2095,7 +2096,7 @@ Greater Healing Potion    0.77%
 left as the game wrote it - as "Primitive Key" above, an item new to this game, until somebody
 finds one. No other addon is needed for any
 of it (the rates were asked for on 20 November 2026, by someone about to uninstall Questie; the
-list, the counting and what follows on 24 November).
+list, the counting, what a kill brings and what follows on 24 November).
 
 **Counted as you loot.** The figures used to be the original game's, written down once. Now
 every corpse you loot is counted - once, with everything that was in it - and the tooltip goes
@@ -2159,6 +2160,52 @@ game's figure alone.
 - **Nothing of a quest you are not on**: a thing of the quest kind that no quest of yours
   wants is not shown at all. It would not be in the corpse.
 - `/atlas drops list` leaves the list out, and puts it back; the quests' lines stay.
+
+**What a kill brings.** Above the list, one line: what a kill of the creature brings on
+average ("it tells us how much each kill of that enemy would net us on average", asked for on
+24 November 2026 - the rates being counted, and an item's tooltip already saying what each
+thing is best got rid of for).
+
+```
+what a kill brings = the coin in a corpse
+                   + for each thing that drops for anybody:
+                     how often it drops  x  pieces to a find  x  what one piece brings
+```
+
+- **What one piece brings** is what its own tooltip says ("What to do with a thing you are
+  getting rid of", below): the vendor, an auction or disenchanting, whichever brings most of
+  the ways that are safe enough by your own weights - for an auction, what it brings on
+  average: the price less the house's cut for the times it sells, the vendor less the lost
+  deposit for the times it does not. Change a weight and the line changes with it. With no
+  auction prices on this computer, what a vendor pays. A thing no vendor buys and no auction
+  is safe for brings nothing; nor does a thing of the quest kind, which is not sold. A regular
+  thing one of your quests wants stands under that quest and counts all the same.
+- **Pieces to a find.** With every corpse the addon also counts how many pieces of a thing
+  were in it (kept as the pieces beyond the first of each find). A corpse that has silk gives
+  one and a half on average; that is leaned on the original game's figure for the thing (the
+  reference database's least and most to a drop; one piece where it has none), which weighs as
+  much as three finds.
+- **The coin** is read from the words the game shows it in - by the game's own words for
+  gold, silver and copper, whatever language it speaks - and counted with the corpses it was
+  read of; a corpse with none in it counts for nought. Leaned on the coin the reference
+  database has the creature give (the middle of its least and most), which weighs as much as
+  five corpses. Looted several corpses at once, each has what the game says came out of it,
+  where that adds up to what the slot holds.
+- **Where coin cannot be read, it is not guessed.** Words that are not understood, all of
+  them, count for nothing; and then no coin is counted for the rest of the session, because a
+  corpse with none would count for nought beside one with some that did not count at all, and
+  the figure would come out too low. For the same reason a corpse with no coin counts only
+  once coin has been read at all (those looted before are counted then). `/atlas drops` says
+  of how many corpses the coin was read, or that it is not understood. Then the line goes by
+  the original game's coin alone.
+- **With Shift**: the coin on a line of its own with the corpses it was read of, and after
+  each thing of the list what it adds - `30%  30/100  67c`.
+- A thing the game has not said the price of yet is left out and said to be - "(2 things not
+  priced yet)" - and the tooltip is written again when the game has said.
+- Pieces and coin go the way of the rest: said to the map through the strip (a second message
+  of a creature), sent to the Atlas database, added up there with every copy's, and back in
+  the file the map writes for the game.
+- `/atlas drops worth` leaves the line out, and puts it back.
 
 **Where the figures to start from come from.** The Atlas database, as this copy last fetched
 it: every creature's record has `drops`, the items quests ask for that it gives, each with a
@@ -2234,6 +2281,11 @@ Silk Cloth                  30%
   which corpse a thing came out of, is not counted.
 - A corpse with nothing in it cannot be looted, so it is never counted: a rate is "of the
   corpses that had anything to take", as the published figures for the original game are.
+  So "a kill brings" is a little high for a creature that often leaves nothing at all: it is
+  what a corpse with anything in it brings.
+- What a kill brings is what the things are worth, not what you will be paid: nobody's bags
+  hold everything, an auction may not sell, and prices are those of the last time the game
+  was started. It says nothing of how long a kill takes.
 - What others count reaches your game only with a `/reload` or a start of the game after the
   database has been published and fetched again - and the database is published by its
   maker's copy, when that runs. Your own count needs none of that.
@@ -2243,16 +2295,21 @@ Silk Cloth                  30%
 `/atlas drops` says whether it is on, how many creatures there are figures for, how many
 lines it has added and how much you have counted yourself; `/atlas drops off` (and `on`)
 switches the tooltip's lines, as does **In a creature's tooltip, show what it drops and how
-often** in the addon's options; `/atlas drops list` the list alone. The counting goes on
+often** in the addon's options; `/atlas drops list` the list alone, `/atlas drops worth` what
+a kill brings. The counting goes on
 either way. The rates after the game's own lines need version 29 of the addon, the added lines
-version 30, the counting and the list version 45 (**Check for updates**); from 44 to 45 a
-`/reload` is enough.
+version 30, the counting and the list version 45, what a kill brings version 46 (**Check for
+updates**); from 44 on a `/reload` is enough.
 
 Tried against a mocked game that fills its tooltip and opens its loot the way this one does,
-with the figures as the map writes them (the counting, the list and the reckoning: 69 checks;
-what the addon says through the strip read by the map's own code), and from the saved settings
-on against a stand-in database (send, publish, fetch, into the game's file: 53 checks). In the
-game itself none of the counting has been seen yet.
+with the figures as the map writes them (the counting, the list, the reckoning, what a kill
+brings, pieces and coin: 112 checks; what the addon says through the strip read by the map's
+own code), and from the saved settings on against a stand-in database (send, publish, fetch,
+into the game's file: 78 checks). The counting itself has run in the game (version 45, on 24
+November 2026: eight corpses of six creatures, through the strip into the map and on to the
+database). The pieces, the coin and what a kill brings (46) have not been seen there yet - in
+particular whether this game writes the coin in a corpse in the words reckoned with; where it
+does not, `/atlas drops` says so and the coin is left to the original game's figure.
 
 ## What to do with a thing you are getting rid of, in its tooltip
 
@@ -3981,9 +4038,15 @@ copies' players looted (alone, each corpse once) and how many copies looted any;
 that drops for anybody, in how many of those corpses it was; of each thing that drops only
 with its quest, in how many it was of the corpses looted while a quest wanted it; and, beside
 the counts, what the reference database's loot table for the creature gives (the original
-game: what a corpse has half a per cent of the time and more, forty things at the most). A
+game: what a corpse has half a per cent of the time and more, forty things at the most). For
+what a kill brings there is also: of each thing that drops for anybody, the pieces beyond the
+first of each find; the coin - the corpses it was read of, and the copper in them; and from
+the reference database how many pieces a corpse that has a thing gives (where that is more
+than one: 5,364 of the 41,116) and the coin a corpse of the creature has on average (3,694
+creatures). A
 copy sends the whole of what it has counted of a creature each time that grows
-(`p,<creature>,<corpses>,<item>,<found in>,...` and `w,<creature>,<item>,<found in>,<of>,...`,
+(`p,<creature>,<corpses>,<item>,<found in>,...` and `w,<creature>,<item>,<found in>,<of>,...`;
+`m,<creature>,<item>,<pieces beyond the first>,...` and `g,<creature>,<corpses>,<copper>`,
 in the list it already sends: the database's rules are as they were), and since every figure
 only ever grows, the largest a copy has said of each stands; every copy's is added up. One
 copy's word is enough: nothing waits for a second. What a copy has sent is remembered as the
@@ -4012,8 +4075,9 @@ the map of the dungeon ("this door puts you here", "from here one gets to there"
 part of it the minimap's place is this far off": not when you were in it, how the run went, or
 which way you took through it), what your own disenchanting gave ("things of this kind gave
 these materials, so many times": not which things, when, or whose), what was in the corpses
-you looted ("corpses of this creature, so many, had this thing in so many of them": not when,
-where, or whose - counted by the addon and said through the strip as it happens, so that it
+you looted ("corpses of this creature, so many, had this thing in so many of them, so many
+pieces of it, and so much coin": not when, where, or whose, and nothing of the coin you have -
+counted by the addon and said through the strip as it happens, so that it
 goes with the next delivery and not only when the game has written its settings), what became of your own
 auctions ("of this item, at this house, so many put up for 24 hours, so many sold": not when,
 or whose) and what the house asked and kept of them, and what

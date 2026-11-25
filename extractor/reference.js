@@ -142,7 +142,13 @@ function readFacts(sql) {
   {
     const t = reader('creature_template');
     const c = ['Entry', 'MinLevel', 'MaxLevel', 'Family', 'CreatureType', 'Rank', 'MinLevelHealth', 'MaxLevelHealth', 'LootId', 'SkinningLootId'].map(t.at);
-    if (t.ok && c.every((i) => i >= 0)) for (const r of t.rows()) templates.set(num(r[c[0]]), { lv: [num(r[c[1]]), num(r[c[2]])], family: num(r[c[3]]), type: num(r[c[4]]), rank: num(r[c[5]]), hp: [num(r[c[6]]), num(r[c[7]])], loot: num(r[c[8]]), skin: num(r[c[9]]) });
+    // (the coin in a corpse, in copper: the least and the most - where the dump has it)
+    const iLeast = t.at('MinLootGold'), iMost = t.at('MaxLootGold');
+    if (t.ok && c.every((i) => i >= 0)) for (const r of t.rows()) {
+      const one = { lv: [num(r[c[1]]), num(r[c[2]])], family: num(r[c[3]]), type: num(r[c[4]]), rank: num(r[c[5]]), hp: [num(r[c[6]]), num(r[c[7]])], loot: num(r[c[8]]), skin: num(r[c[9]]) };
+      if (iLeast >= 0 && iMost >= 0) { const least = num(r[iLeast]), most = Math.max(least, num(r[iMost])); if (most > 0) one.gold = [least, most]; }
+      templates.set(num(r[c[0]]), one);
+    }
   }
   const respawn = new Map();
   {
@@ -200,7 +206,8 @@ function readFacts(sql) {
 
 /**
  * Everything a loot table gives, each thing with the chance that one corpse (or chest) has it:
- * Map<item, [chance (0..1), true if only while you are on the quest that wants it]>.
+ * Map<item, [chance (0..1), true if only while you are on the quest that wants it, how many
+ * pieces a corpse that has it gives on average]>.
  * A loot table lists items on their own (each with its own chance), items in groups (one of the
  * group at most: those with no chance of their own share what is left), and references to
  * shared tables, rolled a number of times.
@@ -218,20 +225,29 @@ export function lootOf(tables, id, shared = false, depth = 0) {
     if (chance === 0) g.free++; else g.given += Math.abs(chance);
     left.set(group, g);
   }
-  const miss = new Map(), quest = new Set();
-  const add = (item, p, only) => { miss.set(item, (miss.get(item) ?? 1) * (1 - Math.min(1, Math.max(0, p)))); if (only) quest.add(item); };
+  // (pieces: how many of a thing a corpse gives on average, those without it counted in - divided by the chance at the end)
+  const miss = new Map(), quest = new Set(), pieces = new Map();
+  const add = (item, p, only, many) => {
+    miss.set(item, (miss.get(item) ?? 1) * (1 - Math.min(1, Math.max(0, p))));
+    pieces.set(item, (pieces.get(item) ?? 0) + Math.max(0, many));
+    if (only) quest.add(item);
+  };
   for (const [item, chance, group, minOrRef, max] of rows) {
     if (minOrRef < 0) {
       // a shared table, rolled `max` times, each time with this chance
-      const roll = (Math.abs(chance) || 100) / 100;
-      for (const [inner, [p, only]] of lootOf(tables, -minOrRef, true, depth + 1)) add(inner, 1 - (1 - Math.min(1, roll * p)) ** Math.max(1, max), only || chance < 0);
+      const roll = (Math.abs(chance) || 100) / 100, times = Math.max(1, max);
+      for (const [inner, [p, only, each]] of lootOf(tables, -minOrRef, true, depth + 1)) {
+        const once = Math.min(1, roll * p);
+        add(inner, 1 - (1 - once) ** times, only || chance < 0, times * once * (each ?? 1));
+      }
     } else {
       const g = group ? left.get(group) : null;
       const pct = chance !== 0 ? Math.abs(chance) : g && g.free ? Math.max(0, 100 - g.given) / g.free : 100;
-      add(item, pct / 100, chance < 0);
+      const least = Math.max(1, minOrRef), most = Math.max(least, max);
+      add(item, pct / 100, chance < 0, Math.min(1, Math.max(0, pct / 100)) * (least + most) / 2);
     }
   }
-  for (const [item, m] of miss) if (item > 0 && m < 1) out.set(item, [1 - m, quest.has(item)]);
+  for (const [item, m] of miss) if (item > 0 && m < 1) out.set(item, [1 - m, quest.has(item), Math.max(1, (pieces.get(item) ?? 0) / (1 - m))]);
   return out;
 }
 

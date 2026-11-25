@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { decodeStrip, NameCache, MAX_BLOCKS, TEXT_KIND, LOOT_KEY, readLoot } from './strip.js';
+import { decodeStrip, NameCache, MAX_BLOCKS, TEXT_KIND, LOOT_KEY, readLoot, LOOT_MORE_KEY, readLootMore } from './strip.js';
 import { note, changed } from './log.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -333,6 +333,13 @@ export class PlayerTracker {
       try {
         const said = readLoot(this.names.raw.get(`${TEXT_KIND.STATS}:${LOOT_KEY}`));
         if (said && this.loot.heard(said)) note('game', `what was in the corpses of creature ${said.creature}: ${said.n} looted so far`, { things: said.items.length });
+      } catch (err) { if (changed('loot heard', err.message)) note('game', 'what the strip said of a corpse could not be taken in', { error: err.message }); }
+    }
+    // (...and its second message: the coin in them, and how many pieces of a thing - for what a kill brings)
+    if (d.text && d.text.last && d.text.kind === TEXT_KIND.STATS && d.text.key === LOOT_MORE_KEY && this.loot) {
+      try {
+        const said = readLootMore(this.names.raw.get(`${TEXT_KIND.STATS}:${LOOT_MORE_KEY}`));
+        if (said && this.loot.heard(said)) note('game', `the coin in the corpses of creature ${said.creature}: ${said.coin} copper in ${said.cn} so far`, { things: said.items.length });
       } catch (err) { if (changed('loot heard', err.message)) note('game', 'what the strip said of a corpse could not be taken in', { error: err.message }); }
     }
     // Where the game's own interface is on the screen (the addon's Windows.lua): for the map drawn

@@ -954,6 +954,39 @@ do
   end
 end
 
+-- ---- what one piece brings, for whoever asks ---------------------------------------------------------------
+-- What one piece of an item brings on average, got rid of the way the advice above would have it
+-- by your weights: copper (0: no vendor buys it, and no auction is safe to advise), and which of
+-- the six ways that is - or nothing, where the game has not said what the item is yet (it has
+-- been asked, and will have said in a moment). For a thing nobody is holding: not bound to you.
+-- Asked by Drops.lua, for what a kill of a creature brings. Kept until a setting, the prices or
+-- the ten minutes the chance of a short auction is reckoned for change.
+local worths = { stamp = nil, tick = nil, market = nil, of = {}, asked = {} }
+function shared.WorthOf(item)
+  if secret(item) or type(item) ~= "number" or item <= 0 then return nil end
+  local m = rawget(_G, "AzerothAtlasMarket")
+  local tick = type(time) == "function" and floor(time() / 600) or 0
+  if worths.stamp ~= stamp or worths.tick ~= tick or not rawequal(worths.market, m) then
+    worths.stamp, worths.tick, worths.market, worths.of = stamp, tick, m, {}
+  end
+  local had = worths.of[item]
+  if had then return had[1], had[2] end
+  -- (an item the game had nothing to say of is asked after again two seconds on, not with every writing of a tooltip)
+  local now = type(GetTime) == "function" and GetTime() or 0
+  local asked = worths.asked[item]
+  if asked and now >= asked and now - asked < 2 then return nil end
+  local advice, whole = Work(item, false)
+  if advice == nil and whole == nil then worths.asked[item] = now ; return nil end
+  worths.asked[item] = nil
+  local worth, key = 0, nil
+  if advice and advice.best and advice.best.worth then worth, key = advice.best.worth, advice.best.key end
+  if worth < 0 then worth = 0 end
+  if whole then worths.of[item] = { worth, key } end
+  return worth, key
+end
+-- (an amount of copper as the game's coins, for the same)
+shared.Money = Money
+
 -- (for the tests, and for a look from the game: /dump AzerothAtlas.AdvicePeek(2589))
 function shared.AdvicePeek(item, bound, more)
   local advice = Work(item, bound == true)

@@ -44,6 +44,12 @@
 //             the original game's rate (nothing: none is known), and the count: in k of the
 //             corpses (two figures), or in k of t corpses looted while a quest wanted it (three:
 //             a thing that drops only with its quest). No count: nobody has found it yet.
+//             For what a kill brings (the addon from 46 on reads these; one before it passes them
+//             over), a thing may have two figures more, "<per cent>/<k>/<t>/<m>/<e>": the pieces
+//             beyond the first of each find, in all, and how many pieces a corpse that has it
+//             gives in the original game (where that is more than one) - and after the corpses
+//             may stand the coin, "c<corpses whose coin was read>/<copper in them>/<the original
+//             game's coin to a corpse>". What is not known is left empty.
 //   kinds     of each thing: its quality (0 poor to 5 legendary), and 10 more where it is of the
 //             game's "quest" kind - which only drops while a quest of yours wants it
 //   mine      by the number a game's saved settings go by: of each creature the part of `all`
@@ -109,7 +115,9 @@ export function ownLoot(dataDir, cfg = null) {
  * Everything there is to hand on: { rev, of: Map<creature, [[item, per cent], ...]> (the things
  * quests want, with the original game's rates: what an addon from before 45 reads), names:
  * Map<item, its name>, rates (how many figures in `of`),
- *   all: Map<creature, { n (corpses looted), things: Map<item, { pct (the original game's rate, or null), k, t (null: of the n corpses) }> }>,
+ *   all: Map<creature, { n (corpses looted), things: Map<item, { pct (the original game's rate, or null), k, t (null: of the n corpses),
+ *     m (pieces beyond the first of each find; 0: none), e (pieces to a find in the original game, where more than one; else null) }>,
+ *     coin: [corpses whose coin was read, the copper in them], gold (the original game's coin to a corpse; 0: none) }>,
  *   kinds: Map<item, quality + 10 where it is of the quest kind>, mine: Map<tag, Map<creature, count>>,
  *   things (how many in `all`), looted (corpses in `all`) }
  * - or null where no database has been fetched. A figure that is not above nought, or not a
@@ -156,6 +164,9 @@ export function dropFigures(dataDir, cfg = null) {
     // (this computer's own: what it counts now - and never less than what it has sent, which is in what is published)
     const counted = addLoot(pub ? others(pub, sent[creature]) : null, largerLoot(own.get(creature), pub ? fromPlain(sent[creature]) : null)) ?? { n: 0, got: new Map(), on: new Map() };
     const first = new Map(of.get(creature) ?? []), ref = pub?.ref ?? new Map();
+    // (for what a kill brings: the pieces beyond the first of each find, the original game's pieces to a find, and the coin)
+    const more = counted.more ?? new Map(), each = pub?.each ?? new Map();
+    const coin = Array.isArray(counted.coin) && counted.coin[0] > 0 ? counted.coin : [0, 0], gold = pub?.gold > 0 ? pub.gold : 0;
     const row = new Map();
     for (const item of new Set([...first.keys(), ...ref.keys(), ...counted.got.keys(), ...counted.on.keys()])) {
       if (!whole(item)) continue;
@@ -163,8 +174,10 @@ export function dropFigures(dataDir, cfg = null) {
       const got = counted.got.get(item), on = counted.on.get(item);
       // (counted both ways, as two copies may: the way the thing's own kind says)
       const quest = on && got ? questKind(item) : !!on;
-      const thing = { pct: pct > 0 ? pct : null, k: 0, t: null };
+      const thing = { pct: pct > 0 ? pct : null, k: 0, t: null, m: 0, e: null };
       if (quest) { thing.k = on[0]; thing.t = on[1]; } else if (got) thing.k = Math.min(got, counted.n);
+      if (!quest && thing.k > 0 && more.get(item) > 0) thing.m = more.get(item);
+      if (!quest && each.get(item) > 1) thing.e = Math.round(each.get(item) * 100) / 100;
       if (thing.pct === null && !thing.k && !(thing.t > 0)) continue;
       // (a thing of the original game's tables that this game's own files do not have, and nobody has found: not of this game)
       if (hasItems && !known[item] && !thing.k && !(thing.t > 0)) continue;
@@ -172,11 +185,11 @@ export function dropFigures(dataDir, cfg = null) {
       // (its kind: the game's own word on the item - or, of a thing the map's data does not have, how it was counted)
       kinds.set(item, Math.max(kinds.get(item) ?? 0, (Number.isInteger(known[item]?.[1]) ? Math.max(0, Math.min(9, known[item][1])) : 1) + (questKind(item) || (quest && !known[item]) ? 10 : 0)));
     }
-    if (!row.size && !(counted.n > 0)) continue;
+    if (!row.size && !(counted.n > 0) && !(gold > 0)) continue;
     // (no more than a row holds: the likeliest, by what was counted and else by the original game's figure)
     const rate = (x) => (x.t > 0 ? x.k / x.t : x.t === null && counted.n > 0 && x.k > 0 ? x.k / counted.n : (x.pct ?? 0) / 100);
     const kept = [...row].sort((a, b) => rate(b[1]) - rate(a[1]) || a[0] - b[0]).slice(0, THINGS_MOST).sort((a, b) => a[0] - b[0]);
-    all.set(creature, { n: counted.n, things: new Map(kept) });
+    all.set(creature, { n: counted.n, things: new Map(kept), coin, gold });
     things += kept.length; looted += counted.n;
     for (const [item] of kept) wanted.add(item);
   }
@@ -193,19 +206,31 @@ export function dropFigures(dataDir, cfg = null) {
 /** A text as Lua writes one: between double quotes, with nothing in it that would end it early. */
 const luaText = (s) => '"' + s.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
 
-/** One creature's row of `all`: "<corpses> <item>=<per cent>/<k>/<t> ...". */
-function rowText(n, things) {
-  const out = [String(n)];
-  for (const [item, x] of things) out.push(`${item}=${x.pct ?? ''}${x.t > 0 ? `/${x.k}/${x.t}` : x.k > 0 ? `/${x.k}` : ''}`);
+/** A thing's figures, one after the other with a stroke between: what is not known is empty, and what is empty at the end is left off. */
+function figuresText(list) {
+  const parts = list.map((v) => (v === null || v === undefined || v === '' ? '' : String(v)));
+  while (parts.length && parts[parts.length - 1] === '') parts.pop();
+  return parts.join('/');
+}
+/** The coin after a row's corpses: " c<corpses whose coin was read>/<copper>/<the original game's>" - or nothing where none is known. */
+function coinText(coin, gold) {
+  const [cn, copper] = Array.isArray(coin) ? coin : [0, 0];
+  if (!(cn > 0) && !(gold > 0)) return '';
+  return ` c${cn > 0 ? cn : ''}/${cn > 0 ? copper : ''}/${gold > 0 ? gold : ''}`;
+}
+/** One creature's row of `all`: "<corpses> c<coin> <item>=<per cent>/<k>/<t>/<m>/<e> ...". */
+function rowText(n, things, coin = null, gold = 0) {
+  const out = [String(n) + coinText(coin, gold)];
+  for (const [item, x] of things) out.push(`${item}=${figuresText([x.pct, x.t > 0 || x.k > 0 ? x.k : null, x.t > 0 ? x.t : null, x.m > 0 ? x.m : null, x.e > 1 ? x.e : null])}`);
   return out.join(' ');
 }
 /** ...and of `mine`: a count, laid out the same way without the rates. */
 function countText(rec) {
-  const out = [String(rec.n)];
+  const out = [String(rec.n) + coinText(rec.coin, 0)];
   const ids = [...new Set([...rec.got.keys(), ...rec.on.keys()])].sort((a, b) => a - b);
   for (const item of ids) {
-    const on = rec.on.get(item);
-    out.push(on ? `${item}=/${on[0]}/${on[1]}` : `${item}=/${rec.got.get(item)}`);
+    const on = rec.on.get(item), more = on ? 0 : rec.more?.get(item);
+    out.push(`${item}=${figuresText(['', on ? on[0] : rec.got.get(item), on ? on[1] : null, more > 0 ? more : null])}`);
   }
   return out.join(' ');
 }
@@ -239,7 +264,7 @@ export function dropsAddonFiles(figures, interfaceVersion) {
       '}, names = {',
       ...named.map((item) => `[${item}]=${luaText(figures.names.get(item))},`),
       `}, f = ${LAYOUT}, things = ${figures.things ?? 0}, looted = ${figures.looted ?? 0}, all = {`,
-      ...all.map(([id, row]) => `[${id}]="${rowText(row.n, row.things)}",`),
+      ...all.map(([id, row]) => `[${id}]="${rowText(row.n, row.things, row.coin, row.gold)}",`),
       '}, kinds = {',
       ...kinds.map(([item, kind]) => `[${item}]=${kind},`),
       '}, mine = {',

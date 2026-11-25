@@ -1828,7 +1828,7 @@ SlashCmdList["AZEROTHATLAS"] = function(msg)
     return
   end
   if word == "drops" or word == "droprates" then
-    -- /atlas drops, /atlas drops off, /atlas drops on, /atlas drops list: what a creature gives and how often, in its tooltip (Drops.lua)
+    -- /atlas drops, /atlas drops off, /atlas drops on, /atlas drops list, /atlas drops worth: what a creature gives, how often, and what a kill brings, in its tooltip (Drops.lua)
     if shared.DropsSay then shared.DropsSay(rest) else say("this copy of the addon does not show drop rates: update it from the 3D map, and start the game again.") end
     return
   end

@@ -27,6 +27,21 @@
 -- not shown at all: it would not be in the corpse. The list is short (LIST_SHORT); with Shift
 -- held down it is all there is, each thing with what its figure rests on.
 --
+-- And above the list, what a kill of the creature brings on average:
+--
+--     A kill brings        ~ 3s 42c
+--
+-- the coin in a corpse, and for every thing that drops for anybody: how often it drops, times
+-- how many pieces a corpse that has it gives, times what one piece brings when it is got rid of
+-- the way its own tooltip advises (Advice.lua: the vendor, an auction, disenchanting - whichever
+-- brings most of the ways that are safe enough by your weights). A thing of the quest kind
+-- brings nothing: it is not sold. With Shift: the coin on a line of its own, and after each
+-- thing of the list what it adds. Counted with the rest: how many pieces of a thing a corpse
+-- had (kept as the pieces beyond the first of each find), and its coin - read from the words
+-- the game shows it in. Each leans on the original game's figure where there is one, as the
+-- rates do: the pieces to a find on that figure (or on one piece) weighing as much as three
+-- finds, the coin on the original game's weighing as much as five corpses.
+--
 -- Where the figures come from:
 --
 --   the 3D map        writes what the Atlas database has as a small addon of their own beside
@@ -56,6 +71,12 @@
 -- What is counted, and how:
 --   - a corpse counts once, the first time its loot is seen, with everything that was in it;
 --   - only what you loot alone: in a group the game shows each player a part of what there is;
+--   - a corpse with nothing in it cannot be opened and is never counted: every figure here is
+--     "of the corpses that had anything in them", what a kill brings among them;
+--   - the coin only where the game's words for it are understood, all of them. Where they are
+--     not, once, no coin is counted for the rest of the session - a corpse with no coin in it
+--     would else count for nought while one with coin did not count at all. And a corpse with
+--     no coin counts for nought only once coin has been read at all: until then it waits;
 --   - not what a spell of yours brought out (skinning, picking a pocket, mining a corpse): that
 --     is another list than the corpse's own;
 --   - a thing that drops for anybody: in how many of the creature's corpses it was;
@@ -76,10 +97,11 @@
 -- /atlas drops         whether it is on, and how much there is
 -- /atlas drops off     the tooltip as the game writes it (and on, on)
 -- /atlas drops list    the list of everything else a creature gives: off, and on again
+-- /atlas drops worth   what a kill brings: off, and on again
 local shared = AzerothAtlas
 if type(shared) ~= "table" then return end
 
-local find, match, lower, format, gsub, gmatch = string.find, string.match, string.lower, string.format, string.gsub, string.gmatch
+local find, match, lower, format, gsub, gmatch, sub = string.find, string.match, string.lower, string.format, string.gsub, string.gmatch, string.sub
 local floor, strchar = math.floor, string.char
 
 -- (the figure's colour: a grey of its own, which also says "this line has its figure already")
@@ -89,6 +111,9 @@ local QUEST_CLASS = 12                -- the game's kind of item that is of a qu
 -- (how a count is leaned on a first guess: see the top of this file)
 local WEIGHT_LEAST, WEIGHT_MOST, FINDS = 10, 400, 2
 local GUESS, GUESS_QUEST, GUESS_WEIGHT = 0.10, 0.30, 5
+-- (what a kill brings: the original game's pieces to a find weigh as much as so many finds, its coin as much as so many corpses)
+local EACH_WEIGHT, COIN_WEIGHT = 3, 5
+local PIECES_MOST = 1000              -- pieces of one thing in one corpse beyond which the game's word is not believed
 
 local function secret(v) return issecretvalue ~= nil and issecretvalue(v) end
 -- (a table of the game's that may be read: not one it keeps to itself)
@@ -114,6 +139,10 @@ end
 function shared.DropsListOn() return type(AzerothAtlasDB) ~= "table" or AzerothAtlasDB.dropsList ~= false end
 function shared.SetDropsList(on)
   if on then DB().dropsList = nil else DB().dropsList = false end
+end
+function shared.DropsWorthOn() return type(AzerothAtlasDB) ~= "table" or AzerothAtlasDB.dropsWorth ~= false end
+function shared.SetDropsWorth(on)
+  if on then DB().dropsWorth = nil else DB().dropsWorth = false end
 end
 
 -- The figures, as the 3D map wrote them - or nothing (none written yet, or written for another version of this).
@@ -176,7 +205,10 @@ end
 --   3D map tells one game's count from another's on the same computer; it says nothing of you),
 --   of = { [creature] = { n = corpses looted, got = { [item] = in how many it was },
 --                         tried = { [item] = corpses looted while a quest wanted it } (a thing that drops only with its quest),
---                         on = { [a name, in small letters] = the same, of a thing never yet found on this creature } } } }
+--                         on = { [a name, in small letters] = the same, of a thing never yet found on this creature },
+--                         more = { [item] = pieces beyond the first of each find, in all } (a thing that drops for anybody),
+--                         cn = corpses whose coin was read (one with none among them), coin = the copper in them, in all } },
+--   coinOk = true once the game's words for coin have been understood (see Count) }
 local TAG_MOST = 65535
 local PENDING_MOST = 8   -- names kept waiting for their thing, of one creature
 -- (goes up whenever the count changes: what was worked out for a tooltip is worked out again)
@@ -208,28 +240,36 @@ local function Own(creature, begin)
 end
 
 -- ---- what is known of a creature -----------------------------------------------------------------
--- A row of the 3D map's ("<corpses> <item>=<per cent>/<k>/<t> ..."), read into `into`:
--- into[item] = { pct, k, t } (t nothing: of the corpses). @returns the corpses
+-- A row of the 3D map's ("<corpses> c<corpses whose coin was read>/<copper>/<the original game's
+-- coin to a corpse> <item>=<per cent>/<k>/<t>/<m>/<e> ..."; what is not known is left empty, and
+-- the coin left out), read into `into`: into[item] = { pct, k, t (nothing: of the corpses), m
+-- (pieces beyond the first of each find), e (pieces to a find, as the original game has it) }.
+-- @returns the corpses; those whose coin was read, the copper in them, the original game's coin
 local function ReadRow(row, into)
-  if type(row) ~= "string" then return 0 end
-  for item, pct, k, t in gmatch(row, "(%d+)=([%d%.]*)/?(%d*)/?(%d*)") do
+  if type(row) ~= "string" then return 0, 0, 0, nil end
+  for item, pct, k, t, m, e in gmatch(row, "(%d+)=([%d%.]*)/?(%d*)/?(%d*)/?(%d*)/?([%d%.]*)") do
     item = tonumber(item)
-    if item then into[item] = { pct = tonumber(pct), k = tonumber(k) or 0, t = tonumber(t) } end
+    if item then into[item] = { pct = tonumber(pct), k = tonumber(k) or 0, t = tonumber(t), m = tonumber(m) or 0, e = tonumber(e) } end
   end
-  return tonumber(match(row, "^(%d+)%s")) or tonumber(match(row, "^(%d+)$")) or 0
+  local cn, copper, gold = match(row, "%sc(%d*)/(%d*)/([%d%.]*)")
+  return tonumber(match(row, "^(%d+)%s")) or tonumber(match(row, "^(%d+)$")) or 0, tonumber(cn) or 0, tonumber(copper) or 0, tonumber(gold)
 end
 
 -- Everything known of what a creature gives: { n = corpses looted (everybody's and yours),
 -- list = { { item, pct (the original game's rate, or nothing), k (found in so many), t (of so
--- many: nothing where it is of the n corpses), quest (it drops only with its quest) }, ... } } -
--- or nothing. The last creature asked about is kept, until the count or the figures change.
+-- many: nothing where it is of the n corpses), quest (it drops only with its quest), m (pieces
+-- beyond the first of each find), e (pieces to a find in the original game, or nothing) }, ... },
+-- cn (corpses whose coin was read), copper (in them), gold (the original game's coin to a corpse,
+-- or nothing) } - or nothing. The last creature asked about is kept, until the count or the
+-- figures change.
 local last = { id = nil, of = nil, stamp = nil, row = nil }
 local function Known(d, id)
   if last.id == id and last.of == d and last.stamp == stamp then return last.row end
   local by, n = {}, 0
+  local cn, copper, gold = 0, 0, nil
   local kinds = d and type(d.kinds) == "table" and d.kinds or nil
   if Counted(d) then
-    n = ReadRow(d.all[id], by)
+    n, cn, copper, gold = ReadRow(d.all[id], by)
   elseif d then
     -- (a 3D map from before it handed counts on: the things quests want, with the original game's rates)
     local row = d.of[id]
@@ -247,12 +287,15 @@ local function Known(d, id)
   -- your own count: what of it the 3D map's row has in it already is not counted twice
   local own = Own(id)
   if own then
-    local had, hadN = {}, 0
+    local had, hadN, hadCn, hadCopper = {}, 0, 0, 0
     local l = AzerothAtlasDB.loot
     local mine = Counted(d) and type(d.mine) == "table" and d.mine[l.id]
-    if type(mine) == "table" then hadN = ReadRow(mine[id], had) end
+    if type(mine) == "table" then hadN, hadCn, hadCopper = ReadRow(mine[id], had) end
     n = n + math.max(0, own.n - hadN)
+    cn = cn + math.max(0, (tonumber(own.cn) or 0) - hadCn)
+    copper = copper + math.max(0, (tonumber(own.coin) or 0) - hadCopper)
     local tried = type(own.tried) == "table" and own.tried or nil
+    local more = type(own.more) == "table" and own.more or nil
     local function add(item)
       if type(item) ~= "number" then return end
       local e = by[item]
@@ -267,6 +310,7 @@ local function Known(d, id)
         e.k = e.k + k
       elseif not e.quest then
         e.k = e.k + k
+        e.m = (e.m or 0) + math.max(0, (more and tonumber(more[item]) or 0) - (was and was.m or 0))
       end
     end
     for item in pairs(own.got) do add(item) end
@@ -281,9 +325,10 @@ local function Known(d, id)
     list[#list + 1] = e
   end
   local row = nil
-  if #list > 0 or n > 0 then
+  if gold and not (gold > 0) then gold = nil end
+  if #list > 0 or n > 0 or gold then
     table.sort(list, function(a, b) return a.item < b.item end)
-    row = { n = n, list = list }
+    row = { n = n, list = list, cn = cn, copper = copper, gold = gold }
   end
   last.id, last.of, last.stamp, last.row = id, d, stamp, row
   return row
@@ -307,6 +352,67 @@ local function Rate(e, n)
   return (k + GUESS_WEIGHT * (e.quest and GUESS_QUEST or GUESS)) / (t + GUESS_WEIGHT) * 100, k, t
 end
 shared.DropRate = Rate -- (for whoever wants to check the reckoning)
+
+-- How many pieces of a thing a corpse that has it gives, on average: the finds counted, leaned
+-- on the original game's figure for it (one piece, where it has none), which weighs as much as
+-- EACH_WEIGHT finds.
+local function Each(e, n)
+  local k = e.k or 0
+  if k > n then k = n end
+  if k < 0 then k = 0 end
+  local m = k > 0 and (e.m or 0) or 0
+  local first = (e.e and e.e >= 1) and e.e or 1
+  return (EACH_WEIGHT * first + k + m) / (EACH_WEIGHT + k)
+end
+-- The coin in a corpse on average, in copper: what was read, leaned on the original game's
+-- figure (weighing as much as COIN_WEIGHT corpses) where there is one - or nothing, where
+-- nothing is known of it.
+local function Coin(row)
+  local cn, copper = row.cn or 0, row.copper or 0
+  if row.gold then return (COIN_WEIGHT * row.gold + copper) / (COIN_WEIGHT + cn) end
+  if cn > 0 then return copper / cn end
+  return nil
+end
+-- What a kill brings on average (see the top of this file): { sum (copper), coin (of it; nothing:
+-- not known), of = { [item] = what the thing adds }, things (so many reckoned), unpriced (so many
+-- the game has not said the price of yet: asked, and there with the next writing) } - or nothing,
+-- where nothing can be said.
+local function Worth(row)
+  local worthOf = shared.WorthOf
+  if type(worthOf) ~= "function" then return nil end
+  local out = { sum = 0, coin = Coin(row), of = {}, things = 0, unpriced = 0 }
+  if out.coin then out.sum = out.coin end
+  for i = 1, #row.list do
+    local e = row.list[i]
+    if not e.quest then
+      local pct = Rate(e, row.n)
+      if pct and pct > 0 then
+        local one = worthOf(e.item)
+        if one == nil then out.unpriced = out.unpriced + 1
+        else
+          local v = pct / 100 * Each(e, row.n) * one
+          out.of[e.item] = v
+          out.sum = out.sum + v
+          out.things = out.things + 1
+        end
+      end
+    end
+  end
+  if out.coin == nil and out.things == 0 and out.unpriced == 0 then return nil end
+  return out
+end
+shared.DropWorth = function(creature) -- (for whoever wants to check the reckoning: /dump AzerothAtlas.DropWorth(595))
+  local d = rawget(_G, "AzerothAtlasDrops")
+  if type(d) ~= "table" or d.v ~= 1 or type(d.of) ~= "table" then d = nil end
+  local row = Known(d, creature)
+  return row and Worth(row) or nil
+end
+-- An amount of copper as the game's coins (Advice.lua writes them): less than one is said so.
+local function Coins(c)
+  if c < 0.5 then return "<1" .. "|cffeda55fc|r" end
+  if type(shared.Money) == "function" then return shared.Money(c) end
+  return format("%d", floor(c + 0.5)) .. "|cffeda55fc|r"
+end
 
 -- What an item is called: as the 3D map's data has it, or as the game itself says.
 local function NameOf(d, item)
@@ -423,7 +529,7 @@ local function Written(tooltip, text)
   return nil
 end
 
-local count = { shown = 0, added = 0, listed = 0 }
+local count = { shown = 0, added = 0, listed = 0, worth = 0 }
 
 -- A line of a quest's wants has been written into a tooltip.
 local function Line(tooltip, lineData, unitType)
@@ -504,6 +610,8 @@ end
 
 -- (the tooltip lines were last added to: told of the same writing of a tooltip twice, they are added once)
 local done = { data = nil, lines = nil }
+-- (what a kill brings was last written without the price of some thing the game had not said yet: any; due: it is about to be written again)
+local owed = { any = false, due = false }
 
 -- A creature's tooltip has been written, every line of it: what your quests still want of the
 -- creature that the game did not list is written under it, and under that everything else it
@@ -575,6 +683,29 @@ local function Unit(tooltip, data, types, unitType)
   for _, w in ipairs(wanted) do if w.quest ~= first then consider(w) end end
   count.added = count.added + added
 
+  local more = type(IsShiftKeyDown) == "function" and IsShiftKeyDown() and true or false
+  -- What a kill brings on average: the coin, and what everything that drops for anybody sells
+  -- for (also what stands under a quest of yours above: it has its price all the same).
+  local worth = nil
+  owed.any = false
+  if shared.DropsWorthOn() and type(tooltip.AddDoubleLine) == "function" then
+    worth = Worth(row)
+    -- (things the game has not said the price of yet: written again when it has)
+    owed.any = worth ~= nil and worth.unpriced > 0
+    if worth and worth.sum < 0.5 then worth = nil end
+    if worth then
+      local left = "A kill brings"
+      if worth.unpriced > 0 then left = left .. " " .. MARK .. "(" .. worth.unpriced .. (worth.unpriced == 1 and " thing" or " things") .. " not priced yet)|r" end
+      tooltip:AddDoubleLine(left, "~ " .. Coins(worth.sum), 0.5, 0.83, 1, 1, 1, 1)
+      -- (with Shift: the coin of it, and what that rests on - so many corpses, or the original game's figure alone)
+      if more and worth.coin then
+        tooltip:AddDoubleLine("   Coin", Coins(worth.coin) .. "  " .. MARK .. (row.cn > 0 and (row.cn .. (row.cn == 1 and " corpse" or " corpses")) or "-") .. "|r", 0.9, 0.9, 0.9, 1, 1, 1)
+      end
+      added = added + 1
+      count.worth = count.worth + 1
+    end
+  end
+
   -- Everything else it gives. Not what stands under a quest already (whatever kind of thing it
   -- is: what a quest of yours wants is that quest's), and nothing of the quest kind that no
   -- quest of yours wants - it would not be in the corpse.
@@ -590,20 +721,25 @@ local function Unit(tooltip, data, types, unitType)
     end
     if #rest > 0 then
       table.sort(rest, function(a, b) if a.pct ~= b.pct then return a.pct > b.pct end return a.name < b.name end)
-      local more = type(IsShiftKeyDown) == "function" and IsShiftKeyDown() and true or false
       local most = more and LIST_LONG or LIST_SHORT
       tooltip:AddLine("Drops", 0.5, 0.83, 1)
+      local priced = false
       for i = 1, math.min(#rest, most) do
         local r = rest[i]
         local right = Percent(r.pct)
-        -- (with Shift: what the figure rests on - found in so many of so many corpses, or the original game's figure alone)
-        if more then right = right .. "  " .. MARK .. (r.t > 0 and (r.k .. "/" .. r.t) or "-") .. "|r" end
+        -- (with Shift: what the figure rests on - found in so many of so many corpses, or the original game's figure alone -
+        -- and what the thing adds to a kill)
+        if more then
+          right = right .. "  " .. MARK .. (r.t > 0 and (r.k .. "/" .. r.t) or "-") .. "|r"
+          local adds = worth and worth.of[r.item]
+          if adds then right = right .. "  " .. Coins(adds) ; priced = true end
+        end
         tooltip:AddDoubleLine(Coloured(d, r.item, r.name), right, 1, 1, 1, 1, 1, 1)
       end
       if #rest > most then
         tooltip:AddLine(MARK .. "+" .. (#rest - most) .. " rarer" .. (more and "" or " (hold Shift)") .. "|r", 0.6, 0.61, 0.61)
       elseif more then
-        tooltip:AddLine(MARK .. "found in so many of the corpses looted; -: the original game's figure|r", 0.6, 0.61, 0.61, true)
+        tooltip:AddLine(MARK .. "found in so many of the corpses looted; -: the original game's figure" .. (priced and "; then what it adds to a kill" or "") .. "|r", 0.6, 0.61, 0.61, true)
       end
       added = added + 1
       count.listed = count.listed + 1
@@ -670,50 +806,141 @@ local function Alone()
   return true
 end
 
+-- "1 Gold", "23 Silver" and "45 Copper", one under the other, as the game writes the coin in a
+-- corpse: in copper - or nothing, where it is not understood, all of it. Read by the game's own
+-- words for the three (in whatever language it speaks), so that what is not understood is
+-- known not to be.
+local coinWords = nil
+local function Copper(text)
+  if not coinWords then
+    local function pattern(global, fallback)
+      local s = words(rawget(_G, global))
+      if not s or not find(s, "%d", 1, true) then s = fallback end
+      -- (every letter of it for itself, and the number caught)
+      s = gsub(s, "[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0")
+      return (gsub(s, "%%%%d", "(%%d+)"))
+    end
+    coinWords = { { pattern("GOLD_AMOUNT", "%d Gold"), 10000 }, { pattern("SILVER_AMOUNT", "%d Silver"), 100 }, { pattern("COPPER_AMOUNT", "%d Copper"), 1 } }
+  end
+  local rest, sum, any = text, 0, false
+  for i = 1, #coinWords do
+    local a, b, v = find(rest, coinWords[i][1])
+    if a then
+      v = tonumber(v)
+      if not v then return nil end
+      sum = sum + v * coinWords[i][2]
+      rest = sub(rest, 1, a - 1) .. " " .. sub(rest, b + 1)
+      any = true
+    end
+  end
+  if not any or find(rest, "%S") then return nil end
+  return sum
+end
+
+-- (the game's words for coin were not understood, this session: no coin is counted any more - see Count)
+local coinBroken = false
+-- The coin in a slot of the loot that is open, in copper - nothing where the slot is no coin (as
+-- far as the game says), false where it is, or may be, and cannot be read.
+local function CoinIn(slot)
+  local known = false
+  if type(GetLootSlotType) == "function" then
+    local ok, kind = pcall(GetLootSlotType, slot)
+    if not ok or secret(kind) then return false end
+    local money = (Enum and type(Enum.LootSlotType) == "table" and Enum.LootSlotType.Money) or rawget(_G, "LOOT_SLOT_MONEY") or 2
+    if kind ~= money then return nil end
+    known = true
+  end
+  if type(GetLootSlotInfo) ~= "function" then return false end
+  local ok, _, said = pcall(GetLootSlotInfo, slot)
+  if not ok or secret(said) or type(said) ~= "string" then return false end
+  local copper = Copper(said)
+  if copper == nil then
+    -- (coin, by the game's own word, whose amount is not understood: its words for coin are not what was reckoned with)
+    if known then coinBroken = true end
+    return false
+  end
+  return copper
+end
+
 -- What the loot that has just opened is of: { [what it came out of] = { id = the creature (nothing:
--- no creature), items = { [item] = { name, quest (the game marks it as of a quest) } } } }, and
--- those in the order met - or nothing, where the game keeps any of it secret or it cannot be told
--- which thing came out of which.
+-- no creature), items = { [item] = { name, quest (the game marks it as of a quest), many (pieces) } },
+-- coin (the copper in it; nothing: none; false: some, or perhaps some, that could not be read) } },
+-- and those in the order met - or nothing, where the game keeps any of it secret or it cannot be
+-- told which thing came out of which.
 local function Opened()
   if type(GetNumLootItems) ~= "function" or type(GetLootSourceInfo) ~= "function" or type(GetLootSlotLink) ~= "function" then return nil end
   local ok, n = pcall(GetNumLootItems)
   if not ok or secret(n) or type(n) ~= "number" or n < 0 or n > 200 then return nil end
   local by, order, loose = {}, {}, {}
+  local unread, looseCoin = false, nil
   for slot = 1, n do
     local okLink, link = pcall(GetLootSlotLink, slot)
     if not okLink or secret(link) then return nil end
-    local item, name, marked = nil, nil, false
+    local item, name, marked, many, coin = nil, nil, false, 1, nil
     if type(link) == "string" then
       item = tonumber(match(link, "item:(%d+)"))
       name = match(link, "|h%[(.-)%]|h")
     end
     if item and type(GetLootSlotInfo) == "function" then
-      local okInfo, _, said, _, _, _, _, isQuest = pcall(GetLootSlotInfo, slot)
+      local okInfo, _, said, pieces, _, _, _, isQuest = pcall(GetLootSlotInfo, slot)
       if okInfo then
         if not name then name = words(said) end
         marked = not secret(isQuest) and isQuest == true
+        if not secret(pieces) and type(pieces) == "number" and pieces >= 1 and pieces <= PIECES_MOST then many = floor(pieces) end
       end
+    elseif not item and link == nil then
+      coin = CoinIn(slot)
+      if coin == false then unread = true end
     end
     local from = { pcall(GetLootSourceInfo, slot) }
     if not from[1] then return nil end
-    local some = false
+    -- (what it came out of, and how much of it the game says came out of each)
+    local srcs = {}
     for i = 2, #from, 2 do
-      local guid = from[i]
+      local guid, q = from[i], from[i + 1]
       if secret(guid) then return nil end
       if type(guid) == "string" and guid ~= "" then
-        some = true
         local c = by[guid]
         if not c then c = { id = CreatureBy(guid), items = {} } ; by[guid] = c ; order[#order + 1] = guid end
-        if item then c.items[item] = { name = name, quest = marked } end
+        if secret(q) or type(q) ~= "number" or q < 0 then q = nil end
+        srcs[#srcs + 1] = { c = c, q = q }
       end
     end
-    if item and not some then loose[#loose + 1] = { item = item, name = name, quest = marked } end
+    -- (out of several at once: what the game says of each is gone by where it adds up to the whole - else a thing is one piece, and the coin not read)
+    local adds = #srcs > 1
+    if adds then
+      local sum = 0
+      for _, s in ipairs(srcs) do if s.q then sum = sum + s.q else adds = false end end
+      if sum ~= (item and many or coin) then adds = false end
+    end
+    if item then
+      for _, s in ipairs(srcs) do
+        local pieces = (#srcs == 1 and many) or (adds and s.q >= 1 and floor(s.q)) or 1
+        local had = s.c.items[item]
+        if had then had.many = had.many + pieces else s.c.items[item] = { name = name, quest = marked, many = pieces } end
+      end
+      if #srcs == 0 then loose[#loose + 1] = { item = item, name = name, quest = marked, many = many } end
+    elseif coin then
+      if #srcs == 0 then looseCoin = (looseCoin or 0) + coin
+      elseif #srcs == 1 then srcs[1].c.coin = (srcs[1].c.coin or 0) + coin
+      elseif adds then for _, s in ipairs(srcs) do s.c.coin = (s.c.coin or 0) + s.q end
+      else unread = true end
+    end
   end
   -- (a thing the game names no corpse for: the one corpse there is - or, with several, nobody's, and nothing is counted)
   if #loose > 0 then
     if #order ~= 1 then return nil end
-    for _, l in ipairs(loose) do by[order[1]].items[l.item] = { name = l.name, quest = l.quest } end
+    for _, l in ipairs(loose) do
+      local had = by[order[1]].items[l.item]
+      if had then had.many = had.many + l.many else by[order[1]].items[l.item] = { name = l.name, quest = l.quest, many = l.many } end
+    end
   end
+  if looseCoin then
+    if #order == 1 then by[order[1]].coin = (by[order[1]].coin or 0) + looseCoin else unread = true end
+  end
+  -- (coin that could not be read, or not be told whose it was: none of these corpses counts for its coin - one
+  -- with none would else count for nought beside one with some that did not count at all)
+  if unread then for _, guid in ipairs(order) do by[guid].coin = false end end
   return by, order
 end
 
@@ -726,36 +953,45 @@ end
 -- The check is of the whole message: one put together from the pieces of two does not add up.
 -- Each is said SAY_TIMES rounds running (nothing answers; what is missed all the same is in the
 -- saved settings, which the 3D map reads when the game has written them).
-local LOOT_KEY, SAY_TIMES, A_ROUND, QUEUE_MOST = 7, 3, 2, 60
-local queue = {} -- { creature, items = { item, ... three at most }, left }
+--
+-- And a second message, under key 6 (server/strip.js: readLootMore), for the coin and the pieces:
+--   the number these saved settings go by (2 bytes), the creature (3), the corpses whose coin was
+--   read (3), a check (1), the copper in them (4), then up to three things, each: the item (3)
+--   and the pieces beyond the first of each find, in all (3)
+local LOOT_KEY, MORE_KEY, SAY_TIMES, A_ROUND, QUEUE_MOST = 7, 6, 3, 2, 60
+local queue = {} -- { kind ("a": the corpses and each thing's; "b": the coin and the pieces), creature, items = { item, ... three at most }, left }
 local function Byte2(v) return strchar(floor(v / 256) % 256, v % 256) end
 local function Byte3(v)
   if v > 16777215 then v = 16777215 end
   return strchar(floor(v / 65536) % 256, floor(v / 256) % 256, v % 256)
 end
-local function Say(creature, items)
+local function Byte4(v)
+  if v > 4294967295 then v = 4294967295 end
+  return strchar(floor(v / 16777216) % 256, floor(v / 65536) % 256, floor(v / 256) % 256, v % 256)
+end
+local function Say(kind, creature, items)
   local open2 = nil
   local function has(u, item) for i = 1, #u.items do if u.items[i] == item then return true end end return false end
   for _, item in ipairs(items) do
     local put = false
     for _, u in ipairs(queue) do
-      if u.creature == creature and has(u, item) then u.left = SAY_TIMES ; put = true ; break end
+      if u.kind == kind and u.creature == creature and has(u, item) then u.left = SAY_TIMES ; put = true ; break end
     end
     if not put then
       if not open2 or #open2.items >= 3 then
         open2 = nil
-        for _, u in ipairs(queue) do if u.creature == creature and #u.items < 3 then open2 = u ; break end end
-        if not open2 then open2 = { creature = creature, items = {}, left = SAY_TIMES } ; queue[#queue + 1] = open2 end
+        for _, u in ipairs(queue) do if u.kind == kind and u.creature == creature and #u.items < 3 then open2 = u ; break end end
+        if not open2 then open2 = { kind = kind, creature = creature, items = {}, left = SAY_TIMES } ; queue[#queue + 1] = open2 end
       end
       open2.items[#open2.items + 1] = item
       open2.left = SAY_TIMES
     end
   end
-  -- (a corpse with nothing in it: the creature's corpses are said all the same)
+  -- (a corpse with nothing in it: the creature's corpses - or its coin - are said all the same)
   if #items == 0 then
     local any = false
-    for _, u in ipairs(queue) do if u.creature == creature then u.left = SAY_TIMES ; any = true end end
-    if not any then queue[#queue + 1] = { creature = creature, items = {}, left = SAY_TIMES } end
+    for _, u in ipairs(queue) do if u.kind == kind and u.creature == creature then u.left = SAY_TIMES ; any = true end end
+    if not any then queue[#queue + 1] = { kind = kind, creature = creature, items = {}, left = SAY_TIMES } end
   end
   while #queue > QUEUE_MOST do table.remove(queue, 1) end
 end
@@ -764,12 +1000,22 @@ local function Message(u)
   local rec = Own(u.creature)
   if not rec then return nil end
   local body = {}
-  for i = 1, #u.items do
-    local item = u.items[i]
-    local t = type(rec.tried) == "table" and tonumber(rec.tried[item]) or 0
-    body[#body + 1] = Byte3(item) .. Byte3(tonumber(rec.got[item]) or 0) .. Byte3(t)
+  local head, tail
+  if u.kind == "b" then
+    local more = type(rec.more) == "table" and rec.more or nil
+    for i = 1, #u.items do
+      local item = u.items[i]
+      body[#body + 1] = Byte3(item) .. Byte3(more and tonumber(more[item]) or 0)
+    end
+    head, tail = Byte2(l.id) .. Byte3(u.creature) .. Byte3(tonumber(rec.cn) or 0), Byte4(tonumber(rec.coin) or 0) .. table.concat(body)
+  else
+    for i = 1, #u.items do
+      local item = u.items[i]
+      local t = type(rec.tried) == "table" and tonumber(rec.tried[item]) or 0
+      body[#body + 1] = Byte3(item) .. Byte3(tonumber(rec.got[item]) or 0) .. Byte3(t)
+    end
+    head, tail = Byte2(l.id) .. Byte3(u.creature) .. Byte3(rec.n), table.concat(body)
   end
-  local head, tail = Byte2(l.id) .. Byte3(u.creature) .. Byte3(rec.n), table.concat(body)
   local sum = 0
   for i = 1, #head do sum = sum + string.byte(head, i) * ((i - 1) % 7 + 1) end
   -- (the check stands ninth: what follows it is counted from the tenth place on)
@@ -781,7 +1027,7 @@ function shared.LootReport()
   for _ = 1, math.min(A_ROUND, #queue) do
     local u = table.remove(queue, 1)
     local bytes = Message(u)
-    if bytes then out[#out + 1] = { LOOT_KEY, bytes } end
+    if bytes then out[#out + 1] = { u.kind == "b" and MORE_KEY or LOOT_KEY, bytes } end
     u.left = u.left - 1
     if bytes and u.left > 0 then queue[#queue + 1] = u end
   end
@@ -804,12 +1050,48 @@ local function Ordinary(d, subject)
   return plainNames.by[subject] == true
 end
 
--- One corpse of a creature, with what was in it, is counted.
-local function Count(creature, items)
+-- (corpses with no coin in them, a creature each, looted before any coin was ever read: they count
+-- for nought once one has been - until then it is not known that coin can be read here at all)
+local coinless = {}
+
+-- One corpse of a creature, with what was in it, is counted. `coin`: the copper in it (nothing:
+-- none; false: some, or perhaps some, that could not be read).
+local function Count(creature, items, coin)
   local d = Figures()
   local rec = Own(creature, true)
   rec.n = rec.n + 1
-  local changed, questThings = {}, {}
+  -- Its coin. A corpse counts for its coin only where that is known: read, or known to be none -
+  -- and "none" is only known where the game's words for coin have been understood before
+  -- (coinOk, kept with the count), and never misunderstood this session (coinBroken).
+  local l = Loot()
+  local coined = false
+  if coinBroken then
+    l.coinOk = nil
+    coinless = {}
+  elseif coin == false then
+    -- (not read: this corpse says nothing of coin)
+  elseif coin then
+    if not l.coinOk then
+      l.coinOk = true
+      for other, many in pairs(coinless) do
+        local r = Own(other, true)
+        r.cn = (tonumber(r.cn) or 0) + many
+        r.coin = tonumber(r.coin) or 0
+        if other ~= creature then Say("b", other, {}) end
+      end
+      coinless = {}
+    end
+    rec.cn = (tonumber(rec.cn) or 0) + 1
+    rec.coin = (tonumber(rec.coin) or 0) + coin
+    coined = true
+  elseif l.coinOk then
+    rec.cn = (tonumber(rec.cn) or 0) + 1
+    rec.coin = tonumber(rec.coin) or 0
+    coined = true
+  else
+    coinless[creature] = (coinless[creature] or 0) + 1
+  end
+  local changed, questThings, grown = {}, {}, {}
   for item, info in pairs(items) do
     -- (what the corpse calls a thing is its name from now on: the game may not say it by its number yet)
     if info.name and not gameNames[item] then gameNames[item] = info.name end
@@ -821,6 +1103,13 @@ local function Count(creature, items)
     else
       rec.got[item] = (tonumber(rec.got[item]) or 0) + 1
       changed[#changed + 1] = item
+      -- (how many pieces of it: kept as those beyond the first, which is in the find itself)
+      local extra = (tonumber(info.many) or 1) - 1
+      if extra > 0 then
+        if type(rec.more) ~= "table" then rec.more = {} end
+        rec.more[item] = (tonumber(rec.more[item]) or 0) + extra
+        grown[#grown + 1] = item
+      end
     end
   end
   -- What drops only with its quest: this corpse counts for each thing your log asked for while
@@ -871,7 +1160,8 @@ local function Count(creature, items)
   end
   stamp = stamp + 1
   tally.counted = tally.counted + 1
-  Say(creature, changed)
+  Say("a", creature, changed)
+  if coined or #grown > 0 then Say("b", creature, grown) end
 end
 
 -- Loot has opened.
@@ -900,7 +1190,7 @@ local function Looted()
     local c = by[guid]
     if c.id and guid ~= living and not seen[guid] then
       See(guid)
-      if alone == true and not afterSpell and not fishing then Count(c.id, c.items) else tally.passed = tally.passed + 1 end
+      if alone == true and not afterSpell and not fishing then Count(c.id, c.items, c.coin) else tally.passed = tally.passed + 1 end
     end
   end
 end
@@ -911,16 +1201,29 @@ end
 do
   local frame = CreateFrame("Frame", "AzerothAtlasDropsWatch")
   local LOG = { QUEST_LOG_UPDATE = true, QUEST_ACCEPTED = true, QUEST_REMOVED = true, QUEST_TURNED_IN = true, UNIT_QUEST_LOG_CHANGED = true, PLAYER_ENTERING_WORLD = true }
+  -- (a creature's tooltip that is up is written again)
+  local function Rewrite()
+    local tip = GameTooltip
+    if adding and shared.DropsOn() and (shared.DropsListOn() or shared.DropsWorthOn()) and tip and type(tip.IsShown) == "function" and tip:IsShown()
+      and type(tip.GetUnit) == "function" and type(tip.RefreshData) == "function" then
+      local ok, _, shownUnit = pcall(tip.GetUnit, tip)
+      if ok and shownUnit ~= nil and not secret(shownUnit) then pcall(tip.RefreshData, tip) end
+    end
+  end
   frame:SetScript("OnEvent", function(_, event, unit, _, spell)
     if LOG[event] then wants.dirty = true
     elseif event == "LOOT_READY" or event == "LOOT_OPENED" then shared.Try("what a corpse gave", Looted)
     elseif event == "MODIFIER_STATE_CHANGED" then
       -- (Shift pressed or let go over a creature: the tooltip is written again, with the whole list or the short one)
-      local tip = GameTooltip
-      if adding and shared.DropsOn() and shared.DropsListOn() and tip and type(tip.IsShown) == "function" and tip:IsShown()
-        and type(tip.GetUnit) == "function" and type(tip.RefreshData) == "function" then
-        local ok, _, shownUnit = pcall(tip.GetUnit, tip)
-        if ok and shownUnit ~= nil and not secret(shownUnit) then pcall(tip.RefreshData, tip) end
+      Rewrite()
+    elseif event == "GET_ITEM_INFO_RECEIVED" then
+      -- (the game has said what an item is: a tooltip that waited for its price is written again - once for all that arrive together)
+      if owed.any and not owed.due then
+        owed.due = true
+        local function again() owed.due = false ; if owed.any then Rewrite() end end
+        if C_Timer and type(C_Timer.After) == "function" then
+          if not pcall(C_Timer.After, 0.3, again) then again() end
+        else again() end
       end
     elseif secret(unit) or unit ~= "player" then
       -- (somebody else's spell)
@@ -936,20 +1239,20 @@ do
   end)
   -- (registered one at a time: a name this game does not have must not stop the rest)
   for _, event in ipairs({ "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "QUEST_TURNED_IN", "UNIT_QUEST_LOG_CHANGED", "PLAYER_ENTERING_WORLD",
-    "LOOT_READY", "LOOT_OPENED", "MODIFIER_STATE_CHANGED",
+    "LOOT_READY", "LOOT_OPENED", "MODIFIER_STATE_CHANGED", "GET_ITEM_INFO_RECEIVED",
     "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED" }) do pcall(frame.RegisterEvent, frame, event) end
 end
 
 -- How much you have counted yourself: creatures, corpses.
 local function Counts()
   local l = type(AzerothAtlasDB) == "table" and AzerothAtlasDB.loot
-  local creatures, corpses = 0, 0
+  local creatures, corpses, coined = 0, 0, 0
   if type(l) == "table" and type(l.of) == "table" then
     for _, rec in pairs(l.of) do
-      if type(rec) == "table" then creatures = creatures + 1 ; corpses = corpses + (tonumber(rec.n) or 0) end
+      if type(rec) == "table" then creatures = creatures + 1 ; corpses = corpses + (tonumber(rec.n) or 0) ; coined = coined + (tonumber(rec.cn) or 0) end
     end
   end
-  return creatures, corpses
+  return creatures, corpses, coined
 end
 
 do
@@ -967,11 +1270,15 @@ function shared.DropsSay(word)
   local function say(text) print("|cff7fd4ffAzeroth Atlas|r: " .. text) end
   if word == "off" or word == "on" then shared.SetDrops(word == "on") end
   if word == "list" then shared.SetDropsList(not shared.DropsListOn()) end
+  if word == "worth" then shared.SetDropsWorth(not shared.DropsWorthOn()) end
   if not hooked then say("this game has no way for an addon to add to a line of its tooltip: drop rates cannot be shown.") return end
   if not shared.DropsOn() then say("drop rates are not shown in a creature's tooltip (/atlas drops on shows them).") return end
-  local creatures, corpses = Counts()
+  local creatures, corpses, coined = Counts()
   local own = "You have looted " .. corpses .. " corpses of " .. creatures .. " creatures that were counted (" .. tally.counted .. " since you logged in, " .. tally.passed
     .. " passed over: looted in a group, or brought out by a spell): the tooltip goes by them at once, and the 3D map sends them on to the Atlas database. "
+    -- (the coin: how far it has been read - which says whether this game's words for it are understood)
+    .. (coinBroken and "The coin in a corpse is not counted: this game's words for it were not understood. "
+      or ("The coin was read of " .. coined .. " of them" .. (coined == 0 and " (none yet: it is counted from the first corpse with coin in it whose words are understood)" or "") .. ". "))
   local d = Figures()
   if not d then
     say("drop rates are shown in a creature's tooltip, after what your quest wants of it - but there are none to show yet. The 3D map writes them, from the Atlas database, beside this addon (AzerothAtlas_Drops): run Azeroth Atlas once, then start the game again. " .. own .. "/atlas drops off turns it off.")
@@ -981,5 +1288,7 @@ function shared.DropsSay(word)
     .. (adding and ("What a quest of yours still wants of a creature and the game does not list is added under it, with its figure (" .. count.added .. " lines added). ") or "")
     .. (adding and (shared.DropsListOn() and ("Under that stands everything else the creature gives, the likeliest first; hold Shift for all of it and what each figure rests on (/atlas drops list leaves the list out). ")
       or "The list of everything else a creature gives is left out (/atlas drops list shows it). ") or "")
+    .. (adding and (shared.DropsWorthOn() and ("Above it: what a kill brings on average - the coin, and each thing by how often it drops, how many pieces, and what a piece brings got rid of the way its own tooltip advises (" .. count.worth .. " shown; /atlas drops worth leaves it out). ")
+      or "What a kill brings is left out (/atlas drops worth shows it). ") or "")
     .. own .. "/atlas drops off turns it off.")
 end

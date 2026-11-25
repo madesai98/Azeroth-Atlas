@@ -289,6 +289,8 @@ const REF_MOST = 40;     // the most things kept of one creature's table: the li
 /**
  * What the reference database's loot tables give, creature by creature: Map<creature, [[item,
  * per cent], ...]> by item, the likeliest REF_MOST of those given REF_LEAST of the time and more.
+ * A thing of which a corpse that has it gives more than one piece on average has that as a third
+ * figure: [item, per cent, pieces to a find].
  * What drops for anybody and what drops only with its quest alike: which of the two a thing is,
  * the game's own word on the item says (its kind), not this.
  * @param ref    readReference()
@@ -304,10 +306,28 @@ export function referenceLoot(ref, lootOf, known = null) {
     let list = made.get(t.loot);
     if (!list) {
       list = [...lootOf(tables, t.loot)].filter(([, [p]]) => p >= REF_LEAST).sort((a, b) => b[1][0] - a[1][0] || a[0] - b[0]).slice(0, REF_MOST)
-        .map(([item, [p]]) => [item, Math.min(100, Math.round(p * 10000) / 100)]).sort((a, b) => a[0] - b[0]);
+        .map(([item, [p, , each]]) => {
+          const pieces = Math.round((each ?? 1) * 100) / 100;
+          return pieces > 1 ? [item, Math.min(100, Math.round(p * 10000) / 100), pieces] : [item, Math.min(100, Math.round(p * 10000) / 100)];
+        }).sort((a, b) => a[0] - b[0]);
       made.set(t.loot, list);
     }
     if (list.length) out.set(id, list);
+  }
+  return out;
+}
+
+/**
+ * The coin the reference database has a corpse of each creature give, on average, in copper:
+ * Map<creature, copper> - of those that give any.
+ * @param known Set of the creatures this game has, or null for all
+ */
+export function referenceCoin(ref, known = null) {
+  const out = new Map();
+  for (const [id, t] of ref.templates) {
+    if (!Array.isArray(t.gold) || (known && !known.has(id))) continue;
+    const coin = Math.round((t.gold[0] + t.gold[1]) / 2);
+    if (coin > 0) out.set(id, coin);
   }
   return out;
 }

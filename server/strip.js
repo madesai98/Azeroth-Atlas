@@ -215,6 +215,30 @@ export function readLoot(b) {
   }
   return { tag, creature, n, items };
 }
+/** The key of the addon's second message of a creature's corpses: the coin in them, and how many pieces of a thing. */
+export const LOOT_MORE_KEY = 6;
+/**
+ * ...which says (Drops.lua): { tag, creature, cn (corpses whose coin was read - one with none in
+ * it among them), coin (the copper in them, in all), items: [[item, pieces beyond the first of
+ * each find, in all]], more: true }. Null where it is cut short or does not add up.
+ */
+export function readLootMore(b) {
+  if (!b || b.length < 13) return null;
+  let sum = 0;
+  for (let i = 0; i < b.length; i++) if (i !== 8) sum += b[i] * (i % 7 + 1);
+  if (b[8] !== 1 + sum % 250) return null;
+  const u24 = (o) => b[o] * 65536 + b[o + 1] * 256 + b[o + 2];
+  const tag = b[0] * 256 + b[1], creature = u24(2), cn = u24(5);
+  if (!tag || !creature) return null;
+  const coin = b[9] * 16777216 + u24(10);
+  const items = [];
+  for (let o = 13; o + 5 < b.length; o += 6) {
+    const item = u24(o), pieces = u24(o + 3);
+    if (!item) continue;
+    items.push([item, pieces]);
+  }
+  return { tag, creature, cn, coin, items, more: true };
+}
 /**
  * Who your character is, read out of the addon's account of it (Self.lua says how it is laid
  * out): { class, race, skills, reps, spells } - or null where it is cut short or laid out in a

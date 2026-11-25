@@ -14,8 +14,9 @@
 //     the game's saved settings (addon/AzerothAtlas/Met.lua; the same file as the boats). Read only.
 //   - what your own disenchanting gave, by the kind of thing disenchanted, which the addon counts
 //     in the same file (addon/AzerothAtlas/Advice.lua, read by yields.js). Read only.
-//   - what was in the corpses you looted, creature by creature: how many corpses, and in how
-//     many of them each thing was - which the addon counts in the same file and says through the
+//   - what was in the corpses you looted, creature by creature: how many corpses, in how many
+//     of them each thing was, how many pieces of it, and how much coin (for what a kill of the
+//     creature brings) - which the addon counts in the same file and says through the
 //     strip as it happens (addon/AzerothAtlas/Drops.lua, read by loot.js; what the strip said is
 //     kept by the map in <dataDir>/user/loot.json). Read only.
 //   - what became of the auctions you put up yourself, counted by item, house and length (so
@@ -44,8 +45,9 @@
 // not when you were in it, how often you died there, or which way you went through it. Of
 // disenchanting: "things of this kind and quality, in this band of item level, gave these
 // materials, so many times" - not which things, when, or whose they were. Of what you looted:
-// "corpses of this creature, so many, had this thing in so many of them" - not when, where, or
-// whose they were, nor which game's settings counted them. A sighting of a boat
+// "corpses of this creature, so many, had this thing in so many of them, so many pieces of it,
+// and so much coin" - not when, where, or whose they were, nor which game's settings counted
+// them, nor how much coin you have. A sighting of a boat
 // goes as "a craft of this line left this stop at this moment, by this way" (a ride, or which addon passed it on), with
 // no names, yours or anybody's: the moment is the whole of what it says, so it has to go, and
 // of a ride of your own it does say that this copy's player was aboard then. What is sent is

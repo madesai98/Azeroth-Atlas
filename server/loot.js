@@ -12,7 +12,12 @@
 // than what was known; said twice, or late, it changes nothing. Kept in <dataDir>/user/loot.json:
 //
 //   { "v": 1, "by": { "<the settings' number>": { "<creature>": { "n": corpses, "got": { "<item>": in how many },
-//                                                                "on": { "<item>": [in how many, of how many] } } } } }
+//                                                                "on": { "<item>": [in how many, of how many] },
+//                                                                "more": { "<item>": pieces beyond the first of each find },
+//                                                                "coin": [corpses whose coin was read, copper in them] } } } }
+//
+// (The last two come in a second message, readLootMore, and are there only where there is any:
+// what a kill brings is reckoned from them.)
 //
 // The map's own program for the database (atlasdb/collect.js) reads this file beside the saved
 // settings, takes the larger of the two for each figure, and sends what has grown. Nothing of
@@ -44,10 +49,18 @@ export class LootStore {
   heard(said) {
     if (!said) return false;
     this.heardCount++;
-    const now = { n: said.n, got: new Map(), on: new Map() };
-    for (const [item, k, t] of said.items) {
-      if (t > 0) now.on.set(item, [Math.min(k, t), t]);
-      else if (k > 0) now.got.set(item, Math.min(k, said.n));
+    const now = { n: 0, got: new Map(), on: new Map(), more: new Map(), coin: [0, 0] };
+    if (said.more) {
+      // (the second message, readLootMore: the coin in the creature's corpses, and the pieces beyond the first of each find)
+      for (const [item, pieces] of said.items) if (pieces > 0) now.more.set(item, pieces);
+      if (said.cn > 0) now.coin = [said.cn, said.coin];
+      if (!now.more.size && !(now.coin[0] > 0)) return false;
+    } else {
+      now.n = said.n;
+      for (const [item, k, t] of said.items) {
+        if (t > 0) now.on.set(item, [Math.min(k, t), t]);
+        else if (k > 0) now.got.set(item, Math.min(k, said.n));
+      }
     }
     let mine = this.by.get(said.tag);
     if (!mine) this.by.set(said.tag, (mine = new Map()));
@@ -86,8 +99,11 @@ export class LootStore {
 }
 
 function same(a, b) {
-  if (a.n !== b.n || a.got.size !== b.got.size || a.on.size !== b.on.size) return false;
+  const more = (r) => r.more ?? new Map(), coin = (r) => r.coin ?? [0, 0];
+  if (a.n !== b.n || a.got.size !== b.got.size || a.on.size !== b.on.size || more(a).size !== more(b).size) return false;
+  if (coin(a)[0] !== coin(b)[0] || coin(a)[1] !== coin(b)[1]) return false;
   for (const [item, k] of a.got) if (b.got.get(item) !== k) return false;
   for (const [item, [k, t]] of a.on) { const o = b.on.get(item); if (!o || o[0] !== k || o[1] !== t) return false; }
+  for (const [item, m] of more(a)) if (more(b).get(item) !== m) return false;
   return true;
 }
