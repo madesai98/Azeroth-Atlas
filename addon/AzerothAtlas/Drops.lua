@@ -98,7 +98,8 @@
 --     counted under the name alone, and made over to the thing when it first turns up: so the
 --     first find is not "one of one". (Which things those are: by how the item binds, not by
 --     its kind - the pages of The Green Hills of Stranglethorn are of the "quest" kind, and drop
---     for anybody. See Only, below.)
+--     for anybody - and, of the few things the binding tells wrong, by the original game's
+--     loot tables, which the 3D map reads. See Only, below.)
 --
 -- What is not done:
 --   - nothing is written inside a dungeon or a raid, where the game keeps what is in a tooltip
@@ -209,7 +210,8 @@ end
 -- whether it wants its quest), with this game's own word on each item: the binding tells 7,093
 -- of 7,130 things right, the kind 6,761. Going by the kind took 326 things that drop for
 -- anybody for a quest's: they stood in no list here, brought nothing to a kill, and were not
--- counted when found.
+-- counted when found. (And 23 of the 37 the binding tells wrong are put right by those tables
+-- themselves, where the 3D map has them: see Only.)
 --
 -- Whether the game counts an item among those of a quest (its kind), as far as it says at once:
 -- true, false - or nothing, where it does not say. Kept: an item's kind does not change.
@@ -252,6 +254,15 @@ local function GameOnly(item, now)
   return gameOnly[item]
 end
 -- Whether a thing drops only while a quest of yours wants it.
+--   - the original game's loot tables, where they mark the thing so: the 3D map has read them
+--     (`kinds`: twenty more for such a thing, not ten), and that is the last word, whatever the
+--     game says of how the item binds. The binding does not tell every thing right: a Troll
+--     Tribal Necklace is bound to nothing, and is in a Vilebranch troll only for whoever has
+--     the quest for it - 23 such things there are, which stood in a creature's list for
+--     anybody to find. (Only what the tables mark is taken from them: a thing the game binds
+--     to a quest and the tables leave unmarked stays the game's - the tables' rows for those
+--     have conditions of their own, or are simply unmarked, which is no word that the thing
+--     drops for anybody.)
 --   - the 3D map's word, where its file goes by the binding (kb; `kinds`: ten more for such a
 --     thing): it has that from the game's own files, and the game need not be asked;
 --   - else the game's word on how the item binds - asked at once of a thing in a corpse (`now`);
@@ -259,11 +270,13 @@ end
 --     from before it kept the binding), and with neither, the kind as the game says it at once.
 -- @returns true, false or nothing (nothing says) - and whether that is the last word on it
 -- (false: the game has yet to say how the item binds)
+local TABLES_SAY = 20
 local function Only(d, item, now)
-  local known = gameOnly[item]
-  if known ~= nil then return known, true end
   local kinds = d and type(d.kinds) == "table" and d.kinds or nil
   local kind = kinds and tonumber(kinds[item])
+  if kind and kind >= TABLES_SAY then return true, true end
+  local known = gameOnly[item]
+  if known ~= nil then return known, true end
   if kind and d.kb == 1 and not now then return kind >= 10, true end
   local game = GameOnly(item, now)
   if game ~= nil then return game, true end
@@ -1272,6 +1285,13 @@ local function Count(creature, items, coin)
       end
       if item then
         if not tried then tried = {} ; rec.tried = tried end
+        -- (counted as a thing that drops for anybody until now - by an addon from before 49, which had no word
+        -- of the original game's tables on it: those finds were among all the corpses, and say nothing of the
+        -- corpses of a quest, which are counted from here)
+        if tried[item] == nil and rec.got[item] ~= nil then
+          rec.got[item] = nil
+          if type(rec.more) == "table" then rec.more[item] = nil end
+        end
         local waited = type(rec.on) == "table" and tonumber(rec.on[subject]) or 0
         tried[item] = (tonumber(tried[item]) or 0) + 1 + waited
         if waited > 0 then rec.on[subject] = nil end

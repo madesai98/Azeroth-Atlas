@@ -118,6 +118,23 @@ function columns(sql, name) {
   return cols;
 }
 
+const num = (v) => { const n = +v; return Number.isFinite(n) ? n : 0; };
+/** One table of the dump, to be read: { ok (it is there), at(column): where a row has it, rows() }. */
+function tableOf(sql, name) {
+  const cols = columns(sql, name);
+  return { ok: cols.length > 0, at: (c) => cols.indexOf(c), rows: () => tuples(sql, name) };
+}
+/** One of the dump's loot tables: Map<loot id, [[item, chance, group, min count or -reference, max count], ...]>. */
+function lootTable(sql, name) {
+  const out = new Map();
+  const t = tableOf(sql, name);
+  const c = ['entry', 'item', 'ChanceOrQuestChance', 'groupid', 'mincountOrRef', 'maxcount'].map(t.at);
+  if (t.ok && c.every((i) => i >= 0)) for (const r of t.rows()) { const id = num(r[c[0]]); let list = out.get(id); if (!list) out.set(id, (list = [])); list.push([num(r[c[1]]), num(r[c[2]]), num(r[c[3]]), num(r[c[4]]), num(r[c[5]])]); }
+  return out;
+}
+/** The dump's text (a .gz is unpacked). */
+const textOf = (raw, file) => (/\.gz$/i.test(file) ? zlib.gunzipSync(raw) : raw).toString('latin1');
+
 /**
  * What the reference database knows that QuestieDB does not, for the quest explorer and the
  * NPC filters (all of it for the original game: a creature or quest new to this one is not here):
@@ -136,8 +153,7 @@ function columns(sql, name) {
  *              the spot inside a dungeon's door among them (world.js, entrancesOf)
  */
 function readFacts(sql) {
-  const num = (v) => { const n = +v; return Number.isFinite(n) ? n : 0; };
-  const reader = (name) => { const cols = columns(sql, name); const at = (c) => cols.indexOf(c); return { ok: cols.length > 0, at, rows: () => tuples(sql, name) }; };
+  const reader = (name) => tableOf(sql, name);
   const templates = new Map();
   {
     const t = reader('creature_template');
@@ -158,14 +174,7 @@ function readFacts(sql) {
     if (t.ok && Math.min(iId, iMin, iMax) >= 0) for (const r of t.rows()) { const id = num(r[iId]); let list = all.get(id); if (!list) all.set(id, (list = [])); list.push((num(r[iMin]) + num(r[iMax])) / 2); }
     for (const [id, list] of all) { list.sort((a, b) => a - b); respawn.set(id, Math.round(list[list.length >> 1])); }
   }
-  const lootTable = (name) => {
-    const out = new Map();
-    const t = reader(name);
-    const c = ['entry', 'item', 'ChanceOrQuestChance', 'groupid', 'mincountOrRef', 'maxcount'].map(t.at);
-    if (t.ok && c.every((i) => i >= 0)) for (const r of t.rows()) { const id = num(r[c[0]]); let list = out.get(id); if (!list) out.set(id, (list = [])); list.push([num(r[c[1]]), num(r[c[2]]), num(r[c[3]]), num(r[c[4]]), num(r[c[5]])]); }
-    return out;
-  };
-  const loot = { creature: lootTable('creature_loot_template'), reference: lootTable('reference_loot_template'), object: lootTable('gameobject_loot_template') };
+  const loot = { creature: lootTable(sql, 'creature_loot_template'), reference: lootTable(sql, 'reference_loot_template'), object: lootTable(sql, 'gameobject_loot_template') };
   const chests = new Map(), movers = new Map(), objectKinds = new Map();
   {
     const t = reader('gameobject_template');
@@ -258,7 +267,7 @@ export function lootOf(tables, id, shared = false, depth = 0) {
 export function readReference(file) {
   const raw = fs.readFileSync(file);
   const hash = crypto.createHash('sha1').update(raw).digest('hex');
-  const sql = (/\.gz$/i.test(file) ? zlib.gunzipSync(raw) : raw).toString('latin1');
+  const sql = textOf(raw, file);
   const table = (name) => {
     const out = new Map();
     const create = sql.indexOf(`CREATE TABLE \`${name}\``);
@@ -288,4 +297,85 @@ export function readReference(file) {
   let facts = { templates: new Map(), respawn: new Map(), loot: { creature: new Map(), reference: new Map(), object: new Map() }, chests: new Map(), movers: new Map(), objectKinds: new Map(), quests: new Map(), entrances: [] };
   try { facts = readFacts(sql); } catch { /* the spawn tables alone, as before */ }
   return { hash, creatures: table('creature'), objects: table('gameobject'), ...facts };
+}
+
+// ---- which things drop only with their quest ----------------------------------------------------
+// The loot tables say of every drop whether it is in a corpse only while a quest of yours wants
+// the thing: its chance is written below nought. The game's own word on an item - how it binds -
+// tells that right for all but a few things: a Troll Tribal Necklace is bound to nothing, and is
+// in a Vilebranch troll only for whoever has the quest for it. Those the tables put right
+// (server/drops.js marks them for the addon in the game).
+//
+// Only what the tables mark is taken from them - not what they leave unmarked. A mark is
+// somebody's deliberate word; "for anybody" is also what a row says that nobody looked at, and
+// what a row says that has a condition of its own, which is not read here (a Red Scepter Shard
+// is in Nefarian for the one who has its quest: by a condition, not by its chance). So where
+// the game binds a thing to a quest and the tables do not mark it, the game's word stands.
+const ONLY_VERSION = 1;              // of how the list is made: raise to have it made again
+const ONLY_FILE = 'quest-only.json'; // where it is kept, beside the dump it is of
+
+/**
+ * The things the creatures' loot tables give only with their quest: every one of those tables
+ * that has the thing marks it so (a thing that any creature gives to anybody is not among them).
+ * @param tables  { main, reference } (readReference().loot: creature, and reference)
+ * @param lootIds the creatures' loot tables (their numbers)
+ * @returns Set<item>
+ */
+export function questOnly(tables, lootIds) {
+  const only = new Set(), free = new Set();
+  for (const id of new Set(lootIds)) for (const [item, [, quest]] of lootOf(tables, id)) (quest ? only : free).add(item);
+  for (const item of free) only.delete(item);
+  return only;
+}
+
+/**
+ * The reference database as it is on this disk - nothing is looked for online:
+ * { file, name, stamp (another for another dump) }, or null (never fetched, or switched off).
+ * @param cfg config.json, or nothing (see fetchReference)
+ */
+export function referenceOnDisk(cfg, dataDir) {
+  try {
+    if (cfg?.reference === false) return null;
+    let file = cfg?.referenceFile || null;
+    if (!file) {
+      const dir = path.join(dataDir, 'sources', 'classic-db');
+      let name = null;
+      try { name = path.basename(String(JSON.parse(fs.readFileSync(path.join(dir, 'source.json'), 'utf8')).name ?? '')); } catch { /* no note of which: whatever dump is there */ }
+      if (!name || !fs.existsSync(path.join(dir, name))) name = fs.readdirSync(dir).filter((f) => /\.sql(\.gz)?$/i.test(f)).sort()[0] ?? null;
+      if (!name) return null;
+      file = path.join(dir, name);
+    }
+    const st = fs.statSync(file);
+    if (!st.isFile()) return null;
+    return { file, name: path.basename(file), stamp: `${path.basename(file)}:${st.size}:${Math.round(st.mtimeMs)}` };
+  } catch { return null; }
+}
+
+/**
+ * ...of the reference database on this disk: Set<item> - or null where there is none, or it is
+ * not to be read. Read out of the dump once and kept beside it (the items, and which dump they
+ * are of), so that the dump - a second's work - is read again only when it is another.
+ */
+export function questOnlyThings(cfg, dataDir) {
+  const have = referenceOnDisk(cfg, dataDir);
+  if (!have) return null;
+  const kept = path.join(dataDir, 'sources', 'classic-db', ONLY_FILE);
+  try {
+    const j = JSON.parse(fs.readFileSync(kept, 'utf8'));
+    if (j?.v === ONLY_VERSION && j.of === have.stamp && Array.isArray(j.items)) return new Set(j.items.filter((i) => Number.isInteger(i) && i > 0));
+  } catch { /* not made yet */ }
+  let items;
+  try {
+    const sql = textOf(fs.readFileSync(have.file), have.file);
+    const t = tableOf(sql, 'creature_template');
+    const iLoot = t.at('LootId');
+    const lootIds = [];
+    if (t.ok && iLoot >= 0) for (const r of t.rows()) { const id = num(r[iLoot]); if (id > 0) lootIds.push(id); }
+    items = [...questOnly({ main: lootTable(sql, 'creature_loot_template'), reference: lootTable(sql, 'reference_loot_template') }, lootIds)].sort((a, b) => a - b);
+  } catch { return null; }
+  try {
+    fs.mkdirSync(path.dirname(kept), { recursive: true });
+    writeFileAtomic(kept, JSON.stringify({ v: ONLY_VERSION, of: have.stamp, items }));
+  } catch { /* made again the next time */ }
+  return new Set(items);
 }

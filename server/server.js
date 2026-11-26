@@ -86,7 +86,7 @@ const handBoats = () => {
 const handDrops = () => {
   try {
     const r = writeDropsAddon(cfg, cfg.dataDir);
-    if (r?.written) note('database', 'what creatures give and how often, as the Atlas database has it and as your own looting counted it, written for the addon', { creatures: r.creatures, rates: r.rates, itemsNamed: r.named, things: r.things, looted: r.looted, fresh: r.fresh || undefined });
+    if (r?.written) note('database', 'what creatures give and how often, as the Atlas database has it and as your own looting counted it, written for the addon', { creatures: r.creatures, rates: r.rates, itemsNamed: r.named, things: r.things, looted: r.looted, questOnlyByTheOriginalTables: r.marked || undefined, fresh: r.fresh || undefined });
     return r;
   } catch (err) { note('database', 'the drop rates could not be written for the addon', { error: err.message }); return null; }
 };

@@ -59,6 +59,17 @@
 //             right, the kind 6,761. A list of items from before the binding was kept goes by
 //             the kind still; the addon (48 on) asks the game itself, and goes by this only
 //             until the game has answered.
+//             And 20 more, not 10, where the original game's loot tables mark the thing as
+//             dropping only with its quest (extractor/reference.js, questOnlyThings: read from
+//             the reference database on this disk, where there is one). That is the last word,
+//             whatever the game says of how the item binds: it puts right the 23 things bound to
+//             nothing that are in a corpse only with their quest (a Troll Tribal Necklace, the
+//             runestones of the Badlands' whelps, what is taken from the fallen of Alterac
+//             Valley), which stood in every such creature's list for anybody to find. The 14 the
+//             other way - bound to a quest, unmarked in the tables - stay with the game's word:
+//             five of those rows have a condition of their own, and the rest are simply
+//             unmarked, which is no word that the thing drops for anybody. (The addon from 49 on
+//             reads the 20; one before it reads "10 or more", and asks the game when it counts.)
 //   mine      by the number a game's saved settings go by: of each creature the part of `all`
 //             that those settings counted, laid out the same way without the rates
 import fs from 'node:fs';
@@ -67,6 +78,7 @@ import { writeFileAtomic } from '../extractor/container.js';
 import { atlasStamp } from '../extractor/atlas.js';
 import { flavourFolder } from '../extractor/config.js';
 import { addonsDir } from './addon.js';
+import { questOnlyThings, referenceOnDisk } from '../extractor/reference.js';
 import { readLoot, lootIn, lootHeard, lootByTag, lootTotals, others, addLoot, largerLoot, fromPlain, fromTags } from '../atlasdb/loot.js';
 
 const NAME = 'AzerothAtlas', DROPS = 'AzerothAtlas_Drops';
@@ -104,7 +116,8 @@ export function dropsKey(dataDir, cfg = null) {
   if (!stamp) return null;
   const loot = JSON.stringify(Object.entries(readJson(path.join(dataDir, 'atlasdb', 'truth-meta.json'))?.shards?.loot ?? {}).sort());
   const own = [stampOf(path.join(dataDir, 'user', 'loot.json')), stampOf(path.join(dataDir, 'atlasdb', 'loot-sent.json')), stampOf(path.join(dataDir, 'atlasdb', 'loot-own.json')), ...(cfg ? savedSettings(cfg).map(stampOf) : [])].join('|');
-  return `${FORMAT}.${LAYOUT}:${stamp.hash}:${stampOf(path.join(dataDir, 'items.json'))}:${loot.length}.${hashText(loot)}:${own}`;
+  // (and the reference database on this disk: the things its loot tables mark as dropping only with their quest)
+  return `${FORMAT}.${LAYOUT}:${stamp.hash}:${stampOf(path.join(dataDir, 'items.json'))}:${loot.length}.${hashText(loot)}:${own}:${referenceOnDisk(cfg, dataDir)?.stamp ?? ''}`;
 }
 function hashText(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h.toString(36); }
 
@@ -127,8 +140,9 @@ export function ownLoot(dataDir, cfg = null) {
  *   all: Map<creature, { n (corpses looted), things: Map<item, { pct (the original game's rate, or null), k, t (null: of the n corpses),
  *     m (pieces beyond the first of each find; 0: none), e (pieces to a find in the original game, where more than one; else null) }>,
  *     coin: [corpses whose coin was read, the copper in them], gold (the original game's coin to a corpse; 0: none) }>,
- *   kinds: Map<item, quality + 10 where it drops only with its quest>, byBinding (that is told by how the game binds each item: the
- *     list of items has it), mine: Map<tag, Map<creature, count>>, asQuest: Map<creature, Set<item taken as dropping only with its quest>>,
+ *   kinds: Map<item, quality + 10 where it drops only with its quest - + 20 where the original game's loot tables say so>, byBinding
+ *     (that is told by how the game binds each item: the list of items has it), marked (how many things of `kinds` the tables mark),
+ *     mine: Map<tag, Map<creature, count>>, asQuest: Map<creature, Set<item taken as dropping only with its quest>>,
  *   things (how many in `all`), looted (corpses in `all`) }
  * - or null where no database has been fetched. A figure that is not above nought, or not a
  * figure, is left out; one above a hundred is a hundred.
@@ -163,9 +177,13 @@ export function dropFigures(dataDir, cfg = null) {
   // (whether the list of items says how each binds: one made before that was kept has nine figures to an item)
   let byBinding = false;
   for (const id in known) { byBinding = Array.isArray(known[id]) && Number.isInteger(known[id][BIND]); break; }
-  // Whether a thing drops only while a quest wants it: it is bound to a quest (see `kinds`, at the
-  // top) - true, false, or null where the game's files do not have the item.
+  // (the things the original game's loot tables mark as dropping only with their quest: none where no reference database is on this disk)
+  const tables = questOnlyThings(cfg, dataDir) ?? new Set();
+  // Whether a thing drops only while a quest wants it: the original game's loot tables mark it so,
+  // or it is bound to a quest (see `kinds`, at the top) - true, false, or null where neither the
+  // tables nor the game's files have the item.
   const onlyWithQuest = (item) => {
+    if (tables.has(item)) return true;
     const row = known[item];
     if (!Array.isArray(row)) return null;
     return Number.isInteger(row[BIND]) ? QUEST_BOUND.has(row[BIND]) : row[2] === QUEST_CLASS;
@@ -208,7 +226,8 @@ export function dropFigures(dataDir, cfg = null) {
       if (hasItems && !known[item] && !thing.k && !(thing.t > 0)) continue;
       row.set(item, thing);
       // (its kind: the game's own word on the item - or, of a thing the map's data does not have, how it was counted)
-      kinds.set(item, Math.max(kinds.get(item) ?? 0, (Number.isInteger(known[item]?.[1]) ? Math.max(0, Math.min(9, known[item][1])) : 1) + (quest ? 10 : 0)));
+      // (and 20, not 10, where the original game's loot tables mark it: the last word on it)
+      kinds.set(item, Math.max(kinds.get(item) ?? 0, (Number.isInteger(known[item]?.[1]) ? Math.max(0, Math.min(9, known[item][1])) : 1) + (tables.has(item) ? 20 : quest ? 10 : 0)));
     }
     if (!row.size && !(counted.n > 0) && !(gold > 0)) continue;
     // (no more than a row holds: the likeliest, by what was counted and else by the original game's figure)
@@ -219,13 +238,15 @@ export function dropFigures(dataDir, cfg = null) {
     for (const [item] of kept) wanted.add(item);
   }
   for (const item of kinds.keys()) if (!wanted.has(item)) kinds.delete(item);
+  let marked = 0;
+  for (const kind of kinds.values()) if (kind >= 20) marked++;
   // what each of those items is called, in the game's own words (none where the map has not been built: the addon asks the game)
   const names = new Map();
   for (const item of wanted) {
     const name = known[item]?.[0];
     if (typeof name === 'string' && name.trim() && name.length <= 200) names.set(item, name.trim());
   }
-  return { rev: stamp.rev, of, names, rates, all, kinds, byBinding, mine, asQuest, things, looted };
+  return { rev: stamp.rev, of, names, rates, all, kinds, byBinding, marked, mine, asQuest, things, looted };
 }
 
 /** A text as Lua writes one: between double quotes, with nothing in it that would end it early. */
@@ -294,7 +315,8 @@ export function dropsAddonFiles(figures, interfaceVersion) {
       '-- as the game\'s own files have it. all: everything a creature gives ("corpses looted',
       '-- item=per cent/found in so many/of so many ..."), kinds: each thing\'s quality, and 10 more where it',
       '-- drops only with its quest (kb = 1: told by how the game binds the item; without it, by the item\'s',
-      '-- kind, which takes some things that drop for anybody for a quest\'s - the addon then asks the game);',
+      '-- kind, which takes some things that drop for anybody for a quest\'s - the addon then asks the game) -',
+      '-- and 20 more where the original game\'s loot tables say so, whatever the game says of the item;',
       '-- mine: the part of `all` that each game\'s saved settings counted themselves.',
       `AzerothAtlasDrops = { v = ${FORMAT}, creatures = ${creatures.length}, rates = ${figures.rates}, of = {`,
       ...creatures.map((id) => `[${id}]="${figures.of.get(id).map(([item, pct]) => `${item}=${pct}`).join(' ')}",`),
@@ -317,7 +339,8 @@ let settled = null;
 
 /**
  * Write the file for the addon, where it is not there as it stands.
- * @returns { written, fresh (the folder is new: the game finds it when it next starts), creatures, rates, named, things, looted } -
+ * @returns { written, fresh (the folder is new: the game finds it when it next starts), creatures, rates, named, things, looted,
+ *            marked (things the original game's loot tables mark as dropping only with their quest) } -
  *          or null where there is nothing to write (no database fetched, none of its creatures
  *          with a figure), or no Azeroth Atlas in the game to write it for
  */
@@ -345,7 +368,7 @@ export function writeDropsAddon(cfg, dataDir) {
     writeFileAtomic(file, text);
     written = true;
   }
-  const said = { creatures: figures.of.size, rates: figures.rates, named: figures.names.size, things: figures.things, looted: figures.looted };
+  const said = { creatures: figures.of.size, rates: figures.rates, named: figures.names.size, things: figures.things, looted: figures.looted, marked: figures.marked };
   settled = { key: now, said };
   return { ...said, written, fresh: fresh && written };
 }

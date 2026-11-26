@@ -292,7 +292,8 @@ const REF_MOST = 40;     // the most things kept of one creature's table: the li
  * A thing of which a corpse that has it gives more than one piece on average has that as a third
  * figure: [item, per cent, pieces to a find].
  * What drops for anybody and what drops only with its quest alike: which of the two a thing is,
- * the game's own word on the item says (its kind), not this.
+ * the item says (how the game binds it) - and the marks of these very tables, which every copy's map
+ * reads for itself out of the dump on its own disk (extractor/reference.js, questOnlyThings), not this.
  * @param ref    readReference()
  * @param lootOf extractor/reference.js's, handed in (this file reads nothing from the disk)
  * @param known  Set of the creatures this game has, or null for all

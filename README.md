@@ -2133,15 +2133,41 @@ of 101; nine more with coins alone and every rate of the list has come down a li
   | --- | --- | --- |
   | the item's kind ("quest" or not), as until 47 | 6,761 of 7,130 things | 326 that drop for anybody taken for a quest's, 43 the other way |
   | how the item binds (to a quest or not), from 48 | 7,093 of 7,130 | 14 that drop for anybody taken for a quest's, 23 the other way |
+  | how it binds, and what those loot tables themselves mark, from 49 | 7,116 of 7,130 | the same 14, left with the game's word on purpose (below) |
 
   The addon has the binding from the map's file, which has it from the game's own item table
   (`items.json`: made again with it the next time the map looks at the game); where the file
   is from before that, the addon asks the game itself and writes the tooltip again when it
   has answered. What an addon from before 48 counted of a page as a quest's is not lost: what
-  was found of it stands, among all the corpses. The 37 things the binding still tells wrong
-  (a Troll Tribal Necklace is bound to nothing and drops only with its quest; Sacred Frostsaber
-  Meat the other way) stay wrong: the original game's tables could put them right for the
-  original game's creatures, and are not asked yet.
+  was found of it stands, among all the corpses.
+- **And where the binding is wrong, by the original game's loot tables themselves** ("why
+  didnt you wire that in too, do it if there are no downsides", the same day, of the 37 things
+  the binding tells wrong). 23 of them are bound to nothing and are in a corpse only with
+  their quest: a Troll Tribal Necklace, Belamoore's Research Journal, the runestones of the
+  Badlands' whelps, a Sunscale Feather, what is taken from the fallen of Alterac Valley. The
+  tables mark every one of them so - and until 49 they stood, for anybody to find, in the
+  lists of 264 creatures (the necklace at "20%" under every Vilebranch troll). The map reads
+  the marks out of the reference database it has on its disk already (once: a second's work,
+  kept beside the dump as `quest-only.json`), and marks such a thing in its file for the
+  addon with a word that stands whatever the game says of how the item binds. So it is in no
+  list while no quest of yours wants it, stands under the quest that does, brings nothing to
+  a kill, and is counted by the corpses looted with its quest. No database has to be
+  published for this, and a copy with no reference database on its disk goes by the binding
+  as before.
+
+  Only what the tables mark is taken from them, not what they leave unmarked - that is the
+  downside there would have been. The other 14 are things the game binds to a quest and the
+  tables give to anybody, by their chance. But five of those rows have a condition of their
+  own, which is not read (a Red Scepter Shard is in Nefarian for the one who has its quest;
+  Sacred Frostsaber Meat; the three ectoplasms), and of the other nine (a Great Goretusk
+  Snout, Rethban Ore, a Discolored Worg Heart...) it is the game's "Quest Item" against a row
+  that says "for anybody" as every row does that nobody marked. Taken for a quest's wrongly, a
+  thing is missing from a list; taken for anybody's wrongly, it stands in every list at a rate
+  nobody will ever see. So those stay with the game's word. A thing the tables mark on one
+  creature and give to anybody on another (a Fractured Elemental Bracer: the one such) stays
+  for anybody. And what an addon before 49 counted of a necklace as a thing that drops for
+  anybody says nothing of a quest's corpses: its count begins with the first corpse looted
+  while your quest wanted it.
 - `/atlas drops` says how many corpses of how many creatures you have counted, and how many
   were passed over.
 
@@ -2355,11 +2381,13 @@ a kill brings. The counting goes on
 either way. The rates after the game's own lines need version 29 of the addon, the added lines
 version 30, the counting and the list version 45, what a kill brings version 46, what each
 figure rests on in words version 47, the things of the quest kind that drop for anybody
-version 48 (**Check for updates**); from 44 on a `/reload` is enough.
+version 48, what the original game's loot tables mark as dropping only with its quest version
+49 (**Check for updates**); from 44 on a `/reload` is enough.
 
 Tried against a mocked game that fills its tooltip and opens its loot the way this one does,
 with the figures as the map writes them (the counting, the list, the reckoning, what a kill
-brings, pieces and coin, which things drop only with their quest: 137 checks; what the addon
+brings, pieces and coin, which things drop only with their quest - by the binding and by the
+original game's loot tables, read out of a dump made up for it: 169 checks; what the addon
 says through the strip read by the map's own code), and from the saved settings on against a
 stand-in database (send, publish, fetch, into the game's file: 78 checks). The counting
 itself has run in the game (version 45, on 24 November 2026: eight corpses of six creatures,
@@ -2370,6 +2398,10 @@ left to the original game's figure. Nor has 48: that the pages are bound to noth
 to its quest is read out of this game's own item table (and the map's file for the real
 database then lists the pages under a Bloodscalp Hunter: 178 things are no longer taken for a
 quest's, 47 are now) - that the game answers the addon the same when asked has not been seen.
+And 49 neither: the marks were read out of the real reference database (814 things, 23 of
+them bound to nothing in this game's item table) and the map's file for the real database
+then has those 23 as dropping only with their quest, under 264 creatures - a tooltip in the
+game has not been looked at.
 
 ## What to do with a thing you are getting rid of, in its tooltip
 
